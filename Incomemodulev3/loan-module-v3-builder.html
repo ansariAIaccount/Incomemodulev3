@@ -3378,6 +3378,61 @@ window.SB = (function(){
   }
 
   // ------------------------------------------------------------
+  // deleteDeal(dealIdOrDealCode) — remove a user-saved deal AND all of its
+  // children. FK CASCADE handles facilities/tranches/interest_*/ratchet_tiers/
+  // drawdowns/paydowns/fees/aasb_extras + accounting_runs/journal_entries/
+  // cashflow_schedules/treatment_overrides/dashboard_kpi_snapshots/etc., so
+  // this is a single DELETE from deals.
+  //
+  // Server policy enforces is_preset = false (see v3_04_anon_delete_deals),
+  // so the canned 17 presets can't be wiped by accident.
+  // Returns counts of what was cleaned up for the confirmation toast/popup.
+  // ------------------------------------------------------------
+  async function deleteDeal(dealIdOrCode){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!dealIdOrCode) return { ok:false, reason:'deal id or code required' };
+    try {
+      // Resolve UUID from input (accepts either UUID or deal_code).
+      let dealId = dealIdOrCode;
+      let dealName = null;
+      if(!/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(String(dealIdOrCode))){
+        const { data, error } = await _client.from('deals')
+          .select('id, name, is_preset').eq('deal_code', dealIdOrCode).limit(1);
+        if(error) throw error;
+        if(!data || !data.length) return { ok:false, reason:'deal not found: ' + dealIdOrCode };
+        if(data[0].is_preset) return { ok:false, reason:'cannot delete preset deals' };
+        dealId   = data[0].id;
+        dealName = data[0].name;
+      }
+      // Pre-count what's about to vanish so the UI can report it.
+      const [{ count: runCount }, { count: jeCount }, { count: cfCount }, { count: trCount }, { count: feeCount }] = await Promise.all([
+        _client.from('accounting_runs').select('id', { count:'exact', head:true }).eq('deal_id', dealId),
+        _client.from('journal_entries').select('id', { count:'exact', head:true }).in('run_id',
+          (await _client.from('accounting_runs').select('id').eq('deal_id', dealId)).data?.map(r => r.id) || ['00000000-0000-0000-0000-000000000000']
+        ),
+        _client.from('cashflow_schedules').select('id', { count:'exact', head:true }).eq('deal_id', dealId),
+        _client.from('tranches').select('id', { count:'exact', head:true }).eq('deal_id', dealId),
+        _client.from('fees').select('id', { count:'exact', head:true }).eq('deal_id', dealId)
+      ]);
+      // Single CASCADE delete.
+      const { error: delErr } = await _client.from('deals').delete().eq('id', dealId);
+      if(delErr){ console.error('[SB] deleteDeal:', delErr); return { ok:false, reason: delErr.message }; }
+      const counts = {
+        accountingRuns: runCount || 0,
+        journalEntries: jeCount || 0,
+        cashflowDays:   cfCount || 0,
+        tranches:       trCount || 0,
+        fees:           feeCount || 0
+      };
+      console.log('[SB] deleteDeal complete:', dealId, dealName, counts);
+      return { ok:true, dealId, dealName, counts };
+    } catch(err) {
+      console.error('[SB] deleteDeal failed:', err);
+      return { ok:false, reason: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  // ------------------------------------------------------------
   // fetchUserDeals() — pull every DB-saved (non-preset) deal with
   // its full nested structure and return PRESET-like wrappers so the
   // Active Deal modal can render them alongside the canned library.
@@ -3587,7 +3642,7 @@ window.SB = (function(){
   }
 
   return {
-    init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, saveSchedule, fetchUserDeals,
+    init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals,
     getConfig, setConfig, resetConfig, getDefaults, getBackendTypes,
     get url(){ return SUPABASE_URL; }, get projectLabel(){ return PROJECT_LABEL; },
     get isOverride(){ return _cfg.isOverride; },
@@ -5417,6 +5472,126 @@ if(typeof window !== 'undefined') {
   window.handleDiuFilledClick = handleDiuFilledClick;
   window.handlePostJeClick    = handlePostJeClick;
 }
+
+// ============================================================
+// V3 — Delete a DB-saved deal from the Active Deal modal.
+// Confirms first, calls SB.deleteDeal(uuid|deal_code), refreshes the
+// merged PRESETS array (so the deleted entry disappears from the modal),
+// and reports cleanup counts in a popup.
+// ============================================================
+function handleDeleteDBDeal(opts){
+  const key      = opts && opts.key;
+  const dealId   = opts && opts.dealId;
+  const dealCode = opts && opts.dealCode;
+  const btn      = opts && opts.button;
+  if(!key){ console.warn('[V3] delete: missing key'); return; }
+  if(!window.SB || !window.SB.connected){
+    if(typeof showSaveDealResultModal === 'function'){
+      showSaveDealResultModal({
+        kind:'error', title:'Supabase not connected',
+        body:'<div style="background:#FEF2F2; border:1px solid #FECACA; color:#7F1D1D; padding:12px 14px; border-radius:8px;">Cannot delete — DB connection is offline. Check the ⚙ settings.</div>',
+        debug:'SB not connected'
+      });
+    } else if(typeof toast === 'function') {
+      toast('Supabase not connected', 4000);
+    }
+    return;
+  }
+  // Look up the preset object to show a friendly name in the prompt.
+  const p = (window.PRESETS || []).find(x => x && x.key === key);
+  const label = (p && p.label) || dealCode || key;
+  const confirmMsg =
+    'Delete "' + label + '" from the database?\n\n' +
+    'This permanently removes:\n' +
+    '  • the deal + facility + tranches + fees + AASB extras\n' +
+    '  • interest components, terms, spreads, ratchet tiers\n' +
+    '  • drawdowns + paydowns\n' +
+    '  • every accounting run + journal entries + cashflow schedule\n' +
+    '  • treatment overrides\n\n' +
+    'Sessions referencing this deal survive (deal_id set to NULL).\n\n' +
+    'This cannot be undone. Proceed?';
+  if(!confirm(confirmMsg)) return;
+
+  // Visual feedback on the trash button while the round-trip is in flight.
+  if(btn){ btn.disabled = true; btn.innerHTML = '<span class="material-icons-outlined text-[14px]" style="animation:invSpin .8s linear infinite;">hourglass_top</span>'; }
+
+  const idOrCode = dealId || dealCode;
+  window.SB.deleteDeal(idOrCode).then(res => {
+    if(res && res.ok){
+      const c = res.counts || {};
+      console.log('[V3] deleted DB deal', label, res);
+      // Remove from window.PRESETS (mutate in place — preserves IIFE inner const reference).
+      if(Array.isArray(window.PRESETS)){
+        for(let i = window.PRESETS.length - 1; i >= 0; i--){
+          if(window.PRESETS[i] && window.PRESETS[i].key === key) window.PRESETS.splice(i, 1);
+        }
+      }
+      // Also strip out of INSTRUMENTS so dropdowns refresh.
+      if(Array.isArray(INSTRUMENTS)){
+        const stamped = '_presetKey';
+        for(let i = INSTRUMENTS.length - 1; i >= 0; i--){
+          const inst = INSTRUMENTS[i];
+          if(inst && (inst.id === key || inst[stamped] === key)) INSTRUMENTS.splice(i, 1);
+        }
+      }
+      // If the currently-loaded deal was the one we just deleted, clear it.
+      const sel = document.getElementById('sel-instrument');
+      if(sel && sel.value === ('v2:' + key)){ sel.value = ''; }
+      const chip = document.getElementById('active-deal-chip');
+      if(chip && (chip.textContent || '').indexOf(label) >= 0){
+        chip.className = 'chip gray'; chip.textContent = 'No deal loaded';
+      }
+      // Re-render the Active Deal modal so the row disappears.
+      if(typeof openActiveDealModal === 'function'){
+        try { openActiveDealModal(); } catch(_){}
+      }
+      // Success popup with cleanup counts.
+      if(typeof showSaveDealResultModal === 'function'){
+        const fmt = (n, w) => n ? '<li><b>' + n + '</b> ' + w + '</li>' : '';
+        showSaveDealResultModal({
+          kind:'success',
+          title:'Deal deleted from Supabase',
+          subtitle: label + ' · cascade cleanup complete',
+          body:
+            '<div style="background:#ECFDF5; border:1.5px solid #10B981; border-radius:10px; padding:12px 14px;">'
+            + '<div style="font-weight:700; color:#065F46; margin-bottom:6px;">Removed via FK CASCADE:</div>'
+            + '<ul style="list-style:disc; margin-left:18px; line-height:1.7;">'
+            + '<li><b>1</b> deal row (incl. facility, AASB extras)</li>'
+            + fmt(c.tranches, 'tranche row' + (c.tranches===1?'':'s') + ' (+ interest components, terms, spreads, ratchet tiers, drawdowns, paydowns)')
+            + fmt(c.fees, 'fee row' + (c.fees===1?'':'s'))
+            + fmt(c.accountingRuns, 'accounting run' + (c.accountingRuns===1?'':'s'))
+            + fmt(c.journalEntries, 'journal entries')
+            + fmt(c.cashflowDays, 'cashflow days')
+            + '</ul></div>'
+            + '<div style="font-size:11.5px; color:#4B5563; margin-top:10px;">Sessions referencing this deal kept their pipeline_state but lost the deal_id link (set to NULL).</div>',
+          debug: res
+        });
+      } else if(typeof toast === 'function') {
+        toast('Deleted · ' + label, 4000);
+      }
+    } else {
+      const reason = (res && res.reason) || 'unknown error';
+      console.error('[V3] delete failed:', res);
+      if(btn){ btn.disabled = false; btn.innerHTML = '<span class="material-icons-outlined text-[14px]">delete</span>'; }
+      if(typeof showSaveDealResultModal === 'function'){
+        showSaveDealResultModal({
+          kind:'error', title:'Delete failed', subtitle: label,
+          body:'<div style="background:#FEF2F2; border:1.5px solid #DC2626; border-radius:10px; padding:12px 14px;">'
+              +'<div style="font-weight:700; color:#991B1B; margin-bottom:6px;">Error from Supabase</div>'
+              +'<div style="font-family:ui-monospace,monospace; font-size:12px; color:#7F1D1D; white-space:pre-wrap;">' + escapeHTML(reason) + '</div></div>',
+          debug: res
+        });
+      } else if(typeof toast === 'function') {
+        toast('Delete failed: ' + reason, 6000);
+      }
+    }
+  }).catch(err => {
+    if(btn){ btn.disabled = false; btn.innerHTML = '<span class="material-icons-outlined text-[14px]">delete</span>'; }
+    console.error('[V3] delete exception:', err);
+    if(typeof toast === 'function') toast('Delete failed: ' + (err && err.message ? err.message : String(err)), 6000);
+  });
+}
+if(typeof window !== 'undefined') window.handleDeleteDBDeal = handleDeleteDBDeal;
 
 // ============================================================
 // V3 — DB Connection Settings popup (gear icon in header)
@@ -8273,6 +8448,14 @@ function openActiveDealModal(){
                 '<span style="color:#9ca3af;">· key: ' + p.key + '</span>' +
               '</div>' +
             '</div>' +
+            (p.source === 'db' ?
+              '<button data-delete-key="' + p.key + '" data-delete-deal-id="' + (p.dealId || '') + '" data-delete-deal-code="' + (p.dealCode || '') + '" ' +
+                'class="mat-btn outline !py-1 !px-2 text-[11px]" ' +
+                'style="flex-shrink:0; color:#dc2626; border-color:#fecaca;" ' +
+                'title="Delete this deal from the database (cascade)">' +
+                '<span class="material-icons-outlined text-[14px]">delete</span>' +
+              '</button>'
+            : '') +
             '<button data-load-key="' + p.key + '" class="mat-btn ' + (isCurrent?'outline':'primary') + ' !py-1 !px-3 text-[11px]" style="flex-shrink:0;">' +
               '<span class="material-icons-outlined text-[14px]">' + (isCurrent?'check_circle':'play_arrow') + '</span>' +
               (isCurrent ? 'Reload' : 'Load') +
@@ -8421,6 +8604,17 @@ if(!window._activeDealDelegateAttached){
     if(closer && closer.closest('#active-deal-modal')){
       e.preventDefault();
       closeActiveDealModal();
+      return;
+    }
+    // ── Active-deal modal: Delete button (DB-saved deals only) — checked
+    // BEFORE load so a click on the trash icon doesn't also trigger Load.
+    const delBtn = e.target.closest('[data-delete-key]');
+    if(delBtn && delBtn.closest('#active-deal-modal')){
+      e.preventDefault(); e.stopPropagation();
+      const key   = delBtn.getAttribute('data-delete-key');
+      const dlId  = delBtn.getAttribute('data-delete-deal-id');
+      const code  = delBtn.getAttribute('data-delete-deal-code');
+      handleDeleteDBDeal({ key, dealId: dlId, dealCode: code, button: delBtn });
       return;
     }
     // ── Active-deal modal: Load button OR card click ──
