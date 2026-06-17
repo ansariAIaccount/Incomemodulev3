@@ -3855,7 +3855,8 @@ function populateInstrumentPicker(){
 }
 
 function currentInstrument(){
-  return INSTRUMENTS.find(i => i.id === M.instrumentId);
+  if(!M.instrumentId) return null;
+  return INSTRUMENTS.find(i => i.id === M.instrumentId) || null;
 }
 
 function resetPipeline(){
@@ -5536,10 +5537,24 @@ function handleDeleteDBDeal(opts){
       }
       // If the currently-loaded deal was the one we just deleted, clear it.
       const sel = document.getElementById('sel-instrument');
-      if(sel && sel.value === ('v2:' + key)){ sel.value = ''; }
+      const wasActive = sel && (sel.value === ('v2:' + key));
+      if(wasActive){ sel.value = ''; }
       const chip = document.getElementById('active-deal-chip');
       if(chip && (chip.textContent || '').indexOf(label) >= 0){
         chip.className = 'chip gray'; chip.textContent = 'No deal loaded';
+      }
+      // V3 — clear in-memory pointers so the Dashboard's "no active deal"
+      // guard kicks in immediately.
+      if(wasActive && typeof M !== 'undefined' && M){ M.instrumentId = null; }
+      if(wasActive && typeof window !== 'undefined' && window.B){
+        if(window.B._presetKey === key) window.B._presetKey = null;
+      }
+      if(wasActive && typeof window !== 'undefined' && window.V2_CTX && window.V2_CTX.activePresetKey === key){
+        window.V2_CTX.activePresetKey = null;
+      }
+      // Re-render the dashboard if it's currently visible.
+      if(wasActive && typeof renderDashboard === 'function'){
+        try { renderDashboard(); } catch(_){}
       }
       // Re-render the Active Deal modal so the row disappears.
       if(typeof openActiveDealModal === 'function'){
@@ -11243,9 +11258,28 @@ document.addEventListener('DOMContentLoaded', ()=>{
   function renderDashboard(){
     const out = document.getElementById('dashboard-content');
     if(!out) return;
-    const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    // V3 — only render when the user has EXPLICITLY chosen a deal. Don't fall
+    // back to a legacy default (e.g. 'libra2' auto-set by populateInstrumentPicker).
+    // Signals checked, in order of authority:
+    //   1. sel-instrument dropdown value — empty means user hasn't picked
+    //   2. Builder's _presetKey — set by loadPresetByObject / loadPresetByKey
+    //   3. active-deal-chip text == "No deal loaded"
+    // If none of those say "yes, a deal is loaded", render blank.
+    const sel  = document.getElementById('sel-instrument');
+    const chip = document.getElementById('active-deal-chip');
+    const selVal = sel ? (sel.value || '') : '';
+    const chipText = chip ? ((chip.textContent || '').trim()) : '';
+    const builderHasDeal = !!(typeof window !== 'undefined' && window.B && window.B._presetKey);
+    const userPicked = (selVal.indexOf('v2:') === 0 && selVal.length > 3) || builderHasDeal;
+    const chipSaysNoDeal = (chipText === 'No deal loaded' || chipText === '');
+    const inst = userPicked && !chipSaysNoDeal && (typeof currentInstrument === 'function') ? currentInstrument() : null;
     if(!inst){
-      out.innerHTML = '<div class="text-[13px] text-gray-500 italic">Pick a deal from the Active Deal dropdown to see its dashboard.</div>';
+      out.innerHTML =
+        '<div style="padding:60px 20px; text-align:center; color:#6A7591;">'
+        + '<span class="material-icons-outlined" style="font-size:48px; opacity:0.4; display:block; margin-bottom:14px;">dashboard</span>'
+        + '<div style="font-size:14px; font-weight:600; color:#21295C; margin-bottom:6px;">No active deal selected</div>'
+        + '<div style="font-size:12px; max-width:360px; margin:0 auto; line-height:1.5;">Go to <b>Stage 0 — Loan Builder</b> and either <b>Load Active Deal</b> from the library, <b>Load from Security Master</b>, or build a new deal manually. The Dashboard will populate once a deal is active.</div>'
+        + '</div>';
       return;
     }
 
@@ -15493,6 +15527,15 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     if(filtered.length === 0){
       html = '<option value="">— No deals visible for ' + team + ' team —</option>';
+    }
+    // V3 — the V2 dropdown defaults to empty; clear any legacy M.instrumentId
+    // set by populateInstrumentPicker so currentInstrument() returns null until
+    // the user explicitly picks a deal.
+    if(typeof M !== 'undefined' && M){
+      const previousVal = sel.value;
+      if(!previousVal || previousVal === '' || !previousVal.startsWith('v2:')){
+        M.instrumentId = null;
+      }
     }
     sel.innerHTML = html;
   }
