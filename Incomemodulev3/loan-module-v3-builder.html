@@ -891,13 +891,14 @@
       <button id="btn-diu-filled" class="mat-btn outline"
               onclick="window.handleDiuFilledClick && window.handleDiuFilledClick()"
               title="Download Investran DIU workbook with two tabs: GL (journal entries) + PortfolioPosition (security master) — auto-runs accounting if not yet run"><span class="material-icons-outlined text-[16px]">file_download</span>Filled DIU XLSX</button>
-      <!-- Post JE direct to Investran — submits the JE batch via the Accounting
-           API path: create batch → load transactions → validate → commit. -->
+      <!-- Post JE via the Investran Data Import Utility (DIU) API. Uploads
+           the filled DIU workbook through the dataimport job lifecycle:
+           create job → upload file → load → validate → commit. -->
       <button id="btn-post-je-investran" class="mat-btn"
               onclick="window.handlePostJeClick && window.handlePostJeClick()"
               style="background:linear-gradient(135deg,#0d2645 0%,#1a3a6e 100%); color:white; border:1px solid #0d2645;"
-              title="Submit the journal-entry batch to Investran's Accounting API and confirm load — auto-runs accounting if not yet run">
-        <span class="material-icons-outlined text-[16px]">cloud_upload</span>Post JE to Investran
+              title="Post the journal-entry batch via Investran Data Import Utility (DIU) API — create job → upload XLSX → load → validate → commit. Auto-runs accounting if not yet run.">
+        <span class="material-icons-outlined text-[16px]">cloud_upload</span>Post JE
       </button>
       <div class="flex items-center gap-1 border border-gray-300 rounded px-2 py-1 bg-white" title="Date this JE batch is posted to the GL. Leave blank for AUTO mode (glDate = effectiveDate per row). Set a date to override every row to that close date.">
         <span class="material-icons-outlined text-[14px] text-gray-500">event</span>
@@ -2519,11 +2520,12 @@
   </div>
 </div>
 
-<!-- ─── Post JE to Investran modal — animated 5-step progress sequence,
-     then a "POSTED · COMMITTED" confirmation card with simulated batch /
-     process / journal-entry IDs. Submitting in this demo build is a faithful
-     simulation of the Investran Accounting API call sequence (create batch
-     operation process → load transactions → validate → commit). ─── -->
+<!-- ─── Post JE modal — animated progress through the Investran Data Import
+     Utility (DIU) job lifecycle: create job → upload XLSX → load → validate
+     → commit. Then a "POSTED · COMMITTED" card with simulated job, batch,
+     and journal-entry IDs. In this demo build the API calls are simulated;
+     when a backend proxy is wired in, the steps stay identical and only
+     the underlying transport changes. ─── -->
 <div id="investran-post-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd"></div>
   <div class="json-modal-pn" style="width:min(720px,96vw); max-height:90vh;">
@@ -2531,7 +2533,7 @@
       <div>
         <div class="font-semibold text-[14px] flex items-center gap-2">
           <span class="material-icons-outlined text-[18px]" style="color:#0d2645">cloud_upload</span>
-          Post JE → Investran Accounting API
+          Post JE → Investran DIU API
         </div>
         <div id="investran-post-sub" class="text-[11px] text-gray-500">—</div>
       </div>
@@ -5209,20 +5211,22 @@ function downloadDIUFilled(){
 if(typeof window !== 'undefined') window.downloadDIUFilled = downloadDIUFilled;
 
 // ============================================================
-// POST JE → INVESTRAN  (Stage 2 → Investran Accounting API)
+// POST JE  (Stage 2 → Investran Data Import Utility / DIU API)
 // ============================================================
-// Simulates the FIS Investran Accounting REST sequence to post the journal
-// batch into the firm's sub-ledger:
-//
-//   1. POST /api/accounting/processes/batch-operation   (create batch process)
-//   2. PUT  /api/accounting/processes/{id}/transactions (load JE rows)
-//   3. POST /api/accounting/processes/{id}/validate     (chart-of-accounts + balance)
-//   4. POST /api/accounting/processes/{id}/commit       (commit to GL)
-//   5. GET  /api/accounting/processes/{id}/batches      (confirm batch IDs)
+// Simulates the FIS Investran DIU REST sequence to push the filled DIU
+// workbook (GL + PortfolioPosition tabs) into the firm's sub-ledger.
+// This is the same path the Investran MCP tools expose:
+//   - dataimport_create_job        → POST /api/dataimport/jobs
+//   - dataimport_upload_file       → PUT  /api/dataimport/jobs/{id}/files
+//   - dataimport_load_process      → POST /api/dataimport/jobs/{id}/load
+//   - dataimport_validate_process  → POST /api/dataimport/jobs/{id}/validate
+//   - dataimport_get_process       → GET  /api/dataimport/jobs/{id}/processes
+//   - (commit)                     → POST /api/dataimport/jobs/{id}/commit
 //
 // In this demo build the calls are simulated with realistic latencies and an
 // animated step list — when a backend proxy is wired in, replace the
-// setTimeout simulator with fetch() calls to the Investran Accounting API.
+// setTimeout simulator with fetch() calls to the DIU API and stream the
+// XLSX produced by downloadDIUFilled() instead of a JSON body.
 // ============================================================
 // Money formatter (thousands separator, 2dp). Defined locally so postJEsToInvestran
 // doesn't depend on later-defined helpers like fmtMoney2.
@@ -5256,18 +5260,19 @@ function postJEsToInvestran(){
   const jeCount = Object.keys(jeGroups).length;
   const rowCount = M.acctJournals.length;
 
-  // ── 2. Build simulated Investran process / batch / journal-entry IDs.
-  // These follow the actual ID patterns used by the Investran Accounting API
-  // (process IDs are large integers, batch IDs are zero-padded sequences).
+  // ── 2. Build simulated DIU job / batch / journal-entry IDs.
+  // These follow the actual ID patterns used by the Investran DIU API
+  // (job IDs are large integers, batch IDs are zero-padded sequences).
   const ts = new Date();
   const stamp = ts.toISOString().replace(/[-:.TZ]/g,'').slice(0,14);
-  const processId = 'PRC-' + stamp + '-' + Math.floor(Math.random()*9000+1000);
-  const batchId   = 'INV-' + stamp.slice(0,8) + '-' + String(Math.floor(Math.random()*900+100)).padStart(3,'0');
+  const jobId     = 'DIU-JOB-' + stamp + '-' + Math.floor(Math.random()*9000+1000);
+  const batchId   = 'DIU-' + stamp.slice(0,8) + '-' + String(Math.floor(Math.random()*900+100)).padStart(3,'0');
   const jeRange   = `JE-${stamp.slice(0,8)}-${String(Math.floor(Math.random()*900+100)).padStart(3,'0')}-${String(jeCount).padStart(3,'0')}`;
-  const batchType = inst.framework === 'AASB' ? 'AASB_LOAN_BATCH' :
-                    inst.framework === 'ASC'  ? 'USGAAP_LOAN_BATCH' :
-                    inst.framework === 'ASPE' ? 'ASPE_LOAN_BATCH' :
-                                                'IFRS_LOAN_BATCH';
+  const xlsxName  = `investran-diu-${(inst.id||'deal')}-${stamp.slice(0,8)}.xlsx`;
+  const templateName = inst.framework === 'AASB' ? 'AASB_Loan_GL_DIU_Template' :
+                       inst.framework === 'ASC'  ? 'USGAAP_Loan_GL_DIU_Template' :
+                       inst.framework === 'ASPE' ? 'ASPE_Loan_GL_DIU_Template' :
+                                                   'IFRS_Loan_GL_DIU_Template';
 
   // ── 3. Open modal & run the simulated 5-step sequence.
   const modal = $('investran-post-modal');
@@ -5285,19 +5290,36 @@ function postJEsToInvestran(){
   tot.textContent = `DR ${formatMoney(totalDr)} · CR ${formatMoney(totalCr)} · ${unbalanced.length===0 ? '✓ Balanced' : '✗ '+unbalanced.length+' unbalanced'}`;
 
   const steps = [
-    { id:'connect',  label:'Authenticate with Investran Accounting API',  endpoint:'POST /oauth/token',                                                  detail:'OAuth2 client-credentials grant · scope=accounting.write',                  ms:500 },
-    { id:'process',  label:'Create batch-operation process',              endpoint:'POST /api/accounting/processes/batch-operation',                     detail:`type=${batchType} · process_id=${processId}`,                               ms:650 },
-    { id:'load',     label:`Load ${rowCount} journal rows into process`,  endpoint:'PUT  /api/accounting/processes/{id}/transactions',                   detail:`${jeCount} journal entries · DR=${formatMoney(totalDr)} · CR=${formatMoney(totalCr)}`, ms:900 },
-    { id:'validate', label:'Validate chart of accounts + balance',        endpoint:'POST /api/accounting/processes/{id}/validate',                       detail:`✓ All ${jeCount} JEs balance · ✓ All accounts mapped in firm chart`,        ms:750 },
-    { id:'commit',   label:'Commit batch to General Ledger',              endpoint:'POST /api/accounting/processes/{id}/commit',                         detail:`Batch ${batchId} · status=COMMITTED · ${rowCount} rows posted`,             ms:850 },
-    { id:'confirm',  label:`Confirm batch ${batchId} loaded in sub-ledger`,endpoint:'GET  /api/accounting/processes/{id}/batches',                       detail:`✓ Batch readable · ✓ ${jeCount} JEs visible in Investran Accounting`,       ms:550 }
+    { id:'connect',  label:'Authenticate with Investran DIU API',          endpoint:'POST /oauth/token',                                detail:'OAuth2 client-credentials grant · scope=dataimport.write',                                ms:500 },
+    { id:'createJob',label:'Create DIU import job',                        endpoint:'POST /api/dataimport/jobs',                        detail:`template=${templateName} · job_id=${jobId}`,                                               ms:650 },
+    { id:'upload',   label:`Upload filled DIU workbook (${rowCount} JE rows)`, endpoint:'PUT  /api/dataimport/jobs/{id}/files',         detail:`${xlsxName} · 2 tabs (GL · PortfolioPosition) · ${jeCount} journal entries`,             ms:1100 },
+    { id:'load',     label:'Load process — parse XLSX into transactions',  endpoint:'POST /api/dataimport/jobs/{id}/load',              detail:`Parsed ${rowCount} GL rows · DR=${formatMoney(totalDr)} · CR=${formatMoney(totalCr)}`,    ms:900 },
+    { id:'validate', label:'Validate against firm chart + DIU rules',      endpoint:'POST /api/dataimport/jobs/{id}/validate',          detail:`✓ All ${jeCount} JEs balance · ✓ Accounts mapped · ✓ LE/Deal/Security FKs resolved`,      ms:800 },
+    { id:'commit',   label:'Commit batch — load into sub-ledger',          endpoint:'POST /api/dataimport/jobs/{id}/commit',            detail:`Batch ${batchId} · status=COMMITTED · ${rowCount} rows posted`,                          ms:850 },
+    { id:'confirm',  label:`Confirm batch ${batchId} visible in Investran`, endpoint:'GET  /api/dataimport/jobs/{id}/processes',         detail:`✓ Batch readable · ✓ ${jeCount} JEs visible in DIU process feedback`,                    ms:550 }
   ];
 
+  // V3 — proxy mode detection. If the user configured a DIU proxy URL via
+  // ⚙ settings (stored in localStorage), the modal will eventually call the
+  // proxy for real. Until that wiring is finalized, this is a DEMO simulator.
+  let proxyUrl = null;
+  try { proxyUrl = (localStorage.getItem('pcs_v3_diu_proxy_url') || '').trim(); } catch(_){}
+  const isDemoMode = true;   // flip to !proxyUrl when real-call wiring lands
+  const hostLabel = (proxyUrl || 'https://accounting.investran.fis.com/api/v3');
   // Render the step skeleton — all pending initially.
   body.innerHTML = `
+    ` + (isDemoMode ? `
+    <div style="background:linear-gradient(135deg,#FEF3C7 0%,#FDE68A 100%); border:1.5px solid #F59E0B; color:#78350F; padding:9px 12px; border-radius:8px; margin-bottom:10px; font-size:11.5px; display:flex; gap:8px; align-items:flex-start;">
+      <span class="material-icons-outlined" style="font-size:18px; flex-shrink:0;">warning</span>
+      <div style="line-height:1.4;">
+        <b>DEMO MODE</b> — this is a simulated DIU submission for UI walkthroughs. <b>No data has been sent to Investran.</b> All step checkmarks, the Job ID, the Batch ID, and the &quot;COMMITTED&quot; status are generated client-side.
+        <div style="margin-top:4px; font-size:11px;">For real posting, run the proxy in <code>server/</code> (see <code>server/README.md</code>), set <b>DIU Proxy URL</b> in the ⚙ settings, and re-open this modal.</div>
+      </div>
+    </div>
+    ` : '') + `
     <div style="background:#0d2645; color:white; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-family:ui-monospace, monospace; font-size:11px;">
       <div style="opacity:0.7">Endpoint host:</div>
-      <div style="font-weight:700; letter-spacing:0.2px;">https://accounting.investran.fis.com/api/v3</div>
+      <div style="font-weight:700; letter-spacing:0.2px;">${hostLabel}</div>
     </div>
     <div id="inv-step-list" style="display:flex; flex-direction:column; gap:8px;">
       ${steps.map((s,i) => `
@@ -5333,13 +5355,14 @@ function postJEsToInvestran(){
         <div style="background:linear-gradient(135deg,#ecfdf5 0%, #d1fae5 100%); border:1.5px solid #10b981; border-radius:10px; padding:14px 16px;">
           <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
             <span class="material-icons-outlined" style="color:#059669; font-size:24px;">check_circle</span>
-            <div style="font-weight:700; color:#065f46; font-size:14px;">Batch posted to Investran · COMMITTED</div>
+            <div style="font-weight:700; color:#065f46; font-size:14px;">DIU batch posted · COMMITTED</div>
           </div>
           <div style="display:grid; grid-template-columns:140px 1fr; row-gap:5px; column-gap:12px; font-size:11.5px;">
-            <div style="color:#065f46; font-weight:600;">Process ID</div><div style="font-family:ui-monospace,monospace; color:#064e3b;">${processId}</div>
+            <div style="color:#065f46; font-weight:600;">DIU Job ID</div><div style="font-family:ui-monospace,monospace; color:#064e3b;">${jobId}</div>
             <div style="color:#065f46; font-weight:600;">Batch ID</div><div style="font-family:ui-monospace,monospace; color:#064e3b;">${batchId}</div>
             <div style="color:#065f46; font-weight:600;">JE range</div><div style="font-family:ui-monospace,monospace; color:#064e3b;">${jeRange}</div>
-            <div style="color:#065f46; font-weight:600;">Batch type</div><div style="color:#064e3b;">${batchType}</div>
+            <div style="color:#065f46; font-weight:600;">DIU template</div><div style="color:#064e3b;">${templateName}</div>
+            <div style="color:#065f46; font-weight:600;">Uploaded file</div><div style="font-family:ui-monospace,monospace; color:#064e3b;">${xlsxName}</div>
             <div style="color:#065f46; font-weight:600;">Sub-ledger</div><div style="color:#064e3b;">${inst.framework || 'IFRS'} loan accounting · LE = ${inst.le || 'Corporate Bank'}</div>
             <div style="color:#065f46; font-weight:600;">JE count</div><div style="color:#064e3b;">${jeCount} journal entries (${rowCount} rows)</div>
             <div style="color:#065f46; font-weight:600;">Total DR</div><div style="color:#064e3b;">${formatMoney(totalDr)} ${inst.currency || ''}</div>
@@ -5348,17 +5371,17 @@ function postJEsToInvestran(){
           </div>
           <div style="margin-top:10px; padding-top:8px; border-top:1px solid #6ee7b7; font-size:11px; color:#047857;">
             <span class="material-icons-outlined" style="font-size:13px; vertical-align:-3px;">info</span>
-            View the posted batch in Investran: <span style="font-family:ui-monospace,monospace; color:#065f46;">Accounting → Batch Operations → ${batchId}</span>
+            View in Investran: <span style="font-family:ui-monospace,monospace; color:#065f46;">Data Import Utility → Jobs → ${jobId}</span> · or <span style="font-family:ui-monospace,monospace; color:#065f46;">Accounting → Batches → ${batchId}</span>
           </div>
         </div>
       `;
       // Update Stage 2 chip with posted state.
       $('acct-status').className = 'chip green self-center';
-      $('acct-status').innerHTML = `Posted to Investran · ${batchId}`;
+      $('acct-status').innerHTML = `Posted via DIU · ${batchId}`;
       btnClose.style.display = '';
       btnDone.style.display  = '';
-      toast(`Posted to Investran · batch ${batchId} · ${jeCount} JEs · COMMITTED`, 6000);
-      console.log('[Investran] post complete', { processId, batchId, jeCount, rowCount });
+      toast(`Posted via DIU · batch ${batchId} · ${jeCount} JEs · COMMITTED`, 6000);
+      console.log('[Investran DIU] post complete', { jobId, batchId, jeCount, rowCount, template: templateName });
       // Persistent confirmation badge — sits next to the Post JE button so the
       // batch ID stays visible after the modal is closed.
       const btnRef = document.getElementById('btn-post-je-investran');
@@ -5376,7 +5399,7 @@ function postJEsToInvestran(){
       }
       // Remember the last posted batch so the user can reference it later /
       // future "view in Investran" tools can deep-link to it.
-      M.lastInvestranPost = { processId, batchId, jeRange, jeCount, rowCount, batchType, postedAt: new Date().toISOString() };
+      M.lastInvestranPost = { jobId, batchId, jeRange, jeCount, rowCount, template: templateName, xlsxName, postedAt: new Date().toISOString() };
       return;
     }
     const s = steps[i];
@@ -8510,14 +8533,19 @@ function loadActiveDealByKey(key){
     console.log('[V3] db-deal candidate in PRESETS:', !!candidate, 'built fn:', candidate && typeof candidate.build);
     if(candidate){
       const sel = document.getElementById('sel-instrument');
-      if(sel) sel.value = 'v2:' + key;   // keep header chip + downstream consistent
+      if(sel) sel.value = 'v2:' + key;   // tentative — re-applied after dropdown rebuild
       const loaded = window.loadPresetByObject(candidate);
       if(typeof closeActiveDealModal === 'function') closeActiveDealModal();
-      if(typeof refreshActiveDealChip === 'function') refreshActiveDealChip();
-      // Auto-run accounting in the background (mirrors legacy preset switch).
+      // V3 — registerBuilderInstrument MUST run before refreshActiveDealChip,
+      // because it rebuilds the dropdown (adding the new option) and re-applies
+      // sel.value. If we refresh the chip first, sel.value is empty (the
+      // tentative set above silently failed because the option didn't exist
+      // yet) and the chip wrongly reads "No deal loaded".
       if(typeof registerBuilderInstrument === 'function'){
         try { registerBuilderInstrument(); } catch(e){ console.warn('registerBuilderInstrument failed:', e); }
       }
+      if(typeof refreshActiveDealChip === 'function') refreshActiveDealChip();
+      // Auto-run accounting in the background (mirrors legacy preset switch).
       setTimeout(() => {
         try { if(typeof runAccounting === 'function') runAccounting(); }
         catch(err){ console.error('Auto-run on DB preset switch failed:', err); }
@@ -8541,14 +8569,20 @@ function loadActiveDealByKey(key){
 function refreshActiveDealChip(){
   const chip = document.getElementById('active-deal-chip');
   if(!chip) return;
+  // V3 — Resolve the key from three sources, in order. sel.value is the
+  // primary signal, but on the DB-load path it can briefly be empty while
+  // the dropdown is being rebuilt. Fall back to B._presetKey / V2_CTX so
+  // the chip never shows "No deal loaded" right after a successful load.
   const sel = document.getElementById('sel-instrument');
-  const val = sel ? sel.value : '';
-  if(!val || !val.startsWith('v2:')){
+  const val = sel ? (sel.value || '') : '';
+  let key = (val && val.startsWith('v2:')) ? val.slice(3) : '';
+  if(!key && typeof window !== 'undefined' && window.B && window.B._presetKey) key = window.B._presetKey;
+  if(!key && typeof window !== 'undefined' && window.V2_CTX && window.V2_CTX.activePresetKey) key = window.V2_CTX.activePresetKey;
+  if(!key){
     chip.className = 'chip gray self-center';
     chip.textContent = 'No deal loaded';
     return;
   }
-  const key = val.slice(3);
   const preset = (window.PRESETS || []).find(p => p.key === key);
   if(!preset){
     chip.className = 'chip blue self-center';
@@ -11260,19 +11294,18 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(!out) return;
     // V3 — only render when the user has EXPLICITLY chosen a deal. Don't fall
     // back to a legacy default (e.g. 'libra2' auto-set by populateInstrumentPicker).
-    // Signals checked, in order of authority:
-    //   1. sel-instrument dropdown value — empty means user hasn't picked
-    //   2. Builder's _presetKey — set by loadPresetByObject / loadPresetByKey
-    //   3. active-deal-chip text == "No deal loaded"
-    // If none of those say "yes, a deal is loaded", render blank.
-    const sel  = document.getElementById('sel-instrument');
-    const chip = document.getElementById('active-deal-chip');
+    // Authoritative signals:
+    //   1. sel-instrument value starts with 'v2:' and has a key after — user picked from dropdown / Active Deal modal
+    //   2. window.B._presetKey is set — Builder loaded a preset (canned or DB)
+    //   3. currentInstrument() returns a real INSTRUMENT (M.instrumentId resolves)
+    // The active-deal-chip text was used previously but it's transiently
+    // wrong on the DB-load path (chip refreshes BEFORE the dropdown is rebuilt
+    // with the new option), so we ignore the chip and trust the other signals.
+    const sel = document.getElementById('sel-instrument');
     const selVal = sel ? (sel.value || '') : '';
-    const chipText = chip ? ((chip.textContent || '').trim()) : '';
     const builderHasDeal = !!(typeof window !== 'undefined' && window.B && window.B._presetKey);
     const userPicked = (selVal.indexOf('v2:') === 0 && selVal.length > 3) || builderHasDeal;
-    const chipSaysNoDeal = (chipText === 'No deal loaded' || chipText === '');
-    const inst = userPicked && !chipSaysNoDeal && (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    const inst = userPicked && (typeof currentInstrument === 'function') ? currentInstrument() : null;
     if(!inst){
       out.innerHTML =
         '<div style="padding:60px 20px; text-align:center; color:#6A7591;">'
@@ -13108,11 +13141,18 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
               <option ${f.frequency==='annual'?'selected':''} value="annual">Annual</option>
             </select>
           </div>
-          ${ /* Payment Date only matters for one-off fees (drives the JE post date).
-              Accrual-style fees recognise across periods so the per-period dates are computed. */
-            f.frequency==='oneOff'
-              ? `<div><label class="text-[10px] uppercase text-gray-600 block">Payment Date</label><input data-f-field="paymentDate" data-fidx="${idx}" type="date" value="${f.paymentDate || ''}" class="w-full border rounded px-1 py-0.5 text-[11px] bg-white"/></div>`
-              : ''
+          ${ /* V3 — Payment Date is now always visible. For oneOff fees it's the
+              actual JE post date. For monthly / quarterly / semi / annual fees it
+              anchors the FIRST payment; the engine derives subsequent dates from
+              frequency + day-basis. Without a date, the engine can't place the fee
+              on the timeline → it won't appear on the Dashboard / Cashflow chart. */
+            `<div><label class="text-[10px] uppercase text-gray-600 block">${
+                f.frequency === 'oneOff' ? 'Payment Date' : 'First Payment Date'
+              } <span style="color:#DC2626; font-weight:900;">*</span></label>
+              <input data-f-field="paymentDate" data-fidx="${idx}" type="date" value="${f.paymentDate || ''}"
+                     class="w-full border ${(!f.paymentDate)?'border-red-300 bg-red-50':'border-gray-300 bg-white'} rounded px-1 py-0.5 text-[11px]"/>
+              ${ !f.paymentDate ? '<div style="font-size:9.5px; color:#DC2626; margin-top:2px;">Required — engine drops fees with no date</div>' : '' }
+            </div>`
           }
           ${ /* ─── Framework-aware fee-treatment dropdown ───
               Pulls the three options (EIR / over-time / point-in-time) from the
@@ -14724,6 +14764,62 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
   ];
 
+  // ─── V3 ENGINE HARDENING ─────────────────────────────────────────────
+  // Ensure every interest component has spreads that cover the full loan
+  // tenor (settlement → maturity). The engine takes coupon.spread from the
+  // first spread row, but downstream renderers (rate trace, EIR breakdown,
+  // dashboard charts) iterate the dated schedule. If the last spread's
+  // effective_to is earlier than maturity, extend it. If no spreads exist,
+  // synthesize a zero-bps placeholder covering the whole tenor.
+  // Console.warn() each fix so the user sees it (and the source data can be
+  // corrected in Stage 0 / SQL).
+  function normalizeSpreadCoverage(built){
+    if(!built || !built.deal || !built.tranches) return built;
+    const settle   = built.deal.settle;
+    const maturity = built.deal.maturity;
+    if(!settle || !maturity) return built;
+    const dealLabel = (built.deal.name || built.deal.dealId || 'deal');
+    let fixes = 0;
+    for(const t of (built.tranches || [])){
+      for(const ic of (t.interestComponents || [])){
+        ic.spreads = Array.isArray(ic.spreads) ? ic.spreads : [];
+        if(!ic.spreads.length){
+          // No spread rows at all — push a zero-bps placeholder so the engine
+          // at least has SOMETHING for every day. User likely wanted a fixed
+          // base rate with no margin.
+          ic.spreads.push({ from: settle, to: maturity, bps: 0, note: '[auto] no spreads defined — full tenor at 0 bps' });
+          console.warn('[V3 hardening] ' + dealLabel + ' · tranche "' + (t.name||'?') + '" · ic "' + (ic.name||'?') + '" had no spreads — added 0bps spread covering ' + settle + ' → ' + maturity);
+          fixes++;
+          continue;
+        }
+        // Sort by effective_from so we know the last one.
+        ic.spreads.sort((a,b) => (a.from || '').localeCompare(b.from || ''));
+        const last = ic.spreads[ic.spreads.length - 1];
+        if(!last.to || last.to < maturity){
+          const oldTo = last.to;
+          last.to = maturity;
+          last.note = (last.note ? last.note + ' · ' : '') + '[auto] extended ' + (oldTo || '?') + ' → ' + maturity + ' (engine needs full tenor coverage)';
+          console.warn('[V3 hardening] ' + dealLabel + ' · tranche "' + (t.name||'?') + '" · ic "' + (ic.name||'?') + '" last spread extended ' + oldTo + ' → ' + maturity);
+          fixes++;
+        }
+        // Also fill any gap between consecutive spreads with the prior bps.
+        for(let i = 0; i < ic.spreads.length - 1; i++){
+          const cur = ic.spreads[i], nxt = ic.spreads[i+1];
+          if(cur.to && nxt.from && cur.to < nxt.from){
+            console.warn('[V3 hardening] ' + dealLabel + ' · ic "' + (ic.name||'?') + '" gap ' + cur.to + ' → ' + nxt.from + ' — extending prior spread to close it');
+            cur.to = nxt.from;
+            fixes++;
+          }
+        }
+      }
+    }
+    if(fixes && typeof toast === 'function'){
+      setTimeout(() => toast('Engine hardening: extended ' + fixes + ' spread' + (fixes===1?'':'s') + ' to maturity · check console for details', 5000), 50);
+    }
+    return built;
+  }
+  if(typeof window !== 'undefined') window.normalizeSpreadCoverage = normalizeSpreadCoverage;
+
   // Load a v2 preset by its key into the Builder state, render, recompute.
   // If the current view mode is 'participation' AND the preset has a
   // participationPct < 100, scale all face values, drawdowns, repayments,
@@ -14732,7 +14828,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   function loadPresetByKey(key){
     const p = PRESETS.find(x => x.key === key);
     if(!p){ console.warn('Preset not found:', key); return null; }
-    const built = p.build();
+    const built = normalizeSpreadCoverage(p.build());
     const viewMode = (window.V2_CTX && V2_CTX.viewMode) || 'syndication';
     const pct = p.participationPct || 100;
     if(viewMode === 'participation' && pct < 100){
@@ -14810,7 +14906,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   window.loadPresetByObject = function(p){
     console.log('[V3] loadPresetByObject START', p && p.key);
     if(!p || typeof p.build !== 'function'){ console.warn('loadPresetByObject: bad preset', p); return null; }
-    const built = p.build();
+    const built = normalizeSpreadCoverage(p.build());
     console.log('[V3] loadPresetByObject built def:', {
       dealName: built && built.deal && built.deal.name,
       framework: built && built.deal && built.deal.framework,
