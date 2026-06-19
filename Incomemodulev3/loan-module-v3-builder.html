@@ -11883,6 +11883,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
           startDate: r.date,
           endBalance: 0, endCarrying: 0,
           interest: 0, pik: 0, defaultInt: 0, fees: 0,
+          eirFees: 0,    // V3 — EIR-amortised origination fees (IFRS9-EIR / ASC310-20-EIR path)
           draws: 0, paydowns: 0, prepays: 0, writeOffs: 0, sales: 0
         });
       }
@@ -11893,6 +11894,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
       b.pik        += (r.dailyPik || 0);
       b.defaultInt += (r.dailyDefaultInterest || 0);
       b.fees       += (r.dailyFees || 0);
+      // V3 — EIR fees: arrangement/origination fees with IFRS9-EIR (or
+      // ASC310-20-EIR) treatment are deferred at t0 and amortised back into
+      // yield daily via dailyEIRAccretion. Booked as interest income for
+      // GAAP/IFRS, but visualized as a separate segment so the user can see
+      // the fee-derived portion of total income.
+      b.eirFees    += (r.dailyEIRAccretion || 0);
       b.draws      += (r.draw || 0);
       b.paydowns   += (r.paydown || 0);
       b.prepays    += (r.prepayment || 0);
@@ -12018,28 +12025,42 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }
 
   // 2. QUARTERLY CASHFLOW COMPOSITION — stacked bars
+  // V3 — split deferred-fee EIR amortisation (b.eirFees) into its own segment
+  // so deals using ASC310-20-EIR / IFRS9-EIR treatment still show fee income
+  // visibly. The accounting books it as interest (IFRS / GAAP correct), but
+  // the chart breaks out the fee-derived portion for transparency.
   function chartQuarterlyCashflow(sched, ccy){
     if(!sched || !sched.length) return '';
-    const quarterly = aggregateQuarterly(sched).filter(q => (q.interest + q.fees + q.pik + q.defaultInt) > 0);
+    const quarterly = aggregateQuarterly(sched).filter(q =>
+      (q.interest + q.fees + q.pik + q.defaultInt + (q.eirFees || 0)) > 0
+    );
     if(!quarterly.length) return '';
     // Take at most 16 quarters (4 years) — pick evenly spaced
     const stride = Math.max(1, Math.ceil(quarterly.length / 16));
     const buckets = quarterly.filter((_, i) => i % stride === 0).slice(0, 16);
     const W = 640, H = 220, padL = 60, padR = 10, padT = 16, padB = 40;
     const innerW = W - padL - padR, innerH = H - padT - padB;
-    const maxTotal = Math.max(...buckets.map(b => b.interest + b.fees + b.pik + b.defaultInt)) || 1;
+    const maxTotal = Math.max(...buckets.map(b => b.interest + b.fees + b.pik + b.defaultInt + (b.eirFees || 0))) || 1;
     const barW = innerW / buckets.length * 0.7;
     const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map(f => ({ val: maxTotal * f, y: padT + innerH - (f * innerH) }));
 
     let bars = '';
+    let totalEirFees = 0;
     buckets.forEach((b, i) => {
+      totalEirFees += (b.eirFees || 0);
       const x = padL + (i + 0.5) * (innerW / buckets.length) - barW/2;
       let stack = padT + innerH;
+      // Stack order from bottom up: cash interest → EIR fees (amber) →
+      // explicit fees → PIK → default. EIR fees sit between cash interest
+      // and explicit fees because they're conceptually fee income that's
+      // booked as interest under IFRS/GAAP — the visual ordering mirrors
+      // that hybrid status.
       const segments = [
-        { val: b.interest,   color: '#21295C', label: 'Cash interest' },
-        { val: b.pik,        color: '#4ECDC4', label: 'PIK interest' },
-        { val: b.defaultInt, color: '#E76F51', label: 'Default interest' },
-        { val: b.fees,       color: '#F4A261', label: 'Fees' }
+        { val: b.interest,         color: '#21295C', label: 'Cash interest' },
+        { val: (b.eirFees || 0),   color: '#FBBF24', label: 'EIR-amortised fees · booked as interest under IFRS9 / ASC310-20' },
+        { val: b.fees,             color: '#F4A261', label: 'Explicit fees (point-in-time / over-time)' },
+        { val: b.pik,              color: '#4ECDC4', label: 'PIK interest' },
+        { val: b.defaultInt,       color: '#E76F51', label: 'Default interest' }
       ];
       for(const seg of segments){
         if(seg.val < 0.01) continue;
@@ -12048,6 +12069,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
         stack -= h;
       }
     });
+    // Footer note when EIR fees are present — flags the accounting nuance.
+    const eirNote = totalEirFees > 0.01
+      ? `<div style="font-size:10px; color:#92400E; background:#FEF3C7; border-left:3px solid #F59E0B; padding:5px 8px; border-radius:4px; margin-top:6px;">`
+        + `<b>Amber segment</b> = ${fmtMoneyDash(totalEirFees, ccy)} of EIR-amortised fees over the shown quarters. `
+        + `Under IFRS 9 / ASC 310-20 these are booked as <b>interest income</b> (effective-yield method); they share the same GL accounts as cash interest.</div>`
+      : '';
 
     return `<div class="chart-card">
       <div class="chart-card-title">Quarterly Income Composition</div>
@@ -12063,10 +12090,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
       </svg>
       <div class="chart-legend">
         <span><span class="chart-legend-sw" style="background:#21295C"></span>Cash interest</span>
+        <span><span class="chart-legend-sw" style="background:#FBBF24"></span>EIR-amortised fees</span>
+        <span><span class="chart-legend-sw" style="background:#F4A261"></span>Explicit fees</span>
         <span><span class="chart-legend-sw" style="background:#4ECDC4"></span>PIK</span>
         <span><span class="chart-legend-sw" style="background:#E76F51"></span>Default</span>
-        <span><span class="chart-legend-sw" style="background:#F4A261"></span>Fees</span>
       </div>
+      ${eirNote}
     </div>`;
   }
 

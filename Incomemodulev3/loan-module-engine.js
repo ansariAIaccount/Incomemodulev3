@@ -921,7 +921,8 @@ function buildSchedule(instr){
   // For IFRS9-EIR fees: deferred income at t0 = sum(flat one-off) + 0 (% accrue daily over life)
   let deferredEIRPool = 0;
   for(const f of fees){
-    if(/EIR$/.test(f.ifrs || '') && f.mode === 'flat' && f.frequency === 'oneOff'){
+    // Accept both 'flat' (engine-native) and 'fixed' (v3 builder mapping of 'fixAmount').
+    if(/EIR$/.test(f.ifrs || '') && (f.mode === 'flat' || f.mode === 'fixed') && f.frequency === 'oneOff'){
       deferredEIRPool += (f.amount || 0);
       // Reduce initial carrying value by the deferred fee (cash received at signing
       // is offset against carrying amount; it accretes back into interest income).
@@ -1513,8 +1514,9 @@ function buildSchedule(instr){
         } else {
           amt = baseAmt * effectiveRate * dcf;
         }
-      } else if(f.mode === 'flat'){
+      } else if(f.mode === 'flat' || f.mode === 'fixed'){
         // Spread flat amount linearly across accrual window
+        // 'fixed' is the v3 builder's mapping of 'fixAmount'; treat identical to 'flat'.
         const lifeDays = Math.max(1, Math.round((accTo - accFrom)/ONE_DAY) + 1);
         amt = (f.amount || 0) / lifeDays;
       }
