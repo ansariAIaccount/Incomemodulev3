@@ -61,6 +61,97 @@ function isHoliday(date, calendarId){
   return cal.has(toISO(date));
 }
 
+/* ---------- Business day + payment date helpers (v3) ----------
+   Standard loan-market conventions:
+     - Following            : if date is non-bizday, roll FORWARD to next bizday
+     - ModifiedFollowing    : Following, but if it crosses month-end, roll
+                              BACKWARD to the prior bizday instead (default
+                              for syndicated loans + most interest payments)
+     - Preceding            : if date is non-bizday, roll BACKWARD
+     - NoAdjustment         : keep the scheduled date even if non-bizday
+   Weekend = Saturday (6) or Sunday (0). Holiday = in HOLIDAY_CALENDARS[cal].
+-------------------------------------------------------------- */
+function isWeekend(d){ const w = d.getDay(); return w === 0 || w === 6; }
+function isBusinessDay(d, calendarId){
+  return !isWeekend(d) && !isHoliday(d, calendarId);
+}
+function rollDate(date, calendarId, convention){
+  // Returns { paymentDate (Date), originalScheduledDate (Date), rolled (bool),
+  //          rollReason ('weekend'|'holiday'|null), conventionUsed }.
+  const conv = convention || 'ModifiedFollowing';
+  const orig = new Date(date);
+  if(conv === 'NoAdjustment' || isBusinessDay(orig, calendarId)){
+    return { paymentDate: orig, originalScheduledDate: orig, rolled: false, rollReason: null, conventionUsed: conv };
+  }
+  const reason = isWeekend(orig) ? 'weekend' : 'holiday';
+  if(conv === 'Preceding'){
+    let d = new Date(orig);
+    while(!isBusinessDay(d, calendarId)) d = addDays(d, -1);
+    return { paymentDate: d, originalScheduledDate: orig, rolled: true, rollReason: reason, conventionUsed: conv };
+  }
+  // Following / ModifiedFollowing share forward-roll first
+  let d = new Date(orig);
+  while(!isBusinessDay(d, calendarId)) d = addDays(d, 1);
+  if(conv === 'ModifiedFollowing' && d.getMonth() !== orig.getMonth()){
+    // Forward-roll crossed month-end → roll backward instead
+    d = new Date(orig);
+    while(!isBusinessDay(d, calendarId)) d = addDays(d, -1);
+  }
+  return { paymentDate: d, originalScheduledDate: orig, rolled: true, rollReason: reason, conventionUsed: conv };
+}
+/* generatePaymentSchedule — list of payment events from anchor to endDate
+   at the given frequency, each rolled per convention.
+   anchor / endDate are ISO strings or Dates. frequency is one of
+   'monthly' | 'quarterly' | 'semi' | 'semiAnnual' | 'annual'.
+   Returns: [{ paymentDate ISO, originalScheduledDate ISO, rolled, rollReason, conventionUsed, seq }]
+-------------------------------------------------------------- */
+function generatePaymentSchedule(anchor, frequency, endDate, calendarId, convention){
+  const out = [];
+  const anchorD = (anchor instanceof Date) ? anchor : parseISO(anchor);
+  const endD    = (endDate instanceof Date) ? endDate : parseISO(endDate);
+  if(!anchorD || !endD) return out;
+  const stepMonths = ({ monthly:1, quarterly:3, semi:6, semiAnnual:6, annual:12 })[frequency] || 0;
+  if(!stepMonths) return out;
+  const conv = convention || 'ModifiedFollowing';
+  let seq = 0;
+  for(let i = 0; ; i++){
+    // Schedule date = anchor day-of-month, i months later. Preserve the
+    // anchor's day-of-month: addMonths uses JS Date semantics which roll
+    // overflow forward (e.g. 1/31 + 1mo → 3/3). For finance we want EOM-clamped:
+    // 1/31 + 1mo → 2/28 (or 2/29 in a leap year).
+    const target = addMonths(anchorD, i * stepMonths);
+    const wantedDay = anchorD.getDate();
+    if(target.getDate() !== wantedDay){
+      // JS overflowed — clamp to last day of intended month
+      const intendedMonth = (anchorD.getMonth() + i * stepMonths) % 12;
+      const intendedYear  = anchorD.getFullYear() + Math.floor((anchorD.getMonth() + i * stepMonths) / 12);
+      target.setFullYear(intendedYear, intendedMonth + 1, 0);  // 0th day = last of prev month
+      target.setHours(12,0,0,0);
+    }
+    if(target > endD) break;
+    const rolled = rollDate(target, calendarId, conv);
+    seq++;
+    out.push({
+      seq,
+      paymentDate:           toISO(rolled.paymentDate),
+      originalScheduledDate: toISO(rolled.originalScheduledDate),
+      rolled:                rolled.rolled,
+      rollReason:            rolled.rollReason,
+      conventionUsed:        rolled.conventionUsed,
+      dayOfWeek:             ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][rolled.paymentDate.getDay()]
+    });
+    if(seq > 600) break;  // safety — 50 years of monthly
+  }
+  return out;
+}
+// Expose for the V3 UI (fee card preview etc.).
+if(typeof window !== 'undefined'){
+  window.rollDate = rollDate;
+  window.generatePaymentSchedule = generatePaymentSchedule;
+  window.isBusinessDay = isBusinessDay;
+  window.isHoliday_engine = isHoliday;
+}
+
 /* ---------- Capitalization gate ---------- */
 function isCapitalizationDay(date, anchor, freq){
   // Capitalization happens on the day-of-month of the anchor at the given frequency.

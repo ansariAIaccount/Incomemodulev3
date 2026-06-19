@@ -11305,7 +11305,30 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const selVal = sel ? (sel.value || '') : '';
     const builderHasDeal = !!(typeof window !== 'undefined' && window.B && window.B._presetKey);
     const userPicked = (selVal.indexOf('v2:') === 0 && selVal.length > 3) || builderHasDeal;
-    const inst = userPicked && (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    // Try currentInstrument() first (M.instrumentId path). If it returns null
+    // but userPicked is true (sel.value or B._presetKey indicates a deal is
+    // loaded), fall back to scanning INSTRUMENTS by every signal we have.
+    // This recovers the dashboard when an intervening call (team-filter change,
+    // fee card re-render, etc.) cleared M.instrumentId without unloading B.
+    let inst = (userPicked && typeof currentInstrument === 'function') ? currentInstrument() : null;
+    if(userPicked && !inst && typeof INSTRUMENTS !== 'undefined' && Array.isArray(INSTRUMENTS)){
+      const candidates = [];
+      // Strip the 'v2:' prefix from sel.value
+      if(selVal.indexOf('v2:') === 0 && selVal.length > 3) candidates.push(selVal.slice(3));
+      if(window.B && window.B._presetKey) candidates.push(window.B._presetKey);
+      if(window.B && window.B.deal && window.B.deal.dealId) candidates.push(window.B.deal.dealId);
+      // Strip a 'db-' prefix too (DB-saved deals carry it on the key but not on inst.id)
+      candidates.forEach(c => { if(c && c.indexOf('db-') === 0) candidates.push(c.slice(3)); });
+      for(const c of candidates){
+        const found = INSTRUMENTS.find(i => i && (i.id === c || i._presetKey === c));
+        if(found){ inst = found; if(typeof M !== 'undefined') M.instrumentId = found.id; console.log('[V3 dashboard] recovered inst via fallback:', c, '→', found.id); break; }
+      }
+      if(!inst){
+        console.warn('[V3 dashboard] userPicked but no inst found · candidates=', candidates,
+                     '· INSTRUMENTS.ids=', INSTRUMENTS.map(i => i && i.id).filter(Boolean).slice(0,5),
+                     '· M.instrumentId=', (typeof M !== 'undefined' ? M.instrumentId : 'M undefined'));
+      }
+    }
     if(!inst){
       out.innerHTML =
         '<div style="padding:60px 20px; text-align:center; color:#6A7591;">'
@@ -13153,6 +13176,48 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
                      class="w-full border ${(!f.paymentDate)?'border-red-300 bg-red-50':'border-gray-300 bg-white'} rounded px-1 py-0.5 text-[11px]"/>
               ${ !f.paymentDate ? '<div style="font-size:9.5px; color:#DC2626; margin-top:2px;">Required — engine drops fees with no date</div>' : '' }
             </div>`
+          }
+          ${ /* V3 — Payment schedule preview for recurring fees. Uses the engine's
+              generatePaymentSchedule() to show the next 6 payment dates with
+              holiday-roll info (Modified Following convention against the deal's
+              holiday_calendar). Helps the user spot weekend / holiday rolls before
+              committing to Save. Only renders for non-oneOff with a payment date. */
+            (() => {
+              if(f.frequency === 'oneOff' || !f.paymentDate) return '';
+              if(typeof window.generatePaymentSchedule !== 'function') return '';
+              const cal = (B.facility && B.facility.holiday) || 'none';
+              const matISO = B.deal.maturity || '2099-12-31';
+              let sched;
+              try { sched = window.generatePaymentSchedule(f.paymentDate, f.frequency, matISO, cal, 'ModifiedFollowing'); }
+              catch(_){ return ''; }
+              if(!sched || !sched.length) return '';
+              const preview = sched.slice(0, 6);
+              const moreCount = Math.max(0, sched.length - preview.length);
+              const rows = preview.map(p => {
+                const rolledChip = p.rolled
+                  ? `<span style="background:#FEF3C7; color:#92400E; padding:0 5px; border-radius:3px; font-size:9px; margin-left:4px;">rolled · ${p.rollReason}</span>`
+                  : '';
+                const datePart = p.rolled
+                  ? `<s style="color:#9CA3AF;">${p.originalScheduledDate}</s> → <b>${p.paymentDate}</b>`
+                  : `<b>${p.paymentDate}</b>`;
+                return `<div style="display:flex; align-items:center; gap:4px; padding:1px 0;">
+                  <span style="color:#9CA3AF; font-size:9px; min-width:18px;">#${p.seq}</span>
+                  <span style="font-family:ui-monospace,monospace;">${datePart}</span>
+                  <span style="color:#6B7280; font-size:9px;">${p.dayOfWeek}</span>
+                  ${rolledChip}
+                </div>`;
+              }).join('');
+              return `<div class="col-span-2" style="background:#F8FAFD; border:1px solid #E1E5EE; border-radius:4px; padding:6px 8px; font-size:10px; color:#4B5563;">
+                <div style="font-weight:700; color:#21295C; font-size:10px; margin-bottom:3px;">
+                  Payment Schedule Preview
+                  <span style="font-weight:400; color:#6B7280; font-size:9px; margin-left:6px;">
+                    Modified Following · calendar=${cal}
+                  </span>
+                </div>
+                ${rows}
+                ${ moreCount ? `<div style="color:#6B7280; font-size:9px; margin-top:2px;">+ ${moreCount} more through ${matISO}</div>` : '' }
+              </div>`;
+            })()
           }
           ${ /* ─── Framework-aware fee-treatment dropdown ───
               Pulls the three options (EIR / over-time / point-in-time) from the
