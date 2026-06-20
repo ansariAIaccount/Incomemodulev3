@@ -8654,23 +8654,13 @@ window.startNewBlankDeal = function(){
   if(typeof window.V2_CTX !== 'undefined' && window.V2_CTX){
     window.V2_CTX.activePresetKey = null;
   }
-  // Clear the hidden compatibility dropdown — drop the option corresponding
-  // to the previously-loaded deal then clear sel.value so refreshActiveDealChip
-  // resolves to "No deal loaded".
+  // Clear sel-instrument selection back to the empty placeholder option.
+  // IMPORTANT: do NOT prune the option list — the dropdown is owned by
+  // populateV2Dropdown() (sourced from PRESETS, not INSTRUMENTS). Pruning
+  // by INSTRUMENTS membership would empty the list and break the next
+  // non-DB preset load (sel.value = 'v2:...' would silently no-op).
   const sel = document.getElementById('sel-instrument');
-  if(sel){
-    // Remove the option for the previously-active deal so it doesn't linger
-    // and accidentally rehydrate via populateV2Dropdown's reconciliation pass.
-    Array.from(sel.options).slice().forEach(opt => {
-      if(!opt.value) return;
-      // Drop options that point at an id no longer in INSTRUMENTS
-      const id = opt.value.startsWith('v2:') ? opt.value.slice(3) : opt.value;
-      const stillThere = (typeof INSTRUMENTS !== 'undefined' && Array.isArray(INSTRUMENTS))
-        ? INSTRUMENTS.some(i => i && i.id === id) : false;
-      if(!stillThere) opt.remove();
-    });
-    sel.value = '';
-  }
+  if(sel) sel.value = '';
   // 5. UI re-render — all four are exposed on window from inside the Builder IIFE
   if(typeof window.populateDealForm === 'function'){ try { window.populateDealForm();  } catch(err){ console.error('populateDealForm failed:', err); } }
   if(typeof window.renderTranches    === 'function'){ try { window.renderTranches();    } catch(err){ console.error('renderTranches failed:', err); } }
