@@ -8608,7 +8608,100 @@ window.refreshActiveDealChip = refreshActiveDealChip;
 // attributes wired in the HTML can call them safely. They tolerate being
 // called before openActiveDealModal / openISINModal are defined (early click
 // after page load) by re-queueing.
+// startNewBlankDeal() — full reset back to an empty Builder. Called by the
+// "Manually Build New Loan" header button so the previously loaded deal
+// does NOT bleed through into the form, the dropdown, the chip, or the
+// downstream Stage 1-5 pipeline.
+//
+// Resets, in order:
+//   1. The Builder state object B (deal / facility / tranches / fees / _presetKey)
+//   2. INSTRUMENTS array entry for the previously active deal (so the hidden
+//      sel-instrument dropdown doesn't keep it as an option)
+//   3. M.instrumentId + downstream pipeline state via resetPipeline()
+//   4. V2_CTX.activePresetKey (the secondary key source)
+//   5. UI: re-render Deal Setup form, tranches, fees, chip, tabsub label
+window.startNewBlankDeal = function(){
+  // 1. Builder state — reuse the same default shape as resetBuilder()
+  if(typeof window.B !== 'undefined' && window.B){
+    const prevKey = window.B._presetKey || null;
+    window.B.deal = { name:'', dealId:'', counterparty:'', le:'', currency:'USD',
+                      framework:'IFRS', settle:'', maturity:'' };
+    window.B.facility = { commitment: 0, availEnd:'', dayBasis:'ACT/360',
+                          holiday:'none', repayment:'AtMaturity', type:'termLoan' };
+    window.B.tranches = [];
+    window.B.fees = [];
+    window.B._presetKey = null;
+    if(window.B.aasbExtras) delete window.B.aasbExtras;
+    window.B._participationPct = 100;
+    // 2. Drop the previously active instrument from INSTRUMENTS
+    if(typeof INSTRUMENTS !== 'undefined' && Array.isArray(INSTRUMENTS) && prevKey){
+      for(let i = INSTRUMENTS.length - 1; i >= 0; i--){
+        const inst = INSTRUMENTS[i];
+        if(inst && (inst.id === prevKey || inst._presetKey === prevKey)){
+          INSTRUMENTS.splice(i, 1);
+        }
+      }
+    }
+  }
+  // 3. Pipeline (Stage 1-5)
+  if(typeof M !== 'undefined' && M){
+    M.instrumentId = null;
+  }
+  if(typeof resetPipeline === 'function'){
+    try { resetPipeline(); } catch(_){}
+  }
+  // 4. V2_CTX
+  if(typeof window.V2_CTX !== 'undefined' && window.V2_CTX){
+    window.V2_CTX.activePresetKey = null;
+  }
+  // Clear the hidden compatibility dropdown — drop the option corresponding
+  // to the previously-loaded deal then clear sel.value so refreshActiveDealChip
+  // resolves to "No deal loaded".
+  const sel = document.getElementById('sel-instrument');
+  if(sel){
+    // Remove the option for the previously-active deal so it doesn't linger
+    // and accidentally rehydrate via populateV2Dropdown's reconciliation pass.
+    Array.from(sel.options).slice().forEach(opt => {
+      if(!opt.value) return;
+      // Drop options that point at an id no longer in INSTRUMENTS
+      const id = opt.value.startsWith('v2:') ? opt.value.slice(3) : opt.value;
+      const stillThere = (typeof INSTRUMENTS !== 'undefined' && Array.isArray(INSTRUMENTS))
+        ? INSTRUMENTS.some(i => i && i.id === id) : false;
+      if(!stillThere) opt.remove();
+    });
+    sel.value = '';
+  }
+  // 5. UI re-render — all four are exposed on window from inside the Builder IIFE
+  if(typeof window.populateDealForm === 'function'){ try { window.populateDealForm();  } catch(err){ console.error('populateDealForm failed:', err); } }
+  if(typeof window.renderTranches    === 'function'){ try { window.renderTranches();    } catch(err){ console.error('renderTranches failed:', err); } }
+  if(typeof window.renderFees        === 'function'){ try { window.renderFees();        } catch(err){ console.error('renderFees failed:', err); } }
+  if(typeof window.recomputeStage1   === 'function'){ try { window.recomputeStage1();   } catch(err){ console.error('recomputeStage1 failed:', err); } }
+  if(typeof window.refreshActiveDealChip === 'function'){ try { window.refreshActiveDealChip(); } catch(_){} }
+  // tabsub label under "0 Loan Builder" — back to "No deal built"
+  const sub = document.getElementById('tabsub-builder');
+  if(sub) sub.textContent = 'No deal built';
+  // Stage-1 status chip → reset
+  const st1 = document.getElementById('tabsub-stage-1');
+  if(st1) st1.textContent = 'Awaiting builder';
+};
+
 window.handleHeaderManualClick = function(){
+  // If there's a deal loaded, confirm before nuking everything — the user
+  // may have unsaved edits in the Builder form. Skip the confirm when the
+  // Builder is already empty (B._presetKey is null AND B.deal.name is blank).
+  const hasDeal = (typeof window.B !== 'undefined' && window.B &&
+    (window.B._presetKey ||
+     (window.B.deal && (window.B.deal.name || window.B.deal.dealId)) ||
+     (window.B.tranches && window.B.tranches.length) ||
+     (window.B.fees && window.B.fees.length)));
+  if(hasDeal){
+    const ok = confirm('Start a new blank loan? This will clear the currently loaded deal from the Builder and reset Stages 1-5.\n\nDB-saved deals are NOT affected — you can reload them from "Load Active Deal".');
+    if(!ok) return;
+  }
+  // Full reset
+  if(typeof window.startNewBlankDeal === 'function'){
+    try { window.startNewBlankDeal(); } catch(err){ console.error('startNewBlankDeal failed:', err); }
+  }
   // Switch to Stage 0 builder tab
   document.querySelector('.tab-btn[data-tab="builder"]')?.click();
   // Scroll to the TOP of the page so the builder section sits right under the
@@ -8620,7 +8713,7 @@ window.handleHeaderManualClick = function(){
     if(firstSection) firstSection.setAttribute('open', '');
     // Scroll the page to top — the sticky header stays pinned, content lines up below it
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    if(typeof toast === 'function') toast('Build a loan manually — start with Deal Setup');
+    if(typeof toast === 'function') toast(hasDeal ? 'Cleared — start fresh with Deal Setup' : 'Build a loan manually — start with Deal Setup');
   }, 80);
 };
 window.handleHeaderIsinClick = function(){
