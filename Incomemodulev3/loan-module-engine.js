@@ -941,6 +941,10 @@ function buildSchedule(instr){
     }
   }
   const eirDailyAccretion = deferredEIRPool > 0 ? (deferredEIRPool / totalLifeDays) : 0;
+  // V3 — Running total so the daily accretion step can cap itself at the pool
+  // (prevents float-rounding overshoot) and crystallise the residual when the
+  // loan is derecognised (balance → 0 via paydown / sale / write-off).
+  let cumulativeEIRAccreted = 0;
 
   // ---- SONIA / margin ratchet helpers ---------------------------------
   // instr.marginSchedule: [{ from: ISO, to: ISO|null, marginBps: number }]
@@ -1530,10 +1534,29 @@ function buildSchedule(instr){
     // ----- EIR accretion of deferred IFRS 9 fees -----
     // Deferred income (from arrangement / OID-style fees) accretes back into
     // interest income via increasing the carrying value daily.
+    // V3 — Two-part fix to prevent carrying value from going negative:
+    //   1. While balance > 0: accrete the daily slice as normal, but cap
+    //      cumulative accretion at deferredEIRPool (prevents float rounding
+    //      from over-shooting the pool).
+    //   2. When balance hits zero on this row (paydown / loan sale / write-off
+    //      / final maturity payment processed earlier in the event loop),
+    //      CRYSTALLISE the remaining residual pool in one shot. This is the
+    //      correct accounting treatment: the loan is derecognised so any
+    //      unamortised deferred fee must be recognised at that moment.
     let dailyEIRAccretion = 0;
     if(eirDailyAccretion > 0){
-      dailyEIRAccretion = eirDailyAccretion;
-      carryingValue += dailyEIRAccretion;
+      const remainingPool = Math.max(0, deferredEIRPool - cumulativeEIRAccreted);
+      if(balance > 0.005){
+        // Standard daily accretion — but never exceed the residual pool
+        dailyEIRAccretion = Math.min(eirDailyAccretion, remainingPool);
+      } else if(remainingPool > 0.005){
+        // Balance just hit zero — crystallise the entire residual pool today
+        dailyEIRAccretion = remainingPool;
+      }
+      if(dailyEIRAccretion > 0){
+        carryingValue += dailyEIRAccretion;
+        cumulativeEIRAccreted += dailyEIRAccretion;
+      }
     }
 
     // ----- Capitalization (PIK) -----

@@ -12042,10 +12042,14 @@ document.addEventListener('DOMContentLoaded', ()=>{
       ...quarterly.map(q => Math.max(q.endBalance, q.endCarrying))
     ) || 1;
     const xStep = innerW / Math.max(1, quarterly.length - 1);
-    const yScale = v => padT + innerH - (v / maxVal) * innerH;
+    // V3 — Clamp to ≥ 0 so float-rounding (e.g. -$0.50 at maturity from EIR
+    // pool accretion not summing to exactly the pool) doesn't paint the line
+    // below the x-axis. Engine has its own crystallisation safeguard; this is
+    // a belt-and-braces visual guard.
+    const yScale = v => padT + innerH - (Math.max(0, v) / maxVal) * innerH;
 
-    const balancePts  = quarterly.map((q, i) => ({ x: padL + i * xStep, y: yScale(q.endBalance) }));
-    const carryingPts = quarterly.map((q, i) => ({ x: padL + i * xStep, y: yScale(q.endCarrying) }));
+    const balancePts  = quarterly.map((q, i) => ({ x: padL + i * xStep, y: yScale(Math.max(0, q.endBalance)) }));
+    const carryingPts = quarterly.map((q, i) => ({ x: padL + i * xStep, y: yScale(Math.max(0, q.endCarrying)) }));
 
     // Y-axis ticks
     const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map(f => ({ val: maxVal * f, y: yScale(maxVal * f) }));
@@ -14195,33 +14199,60 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       amortization: { method:'none' },
       type: 'simpleDaily',
       principalRepayment: B.facility.repayment,
-      principalSchedule: [
+      principalSchedule: (function(){
         // Initial draw at settlement — full face from all tranches combined
-        { date: B.deal.settle, type:'draw', amount: totalFace, drawdownId: id+'_D1', status:'actual' }
-      ].concat(
+        const events = [
+          { date: B.deal.settle, type:'draw', amount: totalFace, drawdownId: id+'_D1', status:'actual' }
+        ];
         // Subsequent drawdowns per tranche
-        B.tranches.flatMap(t => (t.drawdowns || []).map((d, di) => ({
-          date: d.date, type:'draw', amount: d.amount, drawdownId: t.id+'_D'+(di+2), status:'actual',
-          reason: d.reason || ''
-        })))
-      ).concat(
+        B.tranches.forEach(t => (t.drawdowns || []).forEach((d, di) => {
+          events.push({
+            date: d.date, type:'draw', amount: d.amount,
+            drawdownId: t.id+'_D'+(di+2), status:'actual',
+            reason: d.reason || ''
+          });
+        }));
         // Paydowns (scheduled, voluntary, mandatory). Tag with kind so the
         // Dashboard timeline can decorate them appropriately.
-        B.tranches.flatMap(t => (t.repayments || []).map((r, ri) => {
+        B.tranches.forEach(t => (t.repayments || []).forEach((r, ri) => {
           const kind = (r.kind || 'scheduled');
           const type = kind === 'voluntary'       ? 'prepayment'
                      : kind === 'mandatory'       ? 'mandatoryPrepayment'
                      : kind === 'changeOfControl' ? 'mandatoryPrepayment'
                      : kind === 'assetSale'       ? 'mandatoryPrepayment'
                      :                              'paydown';
-          return {
+          events.push({
             date: r.date, type, amount: r.amount,
             drawdownId: t.id+'_R'+(ri+1), status:'actual',
             kind, trigger: r.trigger || (type === 'mandatoryPrepayment' ? kind : ''),
             reason: r.reason || ''
-          };
-        }))
-      ),
+          });
+        }));
+        // V3 — Auto-add a maturity payoff for bullet loans (repayment ===
+        // 'AtMaturity') so:
+        //   1. Stage 2 emits the principal-repayment JE (DR Cash / CR Loan Rec)
+        //   2. Dashboard Principal Ladder shows the maturity quarter as a green bar
+        //   3. Carrying-value chart steps to zero on maturity rather than
+        //      cliff-disappearing at the right edge
+        // Skip if a paydown is already scheduled on the maturity date for any
+        // tranche (covers the case where the user manually defined one).
+        if(B.facility && B.facility.repayment === 'AtMaturity' && B.deal.maturity){
+          const totalScheduledPaydowns = events
+            .filter(e => e.type === 'paydown' || e.type === 'prepayment' || e.type === 'mandatoryPrepayment')
+            .reduce((s, e) => s + (+e.amount || 0), 0);
+          const outstandingAtMaturity = totalFace - totalScheduledPaydowns;
+          const matAlreadyHasPaydown = events.some(e =>
+            e.date === B.deal.maturity && (e.type === 'paydown' || e.type === 'prepayment' || e.type === 'mandatoryPrepayment'));
+          if(outstandingAtMaturity > 0.005 && !matAlreadyHasPaydown){
+            events.push({
+              date: B.deal.maturity, type:'paydown', amount: Math.round(outstandingAtMaturity*100)/100,
+              drawdownId: id+'_MAT', status:'actual',
+              kind: 'maturity', reason: 'Bullet maturity payoff (auto)'
+            });
+          }
+        }
+        return events;
+      })(),
       oidTreatment: 'none',
       fees: B.fees.map(f => ({
         id: f.id, kind: f.kind, label: f.label,
