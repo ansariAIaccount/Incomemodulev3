@@ -8541,8 +8541,17 @@ function loadActiveDealByKey(key){
       // sel.value. If we refresh the chip first, sel.value is empty (the
       // tentative set above silently failed because the option didn't exist
       // yet) and the chip wrongly reads "No deal loaded".
-      if(typeof registerBuilderInstrument === 'function'){
-        try { registerBuilderInstrument(); } catch(e){ console.warn('registerBuilderInstrument failed:', e); }
+      //
+      // BUG FIX: registerBuilderInstrument is defined INSIDE the Builder IIFE,
+      // so the unprefixed identifier evaluates to `undefined` in this scope
+      // (typeof returns 'undefined', the if branch is skipped, INSTRUMENTS
+      // never gets the new entry → Dashboard says "No active deal"). Always
+      // use the window.* alias which was just exposed by the IIFE.
+      if(typeof window.registerBuilderInstrument === 'function'){
+        try { window.registerBuilderInstrument(); }
+        catch(e){ console.warn('[V3] registerBuilderInstrument threw — Dashboard self-heal will retry:', e); }
+      } else {
+        console.warn('[V3] window.registerBuilderInstrument not exposed yet — Dashboard will self-heal on first render');
       }
       if(typeof refreshActiveDealChip === 'function') refreshActiveDealChip();
       // Auto-run accounting in the background (mirrors legacy preset switch).
@@ -11402,14 +11411,38 @@ document.addEventListener('DOMContentLoaded', ()=>{
       if(window.B && window.B.deal && window.B.deal.dealId) candidates.push(window.B.deal.dealId);
       // Strip a 'db-' prefix too (DB-saved deals carry it on the key but not on inst.id)
       candidates.forEach(c => { if(c && c.indexOf('db-') === 0) candidates.push(c.slice(3)); });
+      // Strip a 'db-' from B._presetKey to also try the bare deal_code
       for(const c of candidates){
         const found = INSTRUMENTS.find(i => i && (i.id === c || i._presetKey === c));
         if(found){ inst = found; if(typeof M !== 'undefined') M.instrumentId = found.id; console.log('[V3 dashboard] recovered inst via fallback:', c, '→', found.id); break; }
       }
+      // V3 — Last-resort self-heal: if B is populated with a deal but INSTRUMENTS
+      // doesn't have a matching entry (registerBuilderInstrument never ran, or
+      // ran and threw silently), synthesise the instrument NOW from B via
+      // builderToInstrument() and push it. This guarantees the Dashboard works
+      // as long as the Builder has the deal data — even if every intermediate
+      // wiring step failed.
+      if(!inst && window.B && window.B._presetKey && typeof window.registerBuilderInstrument === 'function'){
+        console.warn('[V3 dashboard] no inst in INSTRUMENTS — attempting on-demand registerBuilderInstrument() recovery');
+        try {
+          const recovered = window.registerBuilderInstrument();
+          if(recovered && recovered.id){
+            inst = recovered;
+            if(typeof M !== 'undefined') M.instrumentId = recovered.id;
+            console.log('[V3 dashboard] self-heal succeeded — inst.id=', recovered.id);
+          } else {
+            console.error('[V3 dashboard] registerBuilderInstrument returned null — Builder state is incomplete. B.deal=', window.B.deal, '· B.tranches.length=', (window.B.tranches||[]).length);
+          }
+        } catch(err){
+          console.error('[V3 dashboard] registerBuilderInstrument THREW — this is the real bug. Error:', err, '· B.tranches[0]=', (window.B.tranches||[])[0]);
+        }
+      }
       if(!inst){
-        console.warn('[V3 dashboard] userPicked but no inst found · candidates=', candidates,
+        console.warn('[V3 dashboard] FINAL: no inst found · candidates=', candidates,
                      '· INSTRUMENTS.ids=', INSTRUMENTS.map(i => i && i.id).filter(Boolean).slice(0,5),
-                     '· M.instrumentId=', (typeof M !== 'undefined' ? M.instrumentId : 'M undefined'));
+                     '· M.instrumentId=', (typeof M !== 'undefined' ? M.instrumentId : 'M undefined'),
+                     '· B._presetKey=', (window.B && window.B._presetKey),
+                     '· B.deal.dealId=', (window.B && window.B.deal && window.B.deal.dealId));
       }
     }
     if(!inst){
@@ -12118,9 +12151,46 @@ document.addEventListener('DOMContentLoaded', ()=>{
       (q.interest + q.fees + q.pik + q.defaultInt + (q.eirFees || 0)) > 0
     );
     if(!quarterly.length) return '';
-    // Take at most 16 quarters (4 years) — pick evenly spaced
-    const stride = Math.max(1, Math.ceil(quarterly.length / 16));
-    const buckets = quarterly.filter((_, i) => i % stride === 0).slice(0, 16);
+    // V3 — When the deal has > 16 quarters, AGGREGATE adjacent quarters into
+    // a single bar rather than dropping the dropped ones. The previous logic
+    // (`filter((_, i) => i % stride === 0)`) silently lost any one-off fee,
+    // prepayment fee, or default-interest spike sitting in a dropped quarter
+    // — e.g. a 34-quarter deal would drop 2/3 of buckets, hiding the
+    // arrangement fee bar entirely.
+    let buckets;
+    if(quarterly.length <= 16){
+      buckets = quarterly;
+    } else {
+      const stride = Math.ceil(quarterly.length / 16);
+      buckets = [];
+      for(let i = 0; i < quarterly.length; i += stride){
+        const chunk = quarterly.slice(i, i + stride);
+        const head = chunk[0]; const tail = chunk[chunk.length - 1];
+        // Build a merged bucket. Sum income; carry first start / last end for labels.
+        const merged = {
+          key:        chunk.length > 1 ? (head.key + '…' + tail.key) : head.key,
+          year:       head.year, quarter: head.quarter,
+          startDate:  head.startDate, endDate: tail.endDate || tail.startDate,
+          // Sum the income streams across the chunk
+          interest:   chunk.reduce((s, q) => s + (q.interest    || 0), 0),
+          pik:        chunk.reduce((s, q) => s + (q.pik         || 0), 0),
+          defaultInt: chunk.reduce((s, q) => s + (q.defaultInt  || 0), 0),
+          fees:       chunk.reduce((s, q) => s + (q.fees        || 0), 0),
+          eirFees:    chunk.reduce((s, q) => s + (q.eirFees     || 0), 0),
+          // End-of-period balance/carrying = the tail bucket's
+          endBalance:  tail.endBalance,
+          endCarrying: tail.endCarrying,
+          // Sum the principal-side flows too
+          draws:       chunk.reduce((s, q) => s + (q.draws      || 0), 0),
+          paydowns:    chunk.reduce((s, q) => s + (q.paydowns   || 0), 0),
+          prepays:     chunk.reduce((s, q) => s + (q.prepays    || 0), 0),
+          writeOffs:   chunk.reduce((s, q) => s + (q.writeOffs  || 0), 0),
+          sales:       chunk.reduce((s, q) => s + (q.sales      || 0), 0),
+          _chunkSize:  chunk.length
+        };
+        buckets.push(merged);
+      }
+    }
     const W = 640, H = 220, padL = 60, padR = 10, padT = 16, padB = 40;
     const innerW = W - padL - padR, innerH = H - padT - padB;
     const maxTotal = Math.max(...buckets.map(b => b.interest + b.fees + b.pik + b.defaultInt + (b.eirFees || 0))) || 1;
@@ -15075,6 +15145,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   window.populateDealForm = populateDealForm;
   window.renderTranches   = renderTranches;
   window.renderFees       = renderFees;
+  // V3 — expose registerBuilderInstrument + builderToInstrument so the Dashboard
+  // self-heal path (renderDashboard fallback) can rebuild INSTRUMENTS from B
+  // on demand. Without this, an early registerBuilderInstrument failure inside
+  // loadActiveDealByKey leaves the Dashboard permanently broken until the user
+  // clicks the Builder tab again.
+  window.registerBuilderInstrument = registerBuilderInstrument;
+  window.builderToInstrument       = builderToInstrument;
   // V3 — generic "load a preset BY OBJECT" path that bypasses the inner
   // `const PRESETS` lookup. Accepts the synthetic PRESET-like object directly
   // (with .build() / .key / .participationPct) and applies its build to B.
