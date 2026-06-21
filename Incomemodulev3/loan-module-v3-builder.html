@@ -571,9 +571,6 @@
         </div>
       </div>
       <div style="display:flex; flex-direction:column; gap:8px; position:relative; z-index:1;">
-        <button id="btn-builder-preset" style="background:rgba(255,255,255,0.18); backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,0.25); color:white; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer; transition:all 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.28)'" onmouseout="this.style.background='rgba(255,255,255,0.18)'">
-          <span class="material-icons-outlined" style="font-size:16px;">auto_awesome</span>Load Preset
-        </button>
         <button id="btn-builder-reset" style="background:transparent; border:1px solid rgba(255,255,255,0.25); color:white; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer; transition:all 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
           <span class="material-icons-outlined" style="font-size:16px;">restart_alt</span>Reset
         </button>
@@ -2072,43 +2069,6 @@
     <summary class="text-[12px] mb-2">View Builder feedback message payload (JSON)</summary>
     <pre class="code" id="feedback-payload">—</pre>
   </details>
-</section>
-
-<!-- ===== Footer Architecture diagram ===== -->
-<section class="mt-8 bg-white border border-gray-200 rounded-xl p-5">
-  <h3 class="text-sm font-bold mb-3 flex items-center gap-2"><span class="material-icons-outlined text-[18px]" style="color:var(--brand-600)">architecture</span>Architecture Reference</h3>
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-[12px]">
-    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
-      <div class="font-bold text-blue-900 mb-2">Loan Builder · System of Record</div>
-      <ul class="space-y-1 text-gray-700">
-        <li>• Deal capture &amp; versioning</li>
-        <li>• Cashflows, fees, ratchets</li>
-        <li>• Workflows &amp; approvals</li>
-        <li>• Reporting &amp; dashboards</li>
-      </ul>
-    </div>
-    <div class="bg-purple-50 border border-purple-200 rounded-lg p-3">
-      <div class="font-bold text-purple-900 mb-2">FIS PCS / Investran · Accounting Sub-Ledger</div>
-      <ul class="space-y-1 text-gray-700">
-        <li>• IFRS-aligned classification</li>
-        <li>• Initial recognition &amp; EIR</li>
-        <li>• Fair value &amp; IFRS</li>
-        <li>• Journal generation (DIU)</li>
-      </ul>
-    </div>
-    <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-      <div class="font-bold text-emerald-900 mb-2">Cash Movements · General Ledger</div>
-      <ul class="space-y-1 text-gray-700">
-        <li>• DIU batch posting</li>
-        <li>• Cash movements (actuals)</li>
-        <li>• Reconciliation source</li>
-        <li>• Trial balance / period close</li>
-      </ul>
-    </div>
-  </div>
-  <div class="text-[11px] text-gray-500 mt-3 leading-relaxed">
-    PwC's risk methodology layer (IFRS 9 ECL, PD/LGD/EAD, RWA, stress testing) sits alongside this pipeline — risk inputs come from the Loan Builder deal definition; outputs flow back into the Builder for versioning and into PCS for ECL provisioning JEs (<code>470000 / 145000</code>).
-  </div>
 </section>
 
 <!-- ===== DASHBOARD: Loan-level overview ===== -->
@@ -5304,19 +5264,9 @@ function postJEsToInvestran(){
   // proxy for real. Until that wiring is finalized, this is a DEMO simulator.
   let proxyUrl = null;
   try { proxyUrl = (localStorage.getItem('pcs_v3_diu_proxy_url') || '').trim(); } catch(_){}
-  const isDemoMode = true;   // flip to !proxyUrl when real-call wiring lands
   const hostLabel = (proxyUrl || 'https://accounting.investran.fis.com/api/v3');
   // Render the step skeleton — all pending initially.
   body.innerHTML = `
-    ` + (isDemoMode ? `
-    <div style="background:linear-gradient(135deg,#FEF3C7 0%,#FDE68A 100%); border:1.5px solid #F59E0B; color:#78350F; padding:9px 12px; border-radius:8px; margin-bottom:10px; font-size:11.5px; display:flex; gap:8px; align-items:flex-start;">
-      <span class="material-icons-outlined" style="font-size:18px; flex-shrink:0;">warning</span>
-      <div style="line-height:1.4;">
-        <b>DEMO MODE</b> — this is a simulated DIU submission for UI walkthroughs. <b>No data has been sent to Investran.</b> All step checkmarks, the Job ID, the Batch ID, and the &quot;COMMITTED&quot; status are generated client-side.
-        <div style="margin-top:4px; font-size:11px;">For real posting, run the proxy in <code>server/</code> (see <code>server/README.md</code>), set <b>DIU Proxy URL</b> in the ⚙ settings, and re-open this modal.</div>
-      </div>
-    </div>
-    ` : '') + `
     <div style="background:#0d2645; color:white; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-family:ui-monospace, monospace; font-size:11px;">
       <div style="opacity:0.7">Endpoint host:</div>
       <div style="font-weight:700; letter-spacing:0.2px;">${hostLabel}</div>
@@ -5970,7 +5920,7 @@ function handleBuilderSaveDBClick(){
       title: 'No Builder state to save',
       subtitle: 'The Loan Builder is empty.',
       body: '<div style="background:#FEF2F2; border:1px solid #FECACA; color:#7F1D1D; padding:12px 14px; border-radius:8px;">'
-          + 'Fill in at least the Deal Name in Stage 0 before saving. You can also click "Load Preset" or "Load Active Deal" to start from an existing deal.</div>',
+          + 'Fill in at least the Deal Name in Stage 0 before saving. You can also click "Load Active Deal" to start from an existing deal.</div>',
       debug: window.B || null
     });
     return;
@@ -16242,7 +16192,6 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     });
     $b('btn-add-tranche')?.addEventListener('click', () => { B.tranches.push(newTranche()); renderTranches(); recompute(); });
     $b('btn-add-fee')?.addEventListener('click', () => { B.fees.push(newFee()); renderFees(); recompute(); });
-    $b('btn-builder-preset')?.addEventListener('click', loadPreset);
     $b('btn-builder-reset')?.addEventListener('click', resetBuilder);
     $b('btn-builder-toS2')?.addEventListener('click', sendToCashflowGen);
     wireStage1Buttons();
