@@ -2426,16 +2426,27 @@ function generateDIU(instr, summary, opts){
     }
     jeIndex++;
   }
-  // ECL provisioning (IFRS 9 §5.5) — DR Impairment expense / CR Loan Loss Allowance
-  // Net change can be positive (build-up) or negative (release on stage migration / paydown)
+  // Credit-loss provisioning — DR Impairment expense / CR Loan Loss Allowance.
+  // Net change can be positive (build-up) or negative (release on stage migration / paydown).
+  // V3 — Memo references the right standard for the deal's accounting framework:
+  //   IFRS  → IFRS 9 §5.5 ECL
+  //   AASB  → AASB 9 ECL
+  //   USGAAP → ASC 326 CECL (Current Expected Credit Loss)
+  //   ASPE  → ASPE §3856 incurred-loss
   if(Math.abs(summary.totalECLChange || 0) > 0.005){
     const v = summary.totalECLChange;
+    const fw = (instr.accountingFramework || 'IFRS').toUpperCase();
+    const eclLabel =
+      fw === 'USGAAP' ? 'ASC 326 CECL' :
+      fw === 'AASB'   ? 'AASB 9 ECL' :
+      fw === 'ASPE'   ? 'ASPE 3856 incurred-loss' :
+                        'IFRS 9 ECL';
     if(v > 0){
-      add('Impairment Expense (ECL)',           v, true,  '70100', summary.periodEnd, `IFRS 9 ECL provision for ${summary.periodEnd}`);
-      add('Loan Loss Allowance (Contra-Asset)', v, false, '15500', summary.periodEnd, `IFRS 9 ECL provision for ${summary.periodEnd}`);
+      add('Impairment Expense (ECL)',           v, true,  '70100', summary.periodEnd, `${eclLabel} provision for ${summary.periodEnd}`);
+      add('Loan Loss Allowance (Contra-Asset)', v, false, '15500', summary.periodEnd, `${eclLabel} provision for ${summary.periodEnd}`);
     } else {
-      add('Impairment Reversal (ECL)',          -v, false, '70100', summary.periodEnd, `IFRS 9 ECL release for ${summary.periodEnd}`);
-      add('Loan Loss Allowance Reversal',       -v, true,  '15500', summary.periodEnd, `IFRS 9 ECL release for ${summary.periodEnd}`);
+      add('Impairment Reversal (ECL)',          -v, false, '70100', summary.periodEnd, `${eclLabel} release for ${summary.periodEnd}`);
+      add('Loan Loss Allowance Reversal',       -v, true,  '15500', summary.periodEnd, `${eclLabel} release for ${summary.periodEnd}`);
     }
     jeIndex++;
   }

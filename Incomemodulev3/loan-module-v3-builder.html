@@ -586,6 +586,15 @@
           <span class="material-icons-outlined" style="font-size:18px;">arrow_forward</span>Send to Cashflow Generation
         </button>
         <span id="builder-status" style="text-align:center; font-size:10px; padding:3px 8px; border-radius:10px; background:rgba(255,255,255,0.12); margin-top:2px;">Empty</span>
+        <!-- V3 — auto-save status. Hidden until a DB-saved deal is loaded.
+             Click to flush pending edits immediately. -->
+        <span id="autosave-status"
+              onclick="window.AutoSave && window.AutoSave.flush()"
+              title="Auto-save status (click to save now)"
+              style="display:none; text-align:center; font-size:10px; padding:3px 8px; border-radius:10px; background:rgba(255,255,255,0.12); margin-top:2px; cursor:pointer; gap:4px; align-items:center; justify-content:center;">
+          <span class="material-icons-outlined" style="font-size:11px; vertical-align:-1px; margin-right:2px;">cloud_done</span>
+          <span id="autosave-status-text">Idle</span>
+        </span>
       </div>
     </div>
   </div>
@@ -5896,8 +5905,162 @@ function validateBuilderForSave(){
 }
 if(typeof window !== 'undefined') window.validateBuilderForSave = validateBuilderForSave;
 
+// ─── V3 Auto-save ────────────────────────────────────────────────────────
+// Debounced write-through to Supabase. Engages ONLY when the loaded deal is
+// already in the DB (B._presetKey starts with 'db-'). For a fresh manually-
+// built deal, the user must click "Save to DB" once first; after that, B is
+// stamped with the DB key and autosave takes over.
+//
+// Status display (the chip under "Save to DB"):
+//   • hidden          — no DB-saved deal active
+//   • "Saved"         — clean (no pending edits, no in-flight save)
+//   • "Editing…"      — dirty, debounce timer running
+//   • "Saving…"       — DB request in flight
+//   • "Saved · 14:32" — successful save, with time
+//   • "Save failed · retry" — last attempt errored; click chip to retry
+window.AutoSave = (function(){
+  const DEBOUNCE_MS = 1500;
+  let _timer = null;
+  let _inFlight = false;
+  let _lastSavedAt = null;
+  let _lastError = null;
+  let _dirty = false;
+  let _disabledReason = null;
+
+  function isEnabledForCurrentDeal(){
+    if(typeof window.B === 'undefined' || !window.B) return false;
+    if(!window.B._presetKey || !/^db-/.test(window.B._presetKey)) return false;
+    if(!window.SB || !window.SB.connected) return false;
+    return true;
+  }
+
+  function setStatus(state, extra){
+    const chip = document.getElementById('autosave-status');
+    const text = document.getElementById('autosave-status-text');
+    if(!chip || !text) return;
+    if(!isEnabledForCurrentDeal()){
+      chip.style.display = 'none';
+      return;
+    }
+    chip.style.display = 'inline-flex';
+    const icon = chip.querySelector('.material-icons-outlined');
+    let bg = 'rgba(255,255,255,0.12)';
+    let iconName = 'cloud_done';
+    let label = 'Saved';
+    if(state === 'editing'){ bg='rgba(255,255,255,0.18)'; iconName='edit'; label='Editing…'; }
+    else if(state === 'saving'){ bg='rgba(252,211,77,0.30)'; iconName='cloud_upload'; label='Saving…'; }
+    else if(state === 'saved'){
+      bg='rgba(16,185,129,0.30)'; iconName='cloud_done';
+      const t = _lastSavedAt ? new Date(_lastSavedAt) : null;
+      label = t ? ('Saved · ' + t.toTimeString().slice(0,5)) : 'Saved';
+    }
+    else if(state === 'error'){ bg='rgba(239,68,68,0.30)'; iconName='cloud_off'; label='Save failed · retry'; }
+    chip.style.background = bg;
+    if(icon) icon.textContent = iconName;
+    text.textContent = label;
+    if(extra) chip.title = extra;
+  }
+
+  function schedule(){
+    if(window._autoSaveSuspended) return;   // suspended during deal load
+    if(!isEnabledForCurrentDeal()){
+      _dirty = false;
+      setStatus('idle');
+      return;
+    }
+    _dirty = true;
+    setStatus('editing');
+    if(_timer) clearTimeout(_timer);
+    _timer = setTimeout(flush, DEBOUNCE_MS);
+  }
+
+  function cancel(){
+    if(_timer){ clearTimeout(_timer); _timer = null; }
+  }
+
+  async function flush(){
+    if(_timer){ clearTimeout(_timer); _timer = null; }
+    if(_inFlight) return;        // a save is already running; it'll cover later edits
+    if(!_dirty) return;
+    if(!isEnabledForCurrentDeal()){ _dirty = false; setStatus('idle'); return; }
+    // Validate the same way Save-to-DB does, but silently — autosave should
+    // never block on a missing field popup. If invalid, mark error chip.
+    if(typeof validateBuilderForSave === 'function'){
+      const v = validateBuilderForSave();
+      if(!v.ok){
+        _lastError = 'Required fields missing: ' + (v.missing||[]).map(m=>m.label).join(', ');
+        setStatus('error', _lastError);
+        return;
+      }
+    }
+    _inFlight = true;
+    _dirty = false;            // mark not-dirty BEFORE the await so concurrent edits get queued correctly
+    setStatus('saving');
+    try {
+      const res = await window.SB.saveDeal(window.B);
+      if(res && res.ok){
+        _lastSavedAt = Date.now();
+        _lastError = null;
+        // Re-merge the freshly-saved deal into window.PRESETS in place so the
+        // Active Deal modal sees latest changes (label/dates etc.) without
+        // requiring a refresh.
+        try {
+          if(window.SB && window.SB.fetchUserDeals){
+            const saved = await window.SB.fetchUserDeals();
+            if(Array.isArray(saved) && Array.isArray(window.PRESETS)){
+              for(let i = window.PRESETS.length - 1; i >= 0; i--){
+                if(window.PRESETS[i] && window.PRESETS[i].source === 'db') window.PRESETS.splice(i, 1);
+              }
+              if(saved.length) window.PRESETS.unshift.apply(window.PRESETS, saved);
+            }
+          }
+        } catch(_){}
+        setStatus(_dirty ? 'editing' : 'saved');
+      } else {
+        _lastError = (res && res.reason) || 'unknown error';
+        console.warn('[V3 AutoSave] save failed:', _lastError);
+        setStatus('error', _lastError);
+        _dirty = true;          // keep dirty so a manual click on the chip retries
+      }
+    } catch(err){
+      _lastError = err && err.message || String(err);
+      console.error('[V3 AutoSave] save threw:', err);
+      setStatus('error', _lastError);
+      _dirty = true;
+    } finally {
+      _inFlight = false;
+      // If new edits arrived while we were saving, reschedule
+      if(_dirty){ schedule(); }
+    }
+  }
+
+  function refresh(){ setStatus(_lastError ? 'error' : (_dirty ? 'editing' : 'saved')); }
+
+  // Expose
+  return { schedule, flush, cancel, refresh, setStatus,
+           isEnabled: isEnabledForCurrentDeal,
+           get lastSavedAt(){ return _lastSavedAt; },
+           get lastError(){ return _lastError; } };
+})();
+
+// Flush any pending autosave when the user navigates away. window.beforeunload
+// can't await async work but synchronous fetch with keepalive is best-effort —
+// our SB client doesn't expose that, so the next page load picks up unsaved
+// edits from B (which lives only in memory). Show a "Saving…" status so the
+// user has a visible signal.
+window.addEventListener('beforeunload', function(e){
+  if(window.AutoSave && window.AutoSave.isEnabled && window.AutoSave.isEnabled() && window.AutoSave.lastError === null){
+    // No-op (best-effort flush) — beforeunload is too late for async writes.
+    // We at least cancel the debounce timer to prevent stale writes after navigation.
+    window.AutoSave.cancel && window.AutoSave.cancel();
+  }
+});
+
 function handleBuilderSaveDBClick(){
   console.log('[V3] handleBuilderSaveDBClick invoked');
+  // V3 — Cancel any pending autosave timer; we're about to do a synchronous
+  // save anyway, no need to fire two writes back-to-back.
+  if(window.AutoSave && window.AutoSave.cancel) window.AutoSave.cancel();
   if(typeof window.SB === 'undefined' || !window.SB.connected){
     showSaveDealResultModal({
       kind: 'error',
@@ -5993,6 +6156,13 @@ function handleBuilderSaveDBClick(){
       });
       console.log('[V3] Deal saved:', res);
       if(window.B && window.B.deal && res.dealCode){ window.B.deal.dealId = res.dealCode; }
+      // V3 — Stamp B._presetKey so AutoSave engages from this point on without
+      // requiring a page reload (autosave only fires when the deal is in the DB,
+      // identified by the 'db-' prefix on the preset key).
+      if(window.B && res.dealCode){ window.B._presetKey = 'db-' + res.dealCode; }
+      if(typeof window.AutoSave !== 'undefined'){
+        window.AutoSave.setStatus('saved');
+      }
       // Re-merge DB-saved deals into window.PRESETS so the Active Deal modal
       // shows the newly-saved deal immediately. CRITICAL: mutate in place so
       // the inner IIFE `const PRESETS` reference stays valid — otherwise
@@ -7140,6 +7310,12 @@ function renderMultiEventList(listId, events, formatEvent, emptyMsg, container){
 }
 
 // Transtype #4 — Prepayment. Accumulates: multiple prepayments allowed.
+// V3 — Also writes to B.tranches[0].repayments with kind='voluntary' so the
+// prepayment survives navigation (re-registration of the instrument rebuilds
+// principalSchedule from B) AND so SB.saveDeal() persists it to the DB
+// (saveDeal walks B.tranches[].repayments → paydowns table). Without this,
+// the prepayment lives only in inst.principalSchedule which gets wiped
+// whenever the deal is reloaded from the DB.
 function addPrepaymentTest(){
   const inst = currentInstrument();
   if(!inst) return;
@@ -7149,10 +7325,26 @@ function addPrepaymentTest(){
   const reason = readStr('opt-t4-reason') || 'Voluntary prepayment · injected from Treatment panel';
   inst.principalSchedule.push({
     date, type:'prepayment', amount, eventId: uniqueEventId('TEST_PP'),
-    status:'actual', reason
+    status:'actual', kind:'voluntary', reason
   });
+  // ── Persist into B so it survives reload + gets saved to the DB ──
+  // Find the FIRST tranche on the Builder side and add a kind='voluntary'
+  // paydown row. (UI permits per-tranche routing in the Paydowns panel;
+  // Stage 2 Treatment panel doesn't surface a tranche picker for
+  // prepayments, so we route to tranche[0]. The Paydowns UI shows it
+  // immediately after navigation back to Stage 0.)
+  if(typeof window.B !== 'undefined' && window.B && Array.isArray(window.B.tranches) && window.B.tranches.length){
+    const tr0 = window.B.tranches[0];
+    tr0.repayments = tr0.repayments || [];
+    tr0.repayments.push({
+      date, amount, kind:'voluntary', trigger:null, reason
+    });
+  }
   M.treatmentDirty[inst.id] = true;
-  toast('Prepayment added at ' + date + ' · $' + (amount/1e6).toFixed(2) + 'm');
+  // V3 — Persistence hint so the user knows they need to click Save to DB.
+  const isDBDeal = !!(window.B && window.B._presetKey && /^db-/.test(window.B._presetKey));
+  toast('Prepayment added at ' + date + ' · $' + (amount/1e6).toFixed(2) + 'm'
+        + (isDBDeal ? ' · click Save to DB to persist' : ''), 4500);
   clearInputs('opt-t4-date','opt-t4-amount','opt-t4-reason');
   loadTreatmentForm();
   onTreatmentChange();
@@ -7321,8 +7513,26 @@ function clearTier1Events(eventType){
   const before = inst.principalSchedule.length;
   inst.principalSchedule = inst.principalSchedule.filter(e => e.type !== eventType);
   if(inst.principalSchedule.length === before) return;
+  // V3 — Also strip mirror rows from B.tranches[].repayments for the two event
+  // types that live there (prepayment → kind:'voluntary', mandatoryPrepayment
+  // → kind:'mandatory'/'changeOfControl'/'assetSale'). Without this the DB
+  // would keep the original voluntary/mandatory paydown after the user cleared
+  // the prepayment in Stage 2, and it would silently reappear on reload.
+  if((eventType === 'prepayment' || eventType === 'mandatoryPrepayment') &&
+     typeof window.B !== 'undefined' && window.B && Array.isArray(window.B.tranches)){
+    window.B.tranches.forEach(tr => {
+      if(!Array.isArray(tr.repayments)) return;
+      tr.repayments = tr.repayments.filter(r => {
+        const k = r.kind || 'scheduled';
+        if(eventType === 'prepayment') return k !== 'voluntary';
+        // mandatoryPrepayment covers mandatory / changeOfControl / assetSale
+        return k !== 'mandatory' && k !== 'changeOfControl' && k !== 'assetSale';
+      });
+    });
+  }
   M.treatmentDirty[inst.id] = true;
-  toast('Cleared all ' + eventType + ' events');
+  const isDBDeal = !!(window.B && window.B._presetKey && /^db-/.test(window.B._presetKey));
+  toast('Cleared all ' + eventType + ' events' + (isDBDeal ? ' · click Save to DB to persist' : ''), 4500);
   loadTreatmentForm();
   onTreatmentChange();
 }
@@ -7595,6 +7805,11 @@ window.repaintStage2FromState = function(){
 // Treatment changed — apply, recalculate everything downstream
 function onTreatmentChange(){
   applyTreatmentFromForm();
+  // V3 — Autosave hook (Stage 2 transtype additions / removals route through
+  // here). Fires only when the loaded deal lives in the DB.
+  if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+    window.AutoSave.schedule();
+  }
   // Flag Stage 1 as needing a sync (don't auto-update — the user must click
   // the Sync to Cashflow button in the Stage 2 toolbar). The flag drives the
   // amber-pulse styling on btn-sync-cashflow via refreshStage1SyncButton().
@@ -13712,6 +13927,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     updateBuilderStatus();
     // v2 — also paint Stage 1 Cashflow Generation view
     if(typeof renderStage1Cashflows === 'function') renderStage1Cashflows(lastCashflows);
+    // V3 — Autosave hook. Fires only when this deal is already in the DB.
+    // syncDealForm is the central Stage 0 reactive sink (every input change
+    // routes through recompute), so this catches name, dates, framework,
+    // commitment, tranche faces, fee rates, etc.
+    if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+      window.AutoSave.schedule();
+    }
   }
   function syncDealForm(){
     B.deal.name        = $b('b-deal-name')?.value || '';
@@ -15141,6 +15363,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   window.loadPresetByObject = function(p){
     console.log('[V3] loadPresetByObject START', p && p.key);
     if(!p || typeof p.build !== 'function'){ console.warn('loadPresetByObject: bad preset', p); return null; }
+    // V3 — Suspend autosave during the load. Loading a deal triggers
+    // populateDealForm + renderTranches + renderFees + recompute, each of
+    // which would otherwise schedule a redundant save of data we just read.
+    if(typeof window.AutoSave !== 'undefined'){ window.AutoSave.cancel(); window._autoSaveSuspended = true; }
     const built = normalizeSpreadCoverage(p.build());
     console.log('[V3] loadPresetByObject built def:', {
       dealName: built && built.deal && built.deal.name,
@@ -15185,6 +15411,18 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const viewLabel = viewMode === 'participation' && pct < 100 ? ' (' + pct + '% participation)' : '';
       toast('Loaded · ' + p.label + viewLabel);
     }
+    // V3 — Show or hide the autosave chip depending on whether this is a DB deal.
+    // For non-DB presets the chip stays hidden (autosave does nothing because
+    // saving would create duplicate DB rows). Lift the load-time suspension
+    // on a microtask so any synchronous recomputes from the form-population
+    // step are already done.
+    setTimeout(() => {
+      window._autoSaveSuspended = false;
+      if(typeof window.AutoSave !== 'undefined'){
+        window.AutoSave.cancel();
+        window.AutoSave.setStatus('saved');
+      }
+    }, 50);
     return p;
   };
 
@@ -16046,6 +16284,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.facility = { commitment: 0, availEnd:'', dayBasis:'ACT/360',
                    holiday:'none', repayment:'AtMaturity', type:'termLoan' };
     B.tranches = []; B.fees = [];
+    // V3 — CRITICAL: clear B._presetKey too, otherwise autosave still thinks
+    // the cleared form belongs to the previous DB deal and would overwrite
+    // the saved record with empty data on the next edit.
+    B._presetKey = null;
+    if(typeof window.AutoSave !== 'undefined'){
+      window.AutoSave.cancel();
+      window.AutoSave.setStatus('idle');
+    }
     populateDealForm();
     renderTranches(); renderFees(); recompute();
   }
