@@ -950,7 +950,82 @@ function buildSchedule(instr){
   // instr.marginSchedule: [{ from: ISO, to: ISO|null, marginBps: number }]
   // instr.esgAdjustment : { from: ISO, deltaBps: number }   (e.g., -2.5)
   // instr.rfr            : { index, baseRate, lookbackDays, rounding }
-  function lookupMarginBps(dateISO){
+  // ─── V3 — Compounded RFR (SONIA / SOFR / ESTR / BBSW) ────────────────────
+// Implements the daily-compounded-in-arrears methodology used by ISDA /
+// ARRC / LMA for modern RFR loans, honouring the four convention fields the
+// v3 Builder persists on `interest_terms`:
+//
+//   • lookbackDays     — observation period ends N business days before
+//                        the period-end (typical: 5 days for SONIA loans).
+//   • observationShift — also shifts the period START by N business days.
+//                        When true (combined with lookback), the period
+//                        window for weighting equals the actual interest
+//                        period (vs the standard "look-back only" where
+//                        the window is shifted but weights track the
+//                        observation period, not the interest period).
+//   • lockoutDays      — the rate observed (period_end − lockoutDays) is
+//                        repeated for the final L days (common in U.S.
+//                        SOFR loans following the ARRC fallback).
+//   • dailyCompounding — true → daily-compounded;
+//                        false → simple-arithmetic average of fixings.
+//
+// Input requires an actual fixings series on instr.rfr.fixings = [{date,rate}].
+// When the series is empty or missing, returns null and the caller falls back
+// to `instr.rfr.baseRate` (preserves legacy behaviour).
+//
+// The "period" for compounding is heuristic — uses tenor: '3M'→90d, '1M'→30d
+// etc., back from the as-of date. Real loans would tie this to coupon-period
+// boundaries; this is a reasonable approximation for daily accrual.
+function computeCompoundedRFR(asOfDate, instr){
+  const rfr = instr && instr.rfr;
+  if(!rfr || !Array.isArray(rfr.fixings) || rfr.fixings.length === 0) return null;
+  const lookback   = +rfr.lookbackDays     || 0;
+  const obsShift   = +rfr.observationShift || 0;
+  const lockout    = +rfr.lockoutDays      || 0;
+  const compounded = !!rfr.dailyCompounding;
+  // Tenor → period length in calendar days (approx).
+  const tenorDays = { '1M':30, '3M':90, '6M':180, '12M':365 }[rfr.tenor || '3M'] || 90;
+  // Observation window: [periodStart − obsShift, asOf − lookback], with the
+  // last `lockout` days inside that window held flat at the rate observed on
+  // (periodEnd − lockout).
+  const periodEnd       = addDays(asOfDate, -lookback);
+  const periodStart     = addDays(periodEnd, -tenorDays + (obsShift ? obsShift : 0));
+  const lockoutCutoff   = addDays(periodEnd, -lockout);
+  // Build a date → rate lookup from fixings (latest fix on or before each day wins).
+  const fxs = rfr.fixings.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  function fixingAt(d){
+    const iso = toISO(d);
+    let lastRate = null;
+    for(const f of fxs){
+      if(f.date <= iso) lastRate = +f.rate || 0;
+      else break;
+    }
+    return lastRate != null ? lastRate : (rfr.baseRate || 0);
+  }
+  // Walk daily across the observation window.
+  let product = 1;     // for compounded
+  let sum     = 0;     // for simple
+  let count   = 0;
+  const lockoutRate = fixingAt(lockoutCutoff);
+  for(let d = new Date(periodStart); d <= periodEnd; d = addDays(d, 1)){
+    const rate = (d > lockoutCutoff && lockout > 0) ? lockoutRate : fixingAt(d);
+    if(compounded){
+      // Daily compounding: (1 + r × 1/360) factor
+      product *= (1 + rate / 360);
+    } else {
+      sum += rate;
+    }
+    count++;
+  }
+  if(count === 0) return null;
+  if(compounded){
+    // Annualise: (product − 1) × 360 / count
+    return (product - 1) * 360 / count;
+  }
+  return sum / count;
+}
+
+function lookupMarginBps(dateISO){
     const ms = instr.marginSchedule || [];
     for(const m of ms){
       const f = m.from || '0000-01-01';
@@ -1256,9 +1331,12 @@ function buildSchedule(instr){
       if(instr.coupon.cap   != null) r = Math.min(r, instr.coupon.cap);
       couponRate = r;
     } else if(instr.coupon?.type === 'SONIA' || instr.coupon?.type === 'CompoundedRFR'){
-      // RFR (SONIA) + ratcheted margin + optional ESG adjustment.
-      // Lookback period is informational here; we use today's RFR fix.
-      const rfrBase = (instr.rfr?.baseRate ?? floatingRate) || 0;
+      // RFR (SONIA / SOFR / ESTR / BBSW) + ratcheted margin + optional ESG.
+      // V3 — Use computeCompoundedRFR which respects lookback / observation_shift
+      // / lockout / daily_compounding / weighted from instr.rfr (projected by
+      // builderToInstrument from interest_terms). Falls back to baseRate when
+      // no actual fixings series is supplied — same as the legacy behaviour.
+      const rfrBase = computeCompoundedRFR(d, instr) || (instr.rfr?.baseRate ?? floatingRate) || 0;
       const baseMarginBps = lookupMarginBps(todayISO);
       const marginBps = (baseMarginBps != null ? baseMarginBps : (instr.coupon.spread ?? 0)*10000)
                        + esgDeltaBps(todayISO);
@@ -2414,14 +2492,16 @@ function generateDIU(instr, summary, opts){
     }
     jeIndex++;
   }
-  // Modification gain/loss (IFRS 9 §5.4.3) — DR/CR P&L Modification Gain/Loss / Loan Asset
+  // Modification gain/loss — framework-aware label (IFRS 9 §5.4.3 / ASC 470-50 / AASB 9 §5.4.3)
   if(Math.abs(summary.totalModGain || 0) > 0.005){
     const v = summary.totalModGain;
+    const fwm = (instr.accountingFramework || 'IFRS').toUpperCase();
+    const modTag = fwm === 'USGAAP' ? 'ASC 470-50' : fwm === 'AASB' ? 'AASB 9' : fwm === 'ASPE' ? 'ASPE 3856' : 'IFRS 9';
     if(v > 0){
-      add('Modification Gain (IFRS 9)',                  v, false, '44000', summary.periodEnd, `Modification gain for ${summary.periodEnd}`);
+      add('Modification Gain (' + modTag + ')',          v, false, '44000', summary.periodEnd, `Modification gain for ${summary.periodEnd}`);
       add('Modification — Loan Asset Adjustment',         v, true,  '15000', summary.periodEnd, `Modification gain for ${summary.periodEnd}`);
     } else {
-      add('Modification Loss (IFRS 9)',                 -v, true,  '44000', summary.periodEnd, `Modification loss for ${summary.periodEnd}`);
+      add('Modification Loss (' + modTag + ')',         -v, true,  '44000', summary.periodEnd, `Modification loss for ${summary.periodEnd}`);
       add('Modification — Loan Asset Adjustment',       -v, false, '15000', summary.periodEnd, `Modification loss for ${summary.periodEnd}`);
     }
     jeIndex++;
@@ -2474,20 +2554,35 @@ function generateDIU(instr, summary, opts){
     add('Default Fee Receivable', summary.totalDefaultFee, true,  '23140', summary.periodEnd, `Default fee for ${summary.periodEnd}`);
     jeIndex++;
   }
-  // EIR accretion of deferred IFRS-9 fees (arrangement / OID-style)
-  // DR Loan carrying value (40110) / CR Interest income (40100)
+  // EIR accretion of deferred origination fees (arrangement / OID-style).
+  // DR Loan carrying value (40110) / CR Interest income (40100).
+  // V3 — JE memo and transtype label now reflect the deal's accounting
+  // framework. IFRS labels were applied to USGAAP / AASB / ASPE deals too,
+  // confusing users on Ferhat Float (USGAAP).
+  //   IFRS  → "IFRS 9 §B5.4 EIR"
+  //   AASB  → "AASB 9 EIR"
+  //   USGAAP → "ASC 310-20 effective-yield"
+  //   ASPE  → "ASPE 3856 effective-interest"
   if(Math.abs(summary.totalEIRAccretion || 0) > 0.005){
     const v = summary.totalEIRAccretion;
-    add('EIR Fee Accretion (IFRS 9)',          v, false, '40100', summary.periodEnd, `IFRS 9 EIR fee accretion for ${summary.periodEnd}`);
-    add('EIR Fee Accretion Offset (IFRS 9)',   v, true,  '40110', summary.periodEnd, `IFRS 9 EIR fee accretion for ${summary.periodEnd}`);
+    const fw = (instr.accountingFramework || 'IFRS').toUpperCase();
+    const eirTag =
+      fw === 'USGAAP' ? 'ASC 310-20' :
+      fw === 'AASB'   ? 'AASB 9' :
+      fw === 'ASPE'   ? 'ASPE 3856' :
+                        'IFRS 9';
+    add('EIR Fee Accretion ('        + eirTag + ')', v, false, '40100', summary.periodEnd, `${eirTag} EIR fee accretion for ${summary.periodEnd}`);
+    add('EIR Fee Accretion Offset (' + eirTag + ')', v, true,  '40110', summary.periodEnd, `${eirTag} EIR fee accretion for ${summary.periodEnd}`);
     jeIndex++;
   }
-  // IFRS 15 fees — by label, posted to fee-income / fee-receivable pair.
+  // Fee income — framework-aware tag (IFRS 15 / ASC 606 / AASB 15 / ASPE 3400).
   // GL split: 40250 Fee Income (commitment / arrangement / guarantee), 23150 Fee Receivable.
   const fb = summary.feeBreakdown || {};
+  const fwf = (instr.accountingFramework || 'IFRS').toUpperCase();
+  const feeTag = fwf === 'USGAAP' ? 'ASC 606' : fwf === 'AASB' ? 'AASB 15' : fwf === 'ASPE' ? 'ASPE 3400' : 'IFRS 15';
   for(const [label, amt] of Object.entries(fb)){
     if(Math.abs(amt) <= 0.005) continue;
-    add(`${label} Income (IFRS 15)`,     amt, false, '40250', summary.periodEnd, `${label} accrual for ${summary.periodEnd}`);
+    add(`${label} Income (${feeTag})`,   amt, false, '40250', summary.periodEnd, `${label} accrual for ${summary.periodEnd}`);
     add(`${label} Receivable`,           amt, true,  '23150', summary.periodEnd, `${label} accrual for ${summary.periodEnd}`);
     jeIndex++;
   }

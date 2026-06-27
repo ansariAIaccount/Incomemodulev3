@@ -3103,7 +3103,24 @@ window.SB = (function(){
     franking:        { allowed: ['none','fullyFranked','partiallyFranked','unfranked'], default: 'none' },
     related_party:   { allowed: ['none','aasb124-disclose','aasb124-fullDisclosure'], default: 'none' },
     gst:             { allowed: ['financialSupply','taxable','gstFree','mixed'], default: 'financialSupply' },
-    apra:            { allowed: ['notApplicable','aps220','aps221','aps330'], default: 'notApplicable' }
+    apra:            { allowed: ['notApplicable','aps220','aps221','aps330'], default: 'notApplicable' },
+    // V3 — Stage 2 settings enums (match the DB types created in migration
+    // add_stage2_settings_tables). null defaults are allowed for the JS-side
+    // — saveDeal coerces blank columns to a sensible default at the SQL layer.
+    modification_type:        { allowed: ['substantial','non_substantial'], default: 'non_substantial', alias: { sub:'substantial', nonSub:'non_substantial', 'non-substantial':'non_substantial' } },
+    hedge_designation_type:   { allowed: ['cfh','fvh','fx_hedge','none'], default: 'none', alias: { 'fx-hedge':'fx_hedge', cashFlowHedge:'cfh', fairValueHedge:'fvh' } },
+    eir_method:               { allowed: ['default','effectiveInterestPrice','effectiveInterestFormula','effectiveInterestIRR','override'], default: 'default' },
+    oid_treatment_type:       { allowed: ['none','accrete','expense_immediately'], default: 'none', alias: { expenseImmediately:'expense_immediately', expense:'expense_immediately' } },
+    trade_accounting_method:  { allowed: ['settleDate','tradeDate'], default: 'settleDate', alias: { settlement:'settleDate', trade:'tradeDate' } },
+    revolver_cost_basis:      { allowed: ['maturity','commitment'], default: 'maturity' },
+    amort_profile_kind:       { allowed: ['bullet','levelPrincipal','annuity','ioBalloon'], default: 'bullet', alias: { 'level-principal':'levelPrincipal', 'io-balloon':'ioBalloon' } },
+    amort_profile_frequency:  { allowed: ['M','Q','S','A'], default: null, alias: { monthly:'M', quarterly:'Q', semi:'S', 'semi-annual':'S', annual:'A', yearly:'A' } },
+    lifecycle_event_type:     { allowed: ['loanSale','participation','debtEquitySwap','recovery','writeOff','cure','forbearance','capitalisedCost'], default: 'loanSale', alias: { sale:'loanSale', swap:'debtEquitySwap', d4e:'debtEquitySwap', 'write-off':'writeOff', writeoff:'writeOff' } },
+    // V3 — Legacy treatment_overrides enums (pre-existing schema). saveDeal
+    // now writes these so Stage-2 IFRS9 classification + business model
+    // survive Save to DB.
+    ifrs9_classification:     { allowed: ['AmortisedCost','FVOCI','FVTPL'], default: 'AmortisedCost', alias: { 'amortised-cost':'AmortisedCost', amortisedCost:'AmortisedCost', fvtpl:'FVTPL', fvoci:'FVOCI' } },
+    business_model:           { allowed: ['HoldToCollect','HoldToCollectAndSell','Other'], default: 'HoldToCollect', alias: { hold:'HoldToCollect', 'hold-to-collect':'HoldToCollect', 'hold-to-collect-and-sell':'HoldToCollectAndSell' } }
   };
   function safeEnum(key, val, allowNull){
     const spec = ENUMS[key];
@@ -3340,6 +3357,192 @@ window.SB = (function(){
         if(axErr){ console.error('[SB] saveDeal: aasb_extras:', axErr); return { ok:false, reason: axErr.message }; }
         counts.aasbExtras = 1;
       }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // V3 — Stage 2 settings persistence (proper relational)
+      // Walk B.treatmentOverrides, B.modificationEvents, B.defaultEvents,
+      // B.prepaymentPenaltySchedule, B.lifecycleEvents and upsert each into
+      // its dedicated table. saveDeal already deleted FK-cascade-children
+      // when it deleted+reinserted tranches/fees; the new tables FK directly
+      // to deals.id so the cascade fires from the upper deals.delete (not
+      // currently done) or the existing where(deal_id).delete() approach.
+      // Strategy: delete-by-deal_id then insert fresh rows on every save.
+      // ═══════════════════════════════════════════════════════════════════
+
+      // 7. treatment_overrides (1:1 with deal)
+      // Always upsert (one row per deal). Delete any existing row first
+      // to ensure clean state, then insert if there's at least one override.
+      await _client.from('treatment_overrides').delete().eq('deal_id', dealId);
+      const ov = B.treatmentOverrides || {};
+      const hasOverrides = ov && Object.keys(ov).some(k => ov[k] !== null && ov[k] !== undefined && ov[k] !== '');
+      if(hasOverrides){
+        const overrideRow = {
+          deal_id:                      dealId,
+          // V3 — Map integer ECL stage (1/2/3 from the UI) to the DB enum
+          // ecl_stage_value (stage1/stage2/stage3/poci). The legacy
+          // treatment_overrides.ecl_stage column was already an enum.
+          ecl_stage:                    (function(){
+            if(ov.eclStage == null) return null;
+            const n = +ov.eclStage;
+            if(n === 1) return 'stage1';
+            if(n === 2) return 'stage2';
+            if(n === 3) return 'stage3';
+            if(typeof ov.eclStage === 'string' && /^(stage1|stage2|stage3|poci)$/.test(ov.eclStage)) return ov.eclStage;
+            return null;
+          })(),
+          pd_annual:                    (ov.pdAnnual != null ? +ov.pdAnnual : null),
+          lgd:                          (ov.lgd != null ? +ov.lgd : null),
+          q_factor:                     (ov.qFactor != null ? +ov.qFactor : null),
+          eir_method:                   safeEnum('eir_method', ov.eirMethod, true),
+          eir_override:                 (ov.eirOverride != null ? +ov.eirOverride : null),
+          oid_treatment:                safeEnum('oid_treatment_type', ov.oidTreatment, true) || 'none',
+          oid_method:                   ov.oidMethod || null,
+          pik_rate_override:            (ov.pikRateOverride != null ? +ov.pikRateOverride : null),
+          trade_accounting_method:      safeEnum('trade_accounting_method', ov.tradeAccountingMethod, true) || 'settleDate',
+          trade_date:                   ov.tradeDate || null,
+          trade_accrued_interest:       (ov.tradeAccruedInterest != null ? +ov.tradeAccruedInterest : null),
+          use_reversing_entries:        !!ov.useReversingEntries,
+          revolver_cost_deferral_basis: safeEnum('revolver_cost_basis', ov.revolverCostDeferralBasis, true) || 'maturity',
+          amort_profile_kind:           safeEnum('amort_profile_kind', ov.amortProfileKind, true) || 'bullet',
+          amort_profile_frequency:      safeEnum('amort_profile_frequency', ov.amortProfileFrequency, true),
+          amort_profile_io_months:      (ov.amortProfileIoMonths != null ? +ov.amortProfileIoMonths : null),
+          amort_profile_balloon:        (ov.amortProfileBalloon != null ? +ov.amortProfileBalloon : null),
+          amort_profile_start_date:     ov.amortProfileStartDate || null,
+          hedge_designation_type:       safeEnum('hedge_designation_type', ov.hedgeDesignationType, true) || 'none',
+          hedge_designation_date:       ov.hedgeDesignationDate || null,
+          hedge_de_designation_date:    ov.hedgeDeDesignationDate || null,
+          hedge_de_designation_reason:  ov.hedgeDeDesignationReason || null,
+          allowance_reversal_amount:    (ov.allowanceReversalAmount != null ? +ov.allowanceReversalAmount : null),
+          allowance_reversal_date:      ov.allowanceReversalDate || null,
+          updated_at:                   new Date().toISOString(),
+          // ───────────────────────────────────────────────────────────
+          // V3 — 22 legacy fields the pre-existing treatment_overrides
+          // table has but the v3 client wasn't writing. ALL of these are
+          // read by the engine in ECL / IFRS9 / mod-accounting / tax / FX
+          // calculations, so losing them on reload directly affects JE
+          // generation. Each maps to a Stage-2 form control (opt-*) that
+          // syncBuilderFromInstrument now captures from inst.ifrs.* /
+          // inst.pik.* into B.treatmentOverrides.
+          // ───────────────────────────────────────────────────────────
+          // IFRS 9 classification
+          ifrs9_classification:         safeEnum('ifrs9_classification', ov.ifrs9Classification, true),
+          business_model:               safeEnum('business_model', ov.businessModel, true),
+          sppi_passed:                  (ov.sppiPassed != null ? !!ov.sppiPassed : null),
+          fv_level:                     (ov.fairValueLevel != null ? +ov.fairValueLevel : null),
+          // ECL Stage detail
+          compute_ecl:                  (ov.computeECL != null ? !!ov.computeECL : null),
+          poci_flag:                    (ov.poci != null ? !!ov.poci : null),
+          stage3_interest_on_net:       (ov.stage3InterestBase === 'net'),
+          suspended:                    (ov.suspendedInterest != null ? !!ov.suspendedInterest : null),
+          ead_ccf:                      (ov.eadCCF != null ? +ov.eadCCF : null),
+          dpd_to_stage2:                (ov.dpdStage2Threshold != null ? +ov.dpdStage2Threshold : null),
+          dpd_to_stage3:                (ov.dpdStage3Threshold != null ? +ov.dpdStage3Threshold : null),
+          dpd_current:                  (ov.dpdCurrent != null ? +ov.dpdCurrent : null),
+          covenant_breach:              (ov.covenantBreach != null ? !!ov.covenantBreach : null),
+          watchlist:                    (ov.watchlistOverride != null ? !!ov.watchlistOverride : null),
+          macro_overlay_weight:         (ov.macroOverlayWeight != null ? +ov.macroOverlayWeight : null),
+          // Modification policy
+          mod_threshold_pct:            (ov.modSubstantialThreshold != null ? +ov.modSubstantialThreshold : null),
+          mod_reir_on_substantial:      (ov.modRecomputeEIROnSubstantial != null ? !!ov.modRecomputeEIROnSubstantial : null),
+          mod_default_classification:   ov.modDefaultTreatment || null,
+          continuing:                   (ov.modContinuingInvolvement != null ? !!ov.modContinuingInvolvement : null),
+          // Tax + FX cadence
+          wht_rate:                     (ov.taxWhtRate != null ? +ov.taxWhtRate : null),
+          wht_recoverable:              (ov.taxWhtRecoverability === 'recoverable'),
+          deferred_tax:                 (ov.taxDeferred != null ? !!ov.taxDeferred : null),
+          fx_cadence:                   ov.fxRevaluationCadence || null,
+          // PIK (legacy columns — coexist with new pik_rate_override)
+          pik_enabled:                  (ov.pikEnabled != null ? !!ov.pikEnabled : null),
+          pik_rate:                     (ov.pikRate != null ? +ov.pikRate : null),
+          pik_frequency:                ov.pikCapitalizationFrequency || null
+        };
+        const { error: ovErr } = await _client.from('treatment_overrides').insert(overrideRow);
+        if(ovErr){ console.error('[SB] saveDeal: treatment_overrides:', ovErr); return { ok:false, reason: ovErr.message }; }
+        counts.treatmentOverrides = 1;
+      }
+
+      // 8. modification_events (1:N) — uses LEGACY column names from the
+      // pre-existing schema (modification_date, description, is_substantial,
+      // gain_loss, pv_change_pct, pre_mod_cv, post_mod_cv, eir_reset).
+      // The Builder side keeps the simpler { date, type:'substantial'|...,
+      // reason, gainLoss, pvDelta, newCoupon } shape — we translate here.
+      await _client.from('modification_events').delete().eq('deal_id', dealId);
+      const modEvents = Array.isArray(B.modificationEvents) ? B.modificationEvents : [];
+      if(modEvents.length){
+        const rows = modEvents.map((m) => ({
+          deal_id:          dealId,
+          modification_date: m.date,
+          description:      m.reason || m.description || m.notes || null,
+          is_substantial:   (m.modType === 'substantial' || m.type === 'substantial'),
+          pv_change_pct:    (m.pvDelta != null ? +m.pvDelta : null),
+          pre_mod_cv:       (m.preModCv != null ? +m.preModCv : null),
+          post_mod_cv:      (m.postModCv != null ? +m.postModCv : null),
+          gain_loss:        (m.gainLoss != null ? +m.gainLoss : null),
+          eir_reset:        (m.modType === 'substantial' || m.type === 'substantial' || !!m.eirReset),
+          notes:            m.notes || null
+        }));
+        const { error: meErr } = await _client.from('modification_events').insert(rows);
+        if(meErr){ console.error('[SB] saveDeal: modification_events:', meErr); return { ok:false, reason: meErr.message }; }
+        counts.modificationEvents = rows.length;
+      }
+
+      // 9. default_events (1:N)
+      await _client.from('default_events').delete().eq('deal_id', dealId);
+      const defEvents = Array.isArray(B.defaultEvents) ? B.defaultEvents : [];
+      if(defEvents.length){
+        const rows = defEvents.map((d, i) => ({
+          deal_id:           dealId,
+          event_no:          i + 1,
+          event_date:        d.date,
+          default_rate_pct:  (d.ratePct != null ? +d.ratePct : null),
+          days_past_due:     (d.daysPastDue != null ? +d.daysPastDue : null),
+          recovery_estimate: (d.recoveryEstimate != null ? +d.recoveryEstimate : null),
+          notes:             d.notes || null
+        }));
+        const { error: deErr } = await _client.from('default_events').insert(rows);
+        if(deErr){ console.error('[SB] saveDeal: default_events:', deErr); return { ok:false, reason: deErr.message }; }
+        counts.defaultEvents = rows.length;
+      }
+
+      // 10. prepayment_penalty_schedule (1:N)
+      await _client.from('prepayment_penalty_schedule').delete().eq('deal_id', dealId);
+      const ppBands = Array.isArray(B.prepaymentPenaltySchedule) ? B.prepaymentPenaltySchedule : [];
+      if(ppBands.length){
+        const rows = ppBands.map((b, i) => ({
+          deal_id:   dealId,
+          band_no:   i + 1,
+          from_date: b.from || null,
+          to_date:   b.to || null,
+          rate_pct:  +b.ratePct || 0,
+          note:      b.note || null
+        }));
+        const { error: ppErr } = await _client.from('prepayment_penalty_schedule').insert(rows);
+        if(ppErr){ console.error('[SB] saveDeal: prepayment_penalty_schedule:', ppErr); return { ok:false, reason: ppErr.message }; }
+        counts.prepayPenalty = rows.length;
+      }
+
+      // 11. loan_lifecycle_events (1:N) — loanSale / participation / debtEquitySwap / recovery
+      await _client.from('loan_lifecycle_events').delete().eq('deal_id', dealId);
+      const lcEvents = Array.isArray(B.lifecycleEvents) ? B.lifecycleEvents : [];
+      if(lcEvents.length){
+        const rows = lcEvents.map((e, i) => ({
+          deal_id:               dealId,
+          event_no:              i + 1,
+          event_date:            e.date,
+          event_type:            safeEnum('lifecycle_event_type', e.type, true) || 'loanSale',
+          amount:                (e.amount != null ? +e.amount : null),
+          sale_proceeds:         (e.saleProceeds != null ? +e.saleProceeds : null),
+          participation_pct:     (e.participationPct != null ? +e.participationPct : null),
+          equity_received_value: (e.equityReceivedValue != null ? +e.equityReceivedValue : null),
+          allocation_json:       e.allocation || null,
+          notes:                 e.notes || null,
+          status:                e.status || 'actual'
+        }));
+        const { error: lcErr } = await _client.from('loan_lifecycle_events').insert(rows);
+        if(lcErr){ console.error('[SB] saveDeal: loan_lifecycle_events:', lcErr); return { ok:false, reason: lcErr.message }; }
+        counts.lifecycleEvents = rows.length;
+      }
+
       console.log('[SB] saveDeal complete:', dealCode, 'deal_id=', dealId, counts);
       return { ok:true, dealId, dealCode, counts };
     } catch(err) {
@@ -3423,7 +3626,13 @@ window.SB = (function(){
             'drawdowns(*), paydowns(*)' +
           '), ' +
           'fees(*), ' +
-          'aasb_extras(*)'
+          'aasb_extras(*), ' +
+          // V3 — Stage 2 settings tables (proper relational persistence)
+          'treatment_overrides(*), ' +
+          'modification_events(*), ' +
+          'default_events(*), ' +
+          'prepayment_penalty_schedule(*), ' +
+          'loan_lifecycle_events(*)'
         )
         .eq('is_preset', false)
         .order('updated_at', { ascending: false });
@@ -3512,7 +3721,112 @@ window.SB = (function(){
             relatedParty:       row.aasb_extras[0].related_party,
             gstTreatment:       row.aasb_extras[0].gst_treatment,
             apraStandard:       row.aasb_extras[0].apra_standard
-          } : null
+          } : null,
+          // V3 — Stage 2 settings (proper relational hydration)
+          treatmentOverrides: (Array.isArray(row.treatment_overrides) && row.treatment_overrides.length) ? (function(){
+            const o = row.treatment_overrides[0];
+            return {
+              // Map DB enum stage1/stage2/stage3/poci back to integer 1/2/3 for the UI.
+              // poci → null (UI uses a separate flag for purchased credit-impaired).
+              eclStage: (function(){
+                const v = o.ecl_stage;
+                if(v === 'stage1') return 1;
+                if(v === 'stage2') return 2;
+                if(v === 'stage3') return 3;
+                if(v === 'poci')   return null;
+                return v;
+              })(),
+              pdAnnual:                    o.pd_annual != null ? +o.pd_annual : null,
+              lgd:                         o.lgd != null ? +o.lgd : null,
+              qFactor:                     o.q_factor != null ? +o.q_factor : null,
+              eirMethod:                   o.eir_method,
+              eirOverride:                 o.eir_override != null ? +o.eir_override : null,
+              oidTreatment:                o.oid_treatment,
+              oidMethod:                   o.oid_method,
+              pikRateOverride:             o.pik_rate_override != null ? +o.pik_rate_override : null,
+              tradeAccountingMethod:       o.trade_accounting_method,
+              tradeDate:                   o.trade_date,
+              tradeAccruedInterest:        o.trade_accrued_interest != null ? +o.trade_accrued_interest : null,
+              useReversingEntries:         !!o.use_reversing_entries,
+              revolverCostDeferralBasis:   o.revolver_cost_deferral_basis,
+              amortProfileKind:            o.amort_profile_kind,
+              amortProfileFrequency:       o.amort_profile_frequency,
+              amortProfileIoMonths:        o.amort_profile_io_months,
+              amortProfileBalloon:         o.amort_profile_balloon != null ? +o.amort_profile_balloon : null,
+              amortProfileStartDate:       o.amort_profile_start_date,
+              hedgeDesignationType:        o.hedge_designation_type,
+              hedgeDesignationDate:        o.hedge_designation_date,
+              hedgeDeDesignationDate:      o.hedge_de_designation_date,
+              hedgeDeDesignationReason:    o.hedge_de_designation_reason,
+              allowanceReversalAmount:     o.allowance_reversal_amount != null ? +o.allowance_reversal_amount : null,
+              allowanceReversalDate:       o.allowance_reversal_date,
+              // ───────── V3 — 22 legacy fields (now wired) ─────────
+              ifrs9Classification:         o.ifrs9_classification,
+              businessModel:               o.business_model,
+              sppiPassed:                  (o.sppi_passed == null ? null : !!o.sppi_passed),
+              fairValueLevel:              o.fv_level,
+              computeECL:                  (o.compute_ecl == null ? null : !!o.compute_ecl),
+              poci:                        (o.poci_flag == null ? null : !!o.poci_flag),
+              stage3InterestBase:          (o.stage3_interest_on_net ? 'net' : 'gross'),
+              suspendedInterest:           (o.suspended == null ? null : !!o.suspended),
+              eadCCF:                      (o.ead_ccf != null ? +o.ead_ccf : null),
+              dpdStage2Threshold:          o.dpd_to_stage2,
+              dpdStage3Threshold:          o.dpd_to_stage3,
+              dpdCurrent:                  o.dpd_current,
+              covenantBreach:              (o.covenant_breach == null ? null : !!o.covenant_breach),
+              watchlistOverride:           (o.watchlist == null ? null : !!o.watchlist),
+              macroOverlayWeight:          (o.macro_overlay_weight != null ? +o.macro_overlay_weight : null),
+              modSubstantialThreshold:     (o.mod_threshold_pct != null ? +o.mod_threshold_pct : null),
+              modRecomputeEIROnSubstantial:(o.mod_reir_on_substantial == null ? null : !!o.mod_reir_on_substantial),
+              modDefaultTreatment:         o.mod_default_classification,
+              modContinuingInvolvement:    (o.continuing == null ? null : !!o.continuing),
+              taxWhtRate:                  (o.wht_rate != null ? +o.wht_rate : null),
+              taxWhtRecoverability:        (o.wht_recoverable ? 'recoverable' : 'nonRecoverable'),
+              taxDeferred:                 (o.deferred_tax == null ? null : !!o.deferred_tax),
+              fxRevaluationCadence:        o.fx_cadence,
+              pikEnabled:                  (o.pik_enabled == null ? null : !!o.pik_enabled),
+              pikRate:                     (o.pik_rate != null ? +o.pik_rate : null),
+              pikCapitalizationFrequency:  o.pik_frequency
+            };
+          })() : null,
+          modificationEvents: (Array.isArray(row.modification_events) ? row.modification_events.slice().sort((a,b) => (a.modification_date||'').localeCompare(b.modification_date||'')) : []).map(m => ({
+            // Use the Builder shape (date / modType / reason / gainLoss / pvDelta)
+            date:       m.modification_date,
+            modType:    m.is_substantial ? 'substantial' : 'non-substantial',
+            type:       m.is_substantial ? 'substantial' : 'non-substantial', // legacy alias
+            reason:     m.description || '',
+            description:m.description,
+            pvDelta:    m.pv_change_pct != null ? +m.pv_change_pct : null,
+            preModCv:   m.pre_mod_cv    != null ? +m.pre_mod_cv    : null,
+            postModCv:  m.post_mod_cv   != null ? +m.post_mod_cv   : null,
+            gainLoss:   m.gain_loss     != null ? +m.gain_loss     : null,
+            eirReset:   !!m.eir_reset,
+            notes:      m.notes
+          })),
+          defaultEvents: sort(row.default_events, 'event_no').map(d => ({
+            date:             d.event_date,
+            ratePct:          d.default_rate_pct != null ? +d.default_rate_pct : null,
+            daysPastDue:      d.days_past_due,
+            recoveryEstimate: d.recovery_estimate != null ? +d.recovery_estimate : null,
+            notes:            d.notes
+          })),
+          prepaymentPenaltySchedule: sort(row.prepayment_penalty_schedule, 'band_no').map(b => ({
+            from:    b.from_date,
+            to:      b.to_date,
+            ratePct: +b.rate_pct || 0,
+            note:    b.note
+          })),
+          lifecycleEvents: sort(row.loan_lifecycle_events, 'event_no').map(e => ({
+            date:                e.event_date,
+            type:                e.event_type,
+            amount:              e.amount != null ? +e.amount : null,
+            saleProceeds:        e.sale_proceeds != null ? +e.sale_proceeds : null,
+            participationPct:    e.participation_pct != null ? +e.participation_pct : null,
+            equityReceivedValue: e.equity_received_value != null ? +e.equity_received_value : null,
+            allocation:          e.allocation_json,
+            notes:               e.notes,
+            status:              e.status || 'actual'
+          }))
         };
         return {
           key:         'db-' + row.deal_code,
@@ -7309,6 +7623,34 @@ function renderMultiEventList(listId, events, formatEvent, emptyMsg, container){
   el.innerHTML = rows;
 }
 
+// ─── V3 — Helpers for mirroring inst.* writes into B for DB persistence ───
+// Each Stage 2 transtype handler that writes to inst.* should also call one
+// of these to mirror the change onto B (the source of truth that saveDeal
+// persists). Skipped silently if window.B is missing.
+function _ensureBuilderField(name, defaultValue){
+  if(typeof window.B === 'undefined' || !window.B) return null;
+  if(window.B[name] == null) window.B[name] = defaultValue;
+  return window.B[name];
+}
+function _ensureBuilderOverrides(){
+  if(typeof window.B === 'undefined' || !window.B) return null;
+  if(!window.B.treatmentOverrides) window.B.treatmentOverrides = {};
+  return window.B.treatmentOverrides;
+}
+function _pushLifecycleEvent(eventType, payload){
+  const list = _ensureBuilderField('lifecycleEvents', []);
+  if(!list) return;
+  // For event types that are one-of-a-kind (loanSale, debtEquitySwap) strip
+  // existing entries of the same type before pushing — matches the inst.*
+  // filter-then-push pattern used elsewhere in Stage 2.
+  if(['loanSale','debtEquitySwap'].indexOf(eventType) >= 0){
+    for(let i = list.length - 1; i >= 0; i--){
+      if(list[i] && list[i].type === eventType) list.splice(i, 1);
+    }
+  }
+  list.push(Object.assign({ type: eventType, status: 'actual' }, payload));
+}
+
 // Transtype #4 — Prepayment. Accumulates: multiple prepayments allowed.
 // V3 — Also writes to B.tranches[0].repayments with kind='voluntary' so the
 // prepayment survives navigation (re-registration of the instrument rebuilds
@@ -7547,17 +7889,25 @@ function renderTier1StatusChips(inst){
   // #3 Trade accrued interest
   const chip3 = $('t3-status-chip');
   const accInput = $('opt-t3-accrued');
-  const acc = inst.tradeAccruedInterest;
+  // V3 — Normalise: PG numeric columns sometimes come back as strings via the
+  // Supabase JS client, and the prior code required `typeof === 'number' && > 0`,
+  // silently treating a string-numeric value as "no data" and blanking the
+  // field. Coerce with +x and accept ANY non-NaN non-zero (positive OR
+  // negative) value so reload from DB always re-populates.
+  const accRaw = inst.tradeAccruedInterest;
+  const accNum = (accRaw === null || accRaw === undefined || accRaw === '') ? null : +accRaw;
+  const accValid = (typeof accNum === 'number' && !isNaN(accNum) && accNum !== 0);
+  console.log('[V3 t3 trade-accrued] inst.tradeAccruedInterest=', accRaw, '→ parsed=', accNum, '· valid=', accValid);
   if(chip3){
-    if(typeof acc === 'number' && acc > 0){
+    if(accValid){
       chip3.className = 'chip green text-[10px]';
-      chip3.textContent = 'paid ' + fmtK(acc) + (inst.tradeDate ? ' @ ' + inst.tradeDate : '');
+      chip3.textContent = 'paid ' + fmtK(accNum) + (inst.tradeDate ? ' @ ' + inst.tradeDate : '');
     } else {
       chip3.className = 'chip gray text-[10px]';
       chip3.textContent = 'no trade accrual';
     }
   }
-  if(accInput) accInput.value = (typeof acc === 'number' && acc > 0) ? acc : '';
+  if(accInput) accInput.value = accValid ? accNum : '';
 
   // Helper to render a one-event panel
   function renderOneEventPanel(chipId, listId, evt, chipFn, listFn, emptyChip, emptyList){
@@ -7803,8 +8153,159 @@ window.repaintStage2FromState = function(){
 };
 
 // Treatment changed — apply, recalculate everything downstream
+// ─── V3 — syncBuilderFromInstrument ────────────────────────────────────
+// One-stop snapshot: copy every Stage 2 setting from inst into B (the
+// source of truth that saveDeal persists). Called from onTreatmentChange()
+// so every Stage 2 mutation propagates to B without the individual handlers
+// needing to know about the persistence layer.
+//
+// Fields synced:
+//   • B.modificationEvents         ← inst.modificationEvents[]
+//   • B.defaultEvents              ← inst.defaultEvents[]
+//   • B.prepaymentPenaltySchedule  ← inst.prepaymentPenaltySchedule[]
+//   • B.lifecycleEvents            ← inst.principalSchedule[] filtered to
+//                                    types loanSale / participation /
+//                                    debtEquitySwap / recovery
+//   • B.treatmentOverrides         ← all the per-deal single-value
+//                                    overrides on inst.* (ECL, EIR, OID,
+//                                    PIK, trade-date, hedge, amort, etc.)
+function syncBuilderFromInstrument(inst){
+  if(!inst || typeof window.B === 'undefined' || !window.B) return;
+  // Collections
+  window.B.modificationEvents        = (inst.modificationEvents        || []).map(e => ({ ...e }));
+  window.B.defaultEvents             = (inst.defaultEvents             || []).map(e => ({ ...e }));
+  window.B.prepaymentPenaltySchedule = (inst.prepaymentPenaltySchedule || []).map(e => ({ ...e }));
+  // Lifecycle events extracted from principalSchedule. Includes ALL Tier 1
+  // (#8 writeOff, #9 recovery, #10 cure, #11 forbearance, #12 capitalisedCost)
+  // AND Tier 2 (#13 loanSale, #14 participation, #15 debtEquitySwap, #24 recovery)
+  // event types that live on principalSchedule rather than as standalone fields.
+  // The DB enum lifecycle_event_type was extended with the Tier 1 names so all
+  // of these can be persisted to loan_lifecycle_events.
+  const lcTypes = new Set([
+    'loanSale','participation','debtEquitySwap','recovery',
+    'writeOff','cure','forbearance','capitalisedCost'
+  ]);
+  window.B.lifecycleEvents = (inst.principalSchedule || [])
+    .filter(e => lcTypes.has(e.type))
+    .map(e => ({
+      date:                e.date,
+      type:                e.type,
+      amount:              e.amount,
+      saleProceeds:        e.salePrice != null ? e.salePrice : e.saleProceeds,
+      participationPct:    e.fraction != null ? (e.fraction * 100) : e.participationPct,
+      equityReceivedValue: e.equityValue != null ? e.equityValue : e.equityReceivedValue,
+      allocation:          e.allocation || null,
+      // Tier 1 #10 cure carries a `releaseAmount`; Tier 1 #11 forbearance
+      // carries `deferredAmount`; Tier 1 #12 capitalisedCost carries `category`.
+      // Stuff them into notes so they're preserved (the DB columns are sparse
+      // and don't have dedicated slots for these).
+      notes: [e.reason || e.notes, e.category, e.releaseAmount != null ? 'releaseAmount=' + e.releaseAmount : null,
+              e.deferredAmount != null ? 'deferredAmount=' + e.deferredAmount : null]
+             .filter(Boolean).join(' · ') || null,
+      status:              e.status || 'actual'
+    }));
+  // Single-value treatment overrides
+  window.B.treatmentOverrides = window.B.treatmentOverrides || {};
+  const o = window.B.treatmentOverrides;
+  // IFRS / GAAP ECL parameters
+  if(inst.ifrs){
+    if(inst.ifrs.ecLStage != null)  o.eclStage = inst.ifrs.ecLStage;
+    if(inst.ifrs.pdAnnual != null)  o.pdAnnual = inst.ifrs.pdAnnual;
+    if(inst.ifrs.lgd != null)       o.lgd      = inst.ifrs.lgd;
+    if(inst.ifrs.qFactor != null)   o.qFactor  = inst.ifrs.qFactor;
+  }
+  // EIR
+  if(inst.eirMethod)                       o.eirMethod   = inst.eirMethod;
+  if(inst.eirOverride != null)             o.eirOverride = inst.eirOverride;
+  // OID
+  if(inst.oidTreatment)                    o.oidTreatment = inst.oidTreatment;
+  if(inst.oidMethod)                       o.oidMethod    = inst.oidMethod;
+  // PIK rate override (per-tranche PIK toggle stays in B.tranches[].pik)
+  if(inst.pik && inst.pik.rate != null)    o.pikRateOverride = inst.pik.rate;
+  // Trade-date accounting
+  if(inst.tradeAccountingMethod)           o.tradeAccountingMethod = inst.tradeAccountingMethod;
+  if(inst.tradeDate)                       o.tradeDate             = inst.tradeDate;
+  if(inst.tradeAccruedInterest != null)    o.tradeAccruedInterest  = inst.tradeAccruedInterest;
+  // Reversing entries
+  if(inst.useReversingEntries)             o.useReversingEntries = true;
+  // Revolver cost deferral basis
+  if(inst.revolverCostDeferralBasis)       o.revolverCostDeferralBasis = inst.revolverCostDeferralBasis;
+  // Amortisation profile
+  if(inst.amortProfile){
+    o.amortProfileKind       = inst.amortProfile.kind;
+    o.amortProfileFrequency  = inst.amortProfile.frequency;
+    o.amortProfileIoMonths   = inst.amortProfile.ioMonths;
+    o.amortProfileBalloon    = inst.amortProfile.balloon;
+    o.amortProfileStartDate  = inst.amortProfile.startDate;
+  }
+  // Hedge designation / de-designation
+  if(inst.hedge && inst.hedge.type){
+    o.hedgeDesignationType = inst.hedge.type;
+    if(inst.hedge.designationDate) o.hedgeDesignationDate = inst.hedge.designationDate;
+  }
+  if(inst.hedgeDeDesignationDate)   o.hedgeDeDesignationDate   = inst.hedgeDeDesignationDate;
+  if(inst.hedgeDeDesignationReason) o.hedgeDeDesignationReason = inst.hedgeDeDesignationReason;
+  // Allowance reversal (#23)
+  if(inst.allowanceReversalAmount != null) o.allowanceReversalAmount = inst.allowanceReversalAmount;
+  if(inst.allowanceReversalDate)           o.allowanceReversalDate   = inst.allowanceReversalDate;
+  // ───────────────────────────────────────────────────────────────────
+  // V3 — 22 legacy fields (the ones FIELD_AUDIT_REPORT flagged as lost).
+  // Each is read by the engine OR by Stage 2 JE-generation overlays. The
+  // Stage 2 form mutates inst.ifrs.* / inst.pik.* via applyTreatmentFromForm;
+  // mirror them onto B.treatmentOverrides so saveDeal persists them.
+  // ───────────────────────────────────────────────────────────────────
+  if(inst.ifrs){
+    if(inst.ifrs.ifrs9Classification)       o.ifrs9Classification       = inst.ifrs.ifrs9Classification;
+    if(inst.ifrs.businessModel)             o.businessModel             = inst.ifrs.businessModel;
+    if(inst.ifrs.sppiPassed != null)        o.sppiPassed                = !!inst.ifrs.sppiPassed;
+    if(inst.ifrs.fairValueLevel != null)    o.fairValueLevel            = +inst.ifrs.fairValueLevel;
+    if(inst.ifrs.computeECL != null)        o.computeECL                = !!inst.ifrs.computeECL;
+    if(inst.ifrs.poci != null)              o.poci                      = !!inst.ifrs.poci;
+    if(inst.ifrs.stage3InterestBase)        o.stage3InterestBase        = inst.ifrs.stage3InterestBase;
+    if(inst.ifrs.suspendedInterest != null) o.suspendedInterest         = !!inst.ifrs.suspendedInterest;
+    if(inst.ifrs.eadCCF != null)            o.eadCCF                    = +inst.ifrs.eadCCF;
+    if(inst.ifrs.dpdStage2Threshold != null)o.dpdStage2Threshold        = +inst.ifrs.dpdStage2Threshold;
+    if(inst.ifrs.dpdStage3Threshold != null)o.dpdStage3Threshold        = +inst.ifrs.dpdStage3Threshold;
+    if(inst.ifrs.dpdCurrent != null)        o.dpdCurrent                = +inst.ifrs.dpdCurrent;
+    if(inst.ifrs.covenantBreach != null)    o.covenantBreach            = !!inst.ifrs.covenantBreach;
+    if(inst.ifrs.watchlistOverride != null) o.watchlistOverride         = !!inst.ifrs.watchlistOverride;
+    if(inst.ifrs.macroOverlayWeight != null)o.macroOverlayWeight        = +inst.ifrs.macroOverlayWeight;
+    if(inst.ifrs.fxRevaluationCadence)      o.fxRevaluationCadence      = inst.ifrs.fxRevaluationCadence;
+    // Modification policy block (inst.ifrs.modification.*)
+    if(inst.ifrs.modification){
+      const md = inst.ifrs.modification;
+      if(md.substantialThreshold != null)        o.modSubstantialThreshold      = +md.substantialThreshold;
+      if(md.recomputeEIROnSubstantial != null)   o.modRecomputeEIROnSubstantial = !!md.recomputeEIROnSubstantial;
+      if(md.defaultTreatment)                    o.modDefaultTreatment          = md.defaultTreatment;
+      if(md.continuingInvolvement != null)       o.modContinuingInvolvement     = !!md.continuingInvolvement;
+    }
+    // Tax block (inst.ifrs.tax.*)
+    if(inst.ifrs.tax){
+      const tx = inst.ifrs.tax;
+      if(tx.whtRate != null)         o.taxWhtRate            = +tx.whtRate;
+      if(tx.whtRecoverability)       o.taxWhtRecoverability  = tx.whtRecoverability;
+      if(tx.deferredTax != null)     o.taxDeferred           = !!tx.deferredTax;
+    }
+  }
+  // PIK legacy columns (alongside the new pik_rate_override)
+  if(inst.pik){
+    if(inst.pik.enabled != null)                  o.pikEnabled                  = !!inst.pik.enabled;
+    if(inst.pik.rate != null)                     o.pikRate                     = +inst.pik.rate;
+    if(inst.pik.capitalizationFrequency)          o.pikCapitalizationFrequency  = inst.pik.capitalizationFrequency;
+  }
+}
+
 function onTreatmentChange(){
   applyTreatmentFromForm();
+  // V3 — Snapshot inst → B so the change is captured for DB persistence.
+  // This runs after EVERY Stage 2 mutation (transtype add/remove, treatment
+  // override change, modification injection, etc.) so individual handlers
+  // don't need to know about B.
+  const _inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+  if(_inst && typeof syncBuilderFromInstrument === 'function'){
+    try { syncBuilderFromInstrument(_inst); }
+    catch(err){ console.warn('[V3] syncBuilderFromInstrument failed:', err); }
+  }
   // V3 — Autosave hook (Stage 2 transtype additions / removals route through
   // here). Fires only when the loaded deal lives in the DB.
   if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
@@ -14366,6 +14867,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         spread: (firstIC.spreads?.[0]?.bps || 0) / 10000,
         floor: null, cap: null
       } : { type:'Fixed', fixedRate: 0.05, floatingRate:0, spread:0, floor:null, cap:null },
+      // V3 — Project RFR convention from the first interest term so the engine's
+      // compounded-RFR helper has lookback / observation_shift / lockout /
+      // daily_compounding / weighted available. Without this, those persisted
+      // fields had no effect on the rate calc (audit-report MEDIUM finding).
+      rfr: firstIC ? {
+        index:            firstIC.baseIndex,                                     // 'SONIA' / 'SOFR' / 'TermSOFR' / 'ESTR' / 'BBSW' / etc.
+        baseRate:         firstIC.baseIndex !== 'FIXED' ? firstIC.baseValue : 0, // current observed level (used as fallback when no fixings series)
+        tenor:            firstIC.terms?.[0]?.tenor            || '3M',
+        lookbackDays:     +firstIC.terms?.[0]?.lookbackDays    || 0,
+        observationShift: +firstIC.terms?.[0]?.observationShift|| 0,
+        lockoutDays:      +firstIC.terms?.[0]?.lockoutDays     || 0,
+        dailyCompounding: !!firstIC.terms?.[0]?.dailyCompounding,
+        weighted:         !!firstIC.terms?.[0]?.weighted,
+        // Optional fixings series for true compounding. Empty by default — the
+        // helper falls back to `baseRate` for any day not covered. Format:
+        // [{ date:'2026-01-15', rate: 0.0425 }, ...]
+        fixings:          firstIC.fixings || []
+      } : undefined,
       pik: { enabled:false, rate:0 },
       nonUseFee: { enabled:false, rate:0 },
       amortization: { method:'none' },
@@ -14447,6 +14966,135 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       _viewMode:         B._viewMode         ?? 'participation',
       _builderSource: B   // round-trip metadata
     };
+
+    // V3 — Project persisted Stage 2 settings from B onto inst so the engine /
+    // Treatment Panel see them after a DB-load. Each field defaults to the
+    // current inst value (already populated by IFRS defaults above), only
+    // overrides if the user set it via Stage 2.
+    const ov = B.treatmentOverrides || null;
+    if(ov){
+      // IFRS overrides land on inst.ifrs (engine reads inst.ifrs.*)
+      inst.ifrs = inst.ifrs || {};
+      if(ov.eclStage != null)  inst.ifrs.ecLStage = +ov.eclStage;
+      if(ov.pdAnnual != null)  inst.ifrs.pdAnnual = +ov.pdAnnual;
+      if(ov.lgd != null)       inst.ifrs.lgd      = +ov.lgd;
+      if(ov.qFactor != null)   inst.ifrs.qFactor  = +ov.qFactor;
+      // EIR override
+      if(ov.eirMethod)         inst.eirMethod = ov.eirMethod;
+      if(ov.eirOverride != null) inst.eirOverride = +ov.eirOverride;
+      // OID
+      if(ov.oidTreatment && ov.oidTreatment !== 'none') inst.oidTreatment = ov.oidTreatment;
+      if(ov.oidMethod)         inst.oidMethod = ov.oidMethod;
+      // PIK rate (per-tranche toggle stays on B.tranches; this is a deal-wide rate)
+      if(ov.pikRateOverride != null){
+        inst.pik = inst.pik || { enabled:true, rate:0 };
+        inst.pik.rate = +ov.pikRateOverride;
+        inst.pik.enabled = true;
+      }
+      // Trade-date accounting (#18)
+      if(ov.tradeAccountingMethod === 'tradeDate') inst.tradeAccountingMethod = 'tradeDate';
+      if(ov.tradeDate)         inst.tradeDate = ov.tradeDate;
+      if(ov.tradeAccruedInterest != null) inst.tradeAccruedInterest = +ov.tradeAccruedInterest;
+      // Reversing entries (#19)
+      if(ov.useReversingEntries) inst.useReversingEntries = true;
+      // Revolver cost deferral basis (#25)
+      if(ov.revolverCostDeferralBasis) inst.revolverCostDeferralBasis = ov.revolverCostDeferralBasis;
+      // Amortisation profile (#17)
+      if(ov.amortProfileKind && ov.amortProfileKind !== 'bullet'){
+        inst.amortProfile = {
+          kind:       ov.amortProfileKind,
+          frequency:  ov.amortProfileFrequency || 'Q',
+          ioMonths:   ov.amortProfileIoMonths || 0,
+          balloon:    ov.amortProfileBalloon || 0,
+          startDate:  ov.amortProfileStartDate || null
+        };
+      }
+      // Hedge designation (#20-22)
+      if(ov.hedgeDesignationType && ov.hedgeDesignationType !== 'none'){
+        inst.hedge = inst.hedge || {};
+        inst.hedge.type = ov.hedgeDesignationType;
+        if(ov.hedgeDesignationDate) inst.hedge.designationDate = ov.hedgeDesignationDate;
+      }
+      if(ov.hedgeDeDesignationDate)   inst.hedgeDeDesignationDate = ov.hedgeDeDesignationDate;
+      if(ov.hedgeDeDesignationReason) inst.hedgeDeDesignationReason = ov.hedgeDeDesignationReason;
+      // Allowance reversal (#23)
+      if(ov.allowanceReversalAmount != null) inst.allowanceReversalAmount = +ov.allowanceReversalAmount;
+      if(ov.allowanceReversalDate)           inst.allowanceReversalDate   = ov.allowanceReversalDate;
+      // ───────────────────────────────────────────────────────────────
+      // V3 — 22 legacy fields → project back onto inst.ifrs.* / inst.pik.*
+      // so the engine reads them in ECL / mod / tax / FX / PIK calcs.
+      // ───────────────────────────────────────────────────────────────
+      inst.ifrs = inst.ifrs || {};
+      if(ov.ifrs9Classification)       inst.ifrs.ifrs9Classification = ov.ifrs9Classification;
+      if(ov.businessModel)             inst.ifrs.businessModel       = ov.businessModel;
+      if(ov.sppiPassed != null)        inst.ifrs.sppiPassed          = !!ov.sppiPassed;
+      if(ov.fairValueLevel != null)    inst.ifrs.fairValueLevel      = +ov.fairValueLevel;
+      if(ov.computeECL != null)        inst.ifrs.computeECL          = !!ov.computeECL;
+      if(ov.poci != null)              inst.ifrs.poci                = !!ov.poci;
+      if(ov.stage3InterestBase)        inst.ifrs.stage3InterestBase  = ov.stage3InterestBase;
+      if(ov.suspendedInterest != null) inst.ifrs.suspendedInterest   = !!ov.suspendedInterest;
+      if(ov.eadCCF != null)            inst.ifrs.eadCCF              = +ov.eadCCF;
+      if(ov.dpdStage2Threshold != null)inst.ifrs.dpdStage2Threshold  = +ov.dpdStage2Threshold;
+      if(ov.dpdStage3Threshold != null)inst.ifrs.dpdStage3Threshold  = +ov.dpdStage3Threshold;
+      if(ov.dpdCurrent != null)        inst.ifrs.dpdCurrent          = +ov.dpdCurrent;
+      if(ov.covenantBreach != null)    inst.ifrs.covenantBreach      = !!ov.covenantBreach;
+      if(ov.watchlistOverride != null) inst.ifrs.watchlistOverride   = !!ov.watchlistOverride;
+      if(ov.macroOverlayWeight != null)inst.ifrs.macroOverlayWeight  = +ov.macroOverlayWeight;
+      if(ov.fxRevaluationCadence)      inst.ifrs.fxRevaluationCadence= ov.fxRevaluationCadence;
+      // Mod policy
+      if(ov.modSubstantialThreshold != null || ov.modRecomputeEIROnSubstantial != null ||
+         ov.modDefaultTreatment || ov.modContinuingInvolvement != null){
+        inst.ifrs.modification = inst.ifrs.modification || {};
+        if(ov.modSubstantialThreshold != null)        inst.ifrs.modification.substantialThreshold      = +ov.modSubstantialThreshold;
+        if(ov.modRecomputeEIROnSubstantial != null)   inst.ifrs.modification.recomputeEIROnSubstantial = !!ov.modRecomputeEIROnSubstantial;
+        if(ov.modDefaultTreatment)                    inst.ifrs.modification.defaultTreatment          = ov.modDefaultTreatment;
+        if(ov.modContinuingInvolvement != null)       inst.ifrs.modification.continuingInvolvement     = !!ov.modContinuingInvolvement;
+      }
+      // Tax
+      if(ov.taxWhtRate != null || ov.taxWhtRecoverability || ov.taxDeferred != null){
+        inst.ifrs.tax = inst.ifrs.tax || {};
+        if(ov.taxWhtRate != null)        inst.ifrs.tax.whtRate          = +ov.taxWhtRate;
+        if(ov.taxWhtRecoverability)      inst.ifrs.tax.whtRecoverability= ov.taxWhtRecoverability;
+        if(ov.taxDeferred != null)       inst.ifrs.tax.deferredTax      = !!ov.taxDeferred;
+      }
+      // PIK — legacy block (pikRateOverride was already handled above for the new path)
+      if(ov.pikEnabled != null || ov.pikRate != null || ov.pikCapitalizationFrequency){
+        inst.pik = inst.pik || { enabled:false, rate:0 };
+        if(ov.pikEnabled != null)                inst.pik.enabled                = !!ov.pikEnabled;
+        if(ov.pikRate != null)                   inst.pik.rate                   = +ov.pikRate;
+        if(ov.pikCapitalizationFrequency)        inst.pik.capitalizationFrequency= ov.pikCapitalizationFrequency;
+      }
+    }
+    // Collections (#6, #9, #5)
+    if(Array.isArray(B.modificationEvents) && B.modificationEvents.length){
+      inst.modificationEvents = B.modificationEvents.map(m => ({ ...m }));
+    }
+    if(Array.isArray(B.defaultEvents) && B.defaultEvents.length){
+      inst.defaultEvents = B.defaultEvents.map(d => ({ ...d }));
+    }
+    if(Array.isArray(B.prepaymentPenaltySchedule) && B.prepaymentPenaltySchedule.length){
+      inst.prepaymentPenaltySchedule = B.prepaymentPenaltySchedule.map(b => ({ ...b }));
+    }
+    // Lifecycle events (#13/#14/#15/#24) — fold into principalSchedule so
+    // the engine processes them as events (no separate code path needed).
+    if(Array.isArray(B.lifecycleEvents) && B.lifecycleEvents.length){
+      B.lifecycleEvents.forEach((e, i) => {
+        const evt = {
+          date:    e.date,
+          type:    e.type,
+          amount:  +e.amount || 0,
+          eventId: id + '_LC' + (i+1),
+          status:  e.status || 'actual',
+          notes:   e.notes || ''
+        };
+        if(e.saleProceeds        != null) evt.saleProceeds        = +e.saleProceeds;
+        if(e.participationPct    != null) evt.participationPct    = +e.participationPct;
+        if(e.equityReceivedValue != null) evt.equityReceivedValue = +e.equityReceivedValue;
+        if(e.allocation)                  evt.allocation          = e.allocation;
+        inst.principalSchedule.push(evt);
+      });
+    }
+
     return inst;
   }
 
@@ -15400,6 +16048,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B._presetKey        = p.key;
     if(window.V2_CTX) window.V2_CTX.activePresetKey = p.key;
     B.aasbExtras  = built.aasbExtras  || null;
+    // V3 — Stage 2 settings hydrated from DB by fetchUserDeals
+    B.treatmentOverrides        = built.treatmentOverrides        || null;
+    B.modificationEvents        = built.modificationEvents        || [];
+    B.defaultEvents             = built.defaultEvents             || [];
+    B.prepaymentPenaltySchedule = built.prepaymentPenaltySchedule || [];
+    B.lifecycleEvents           = built.lifecycleEvents           || [];
     B.marketData  = { static: [], pricing: {}, ingestedAt: null };
     console.log('[V3] loadPresetByObject: B updated, calling form refresh functions');
     try { populateDealForm(); console.log('[V3]   populateDealForm OK'); } catch(e){ console.error('[V3]   populateDealForm FAILED:', e); }
