@@ -771,6 +771,23 @@
       </div>
     </details>
 
+    <!-- ─── COVENANTS (V3 Small-scope) ─── -->
+    <details class="builder-section">
+      <summary>
+        <div class="builder-section-icon" style="background:linear-gradient(135deg, #ddd6fe 0%, #c4b5fd 100%); color:#5b21b6;"><span class="material-icons-outlined" style="font-size:20px;">gavel</span></div>
+        <div style="flex:1;">
+          <div class="builder-section-title">Covenants &amp; Reporting <span id="covenants-count-chip" style="font-size:10px; font-weight:600; background:#ede9fe; color:#5b21b6; padding:2px 8px; border-radius:10px; margin-left:6px;">0</span></div>
+          <div class="builder-section-subtitle">Financial maintenance · Incurrence · Information · ESG (SLL) · Borrowing base · drives ECL SICR + ratchets + mandatory prepayments</div>
+        </div>
+        <button id="btn-add-covenant" class="add-btn-pill" onclick="event.stopPropagation()"><span class="material-icons-outlined" style="font-size:14px;">add</span>Add covenant</button>
+      </summary>
+      <div class="builder-section-body">
+        <div id="covenants-container" style="display:grid; gap:10px;">
+          <div id="covenants-empty" class="text-[11px] text-gray-500 italic">No covenants defined for this deal. Click "Add covenant" to capture the first one (typical: Total Leverage, Interest Coverage, DSCR). Once persisted, the Dashboard's Covenants panel will show real data instead of demo placeholders.</div>
+        </div>
+      </div>
+    </details>
+
     <!-- v3 — removed: Market Data (ISIN static + pricing) and Cashflow Events sections.
          Hidden compatibility IDs preserved below so the engine and any legacy
          scripts referencing them still resolve to elements (just invisible). -->
@@ -1914,6 +1931,16 @@
       <div id="modification-history" class="mt-3"></div>
     </details>
 
+    <!-- F-bis) Phase C — Covenant-driven adjustments -->
+    <details id="covenant-adjustments-section" class="bg-white border border-gray-200 rounded-lg mb-2 p-3 hidden">
+      <summary class="font-semibold text-[12.5px] cursor-pointer flex items-center gap-2">
+        <span class="material-icons-outlined text-[16px]" style="color:#DC2626">verified_user</span>
+        Covenant-Driven Adjustments
+        <span class="text-[11px] text-gray-500 font-normal ml-auto">Engine side-effects fired this run · SICR · margin step-ups · mandatory prepayments</span>
+      </summary>
+      <div id="covenant-adjustments" class="mt-3"></div>
+    </details>
+
     <!-- G) IFRS 9 EIR Calculation Trace — opens in popup with 3 worked examples -->
     <div class="bg-white border border-gray-200 rounded-lg mb-2 p-3 flex items-center gap-2 flex-wrap">
       <span class="material-icons-outlined text-[16px]" style="color:var(--brand-600)">functions</span>
@@ -2958,6 +2985,106 @@ window.SB = (function(){
   }
 
   // ------------------------------------------------------------
+  // syncBreachLog — Phase B medium covenants persistence.
+  //
+  // Called after each Run Accounting with the enriched covenants array
+  // produced by the engine's applyCovenantSideEffects(). Reconciles the DB
+  // covenant_breach_log table with the engine's current view:
+  //   • New breach (engine.status === 'breached', no active log row) → INSERT
+  //   • Active breach still present                                  → UPDATE consequence snapshot
+  //   • Active breach now compliant/headroomWarning                  → mark cured
+  // Idempotent: safe to call after every Run Accounting.
+  //
+  // Inputs:
+  //   dealId   — DB UUID of the deal (from saveAccountingRun result)
+  //   covList  — array of enriched covenants (M.schedule.covenants)
+  //   pSched   — inst.principalSchedule (for prepayment event lookup)
+  // ------------------------------------------------------------
+  async function syncBreachLog(dealId, covList, pSched){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!dealId || !Array.isArray(covList) || !covList.length){
+      return { ok:false, reason:'nothing to sync' };
+    }
+    const today = new Date().toISOString().slice(0,10);
+    const stats = { inserted:0, updated:0, cured:0, skipped:0 };
+    try {
+      for(const c of covList){
+        // Only covenants that have a DB UUID can be tracked (manually-built
+        // loans skipped — they'd need Save to DB first to mint covenant IDs).
+        if(!c.id) { stats.skipped++; continue; }
+        if(c.status === 'breached' && c.breachDate){
+          // Look up synthesised mandatory-prepayment event for this covenant
+          const prepEvt = Array.isArray(pSched)
+            ? pSched.find(e => e && e._covenantSynthesised && e._covenantIdentity === c.covIdentity)
+            : null;
+          const row = {
+            covenant_id:             c.id,
+            deal_id:                 dealId,
+            breach_date:             c.breachDate,
+            breach_value:            c.lastReportedValue != null ? +c.lastReportedValue : null,
+            threshold_at_breach:     c.threshold != null ? +c.threshold : null,
+            direction_at_breach:     c.direction || null,
+            consequence_applied:     Array.isArray(c.consequenceList) ? c.consequenceList : [],
+            margin_step_up_bps:      (c.consequenceList || []).includes('marginStepUp')
+                                     ? (+c.breachStepUpBps || 0) : null,
+            sicr_triggered:          (c.consequenceList || []).includes('sicrTrigger'),
+            prepayment_triggered:    !!prepEvt,
+            prepayment_event_date:   prepEvt ? prepEvt.date : null,
+            prepayment_event_amount: prepEvt ? +prepEvt.amount || null : null,
+            status:                  'active',
+            updated_at:              new Date().toISOString()
+          };
+          const { error: upErr } = await _client
+            .from('covenant_breach_log')
+            .upsert(row, { onConflict: 'covenant_id,breach_date', ignoreDuplicates: false });
+          if(upErr){
+            console.error('[SB] syncBreachLog upsert:', upErr);
+          } else {
+            stats.inserted++;
+          }
+        } else {
+          // Covenant currently compliant or headroomWarning — close any active
+          // log rows on this covenant. We don't touch breaches that are already
+          // cured / waived / acceleratedToPrepayment.
+          const { data: openRows, error: selErr } = await _client
+            .from('covenant_breach_log')
+            .select('id, breach_date')
+            .eq('covenant_id', c.id)
+            .eq('status', 'active');
+          if(selErr){
+            console.error('[SB] syncBreachLog select:', selErr);
+            continue;
+          }
+          if(openRows && openRows.length){
+            const { error: updErr } = await _client
+              .from('covenant_breach_log')
+              .update({
+                status:      'cured',
+                cure_date:   today,
+                cure_value:  c.lastReportedValue != null ? +c.lastReportedValue : null,
+                cure_method: 'naturalCure',
+                cured_at:    new Date().toISOString(),
+                updated_at:  new Date().toISOString()
+              })
+              .eq('covenant_id', c.id)
+              .eq('status', 'active');
+            if(updErr){
+              console.error('[SB] syncBreachLog cure update:', updErr);
+            } else {
+              stats.cured += openRows.length;
+            }
+          }
+        }
+      }
+      console.log('[SB] syncBreachLog', stats);
+      return { ok:true, stats };
+    } catch(err) {
+      console.error('[SB] syncBreachLog failed:', err);
+      return { ok:false, reason: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  // ------------------------------------------------------------
   // Treatment overrides — Stage 2 panel edits.
   // ------------------------------------------------------------
   // Treatment overrides — Stage 2 panel state. PK = deal_id (one row per
@@ -3120,7 +3247,12 @@ window.SB = (function(){
     // now writes these so Stage-2 IFRS9 classification + business model
     // survive Save to DB.
     ifrs9_classification:     { allowed: ['AmortisedCost','FVOCI','FVTPL'], default: 'AmortisedCost', alias: { 'amortised-cost':'AmortisedCost', amortisedCost:'AmortisedCost', fvtpl:'FVTPL', fvoci:'FVOCI' } },
-    business_model:           { allowed: ['HoldToCollect','HoldToCollectAndSell','Other'], default: 'HoldToCollect', alias: { hold:'HoldToCollect', 'hold-to-collect':'HoldToCollect', 'hold-to-collect-and-sell':'HoldToCollectAndSell' } }
+    business_model:           { allowed: ['HoldToCollect','HoldToCollectAndSell','Other'], default: 'HoldToCollect', alias: { hold:'HoldToCollect', 'hold-to-collect':'HoldToCollect', 'hold-to-collect-and-sell':'HoldToCollectAndSell' } },
+    // V3 Covenants Small-scope enums
+    covenant_category:        { allowed: ['maintenance','incurrence','operating','information','sustainability','borrowingBase'], default: 'maintenance' },
+    covenant_direction:       { allowed: ['max','min'], default: 'max' },
+    covenant_test_frequency:  { allowed: ['monthly','quarterly','semiAnnual','annual','event','adHoc'], default: 'quarterly', alias: { 'semi-annual':'semiAnnual', yearly:'annual' } },
+    covenant_consequence:     { allowed: ['notice','marginStepUp','defaultInterest','sicrTrigger','mandatoryPrepayment','acceleration'], default: 'sicrTrigger', alias: { sicr:'sicrTrigger', stepUp:'marginStepUp' } }
   };
   function safeEnum(key, val, allowNull){
     const spec = ENUMS[key];
@@ -3543,6 +3675,38 @@ window.SB = (function(){
         counts.lifecycleEvents = rows.length;
       }
 
+      // 12. covenants (1:N) — Small-scope persistence
+      await _client.from('covenants').delete().eq('deal_id', dealId);
+      const covList = Array.isArray(B.covenants) ? B.covenants : [];
+      if(covList.length){
+        const rows = covList.map((c, i) => ({
+          deal_id:                  dealId,
+          covenant_no:              i + 1,
+          name:                     c.name || 'Covenant ' + (i + 1),
+          category:                 safeEnum('covenant_category', c.category, true) || 'maintenance',
+          kpi_metric:               safeEnum('ratchet_kpi', c.kpiMetric, true) || 'leverageRatio',
+          direction:                safeEnum('covenant_direction', c.direction, true) || 'max',
+          threshold:                (c.threshold != null ? +c.threshold : 0),
+          unit:                     c.unit || null,
+          test_frequency:           safeEnum('covenant_test_frequency', c.testFrequency, true) || 'quarterly',
+          first_test_date:          c.firstTestDate || null,
+          next_test_date:           c.nextTestDate  || null,
+          cure_period_days:         (c.curePeriodDays != null ? +c.curePeriodDays : 0),
+          equity_cure_available:    !!c.equityCureAvailable,
+          max_cure_count_per_year:  (c.maxCureCountPerYear != null ? +c.maxCureCountPerYear : null),
+          consequence_on_breach:    safeEnum('covenant_consequence', c.consequenceOnBreach, true) || 'sicrTrigger',
+          breach_step_up_bps:       (c.breachStepUpBps != null ? +c.breachStepUpBps : null),
+          last_reported_value:      (c.lastReportedValue != null ? +c.lastReportedValue : null),
+          last_reported_date:       c.lastReportedDate || null,
+          credit_agreement_section: c.creditAgreementSection || null,
+          notes:                    c.notes || null,
+          updated_at:               new Date().toISOString()
+        }));
+        const { error: cvErr } = await _client.from('covenants').insert(rows);
+        if(cvErr){ console.error('[SB] saveDeal: covenants:', cvErr); return { ok:false, reason: cvErr.message }; }
+        counts.covenants = rows.length;
+      }
+
       console.log('[SB] saveDeal complete:', dealCode, 'deal_id=', dealId, counts);
       return { ok:true, dealId, dealCode, counts };
     } catch(err) {
@@ -3632,7 +3796,9 @@ window.SB = (function(){
           'modification_events(*), ' +
           'default_events(*), ' +
           'prepayment_penalty_schedule(*), ' +
-          'loan_lifecycle_events(*)'
+          'loan_lifecycle_events(*), ' +
+          // Phase B — nested breach log so Dashboard can render history
+          'covenants(*, covenant_breach_log(*))'
         )
         .eq('is_preset', false)
         .order('updated_at', { ascending: false });
@@ -3816,6 +3982,52 @@ window.SB = (function(){
             ratePct: +b.rate_pct || 0,
             note:    b.note
           })),
+          // V3 Covenants Small-scope — reverse-map DB columns to Builder shape
+          covenants: sort(row.covenants, 'covenant_no').map(c => ({
+            id:                      c.id,
+            name:                    c.name,
+            category:                c.category,
+            kpiMetric:               c.kpi_metric,
+            direction:               c.direction,
+            threshold:               c.threshold != null ? +c.threshold : 0,
+            unit:                    c.unit,
+            testFrequency:           c.test_frequency,
+            firstTestDate:           c.first_test_date,
+            nextTestDate:            c.next_test_date,
+            curePeriodDays:          c.cure_period_days,
+            equityCureAvailable:     !!c.equity_cure_available,
+            maxCureCountPerYear:     c.max_cure_count_per_year,
+            consequenceOnBreach:     c.consequence_on_breach,
+            breachStepUpBps:         c.breach_step_up_bps,
+            lastReportedValue:       c.last_reported_value != null ? +c.last_reported_value : null,
+            lastReportedDate:        c.last_reported_date,
+            creditAgreementSection:  c.credit_agreement_section,
+            notes:                   c.notes,
+            // Phase B — breach history nested under each covenant
+            breachLog: (Array.isArray(c.covenant_breach_log) ? c.covenant_breach_log : [])
+              .slice()
+              .sort((a,b) => (b.breach_date || '').localeCompare(a.breach_date || ''))
+              .map(b => ({
+                id:                    b.id,
+                breachDate:            b.breach_date,
+                breachValue:           b.breach_value != null ? +b.breach_value : null,
+                thresholdAtBreach:     b.threshold_at_breach != null ? +b.threshold_at_breach : null,
+                directionAtBreach:     b.direction_at_breach,
+                consequenceApplied:    Array.isArray(b.consequence_applied) ? b.consequence_applied : [],
+                marginStepUpBps:       b.margin_step_up_bps,
+                sicrTriggered:         !!b.sicr_triggered,
+                prepaymentTriggered:   !!b.prepayment_triggered,
+                prepaymentEventDate:   b.prepayment_event_date,
+                prepaymentEventAmount: b.prepayment_event_amount != null ? +b.prepayment_event_amount : null,
+                status:                b.status,
+                cureDate:              b.cure_date,
+                cureValue:             b.cure_value != null ? +b.cure_value : null,
+                cureMethod:            b.cure_method,
+                notes:                 b.notes,
+                detectedAt:            b.detected_at,
+                curedAt:               b.cured_at
+              }))
+          })),
           lifecycleEvents: sort(row.loan_lifecycle_events, 'event_no').map(e => ({
             date:                e.event_date,
             type:                e.event_type,
@@ -3927,7 +4139,7 @@ window.SB = (function(){
   }
 
   return {
-    init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals,
+    init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals, syncBreachLog,
     getConfig, setConfig, resetConfig, getDefaults, getBackendTypes,
     get url(){ return SUPABASE_URL; }, get projectLabel(){ return PROJECT_LABEL; },
     get isOverride(){ return _cfg.isOverride; },
@@ -6443,15 +6655,23 @@ function handleBuilderSaveDBClick(){
       const detailHtml = '<ul style="list-style:disc; margin-left:18px; line-height:1.7; columns:2; column-gap:24px;">'
         + '<li><b>1</b> deal row</li>'
         + '<li><b>1</b> facility row</li>'
-        + fmtCount(c.tranches,  '<b>tranches</b>')
+        + fmtCount(c.tranches,           '<b>tranches</b>')
         + fmtCount(c.interestComponents, '<b>interest components</b>')
-        + fmtCount(c.terms,     '<b>interest terms</b>')
-        + fmtCount(c.spreads,   '<b>spread rows</b>')
-        + fmtCount(c.ratchets,  '<b>ratchet tiers</b>')
-        + fmtCount(c.drawdowns, '<b>drawdowns</b>')
-        + fmtCount(c.paydowns,  '<b>paydowns</b>')
-        + fmtCount(c.fees,      '<b>fees</b>')
+        + fmtCount(c.terms,              '<b>interest terms</b>')
+        + fmtCount(c.spreads,            '<b>spread rows</b>')
+        + fmtCount(c.ratchets,           '<b>ratchet tiers</b>')
+        + fmtCount(c.drawdowns,          '<b>drawdowns</b>')
+        + fmtCount(c.paydowns,           '<b>paydowns</b>')
+        + fmtCount(c.fees,               '<b>fees</b>')
         + (c.aasbExtras ? '<li><b>1</b> AASB extras row</li>' : '')
+        // V3 Stage 2 settings (added in earlier tasks but missing from popup)
+        + (c.treatmentOverrides ? '<li><b>1</b> treatment-overrides row</li>' : '')
+        + fmtCount(c.modificationEvents, '<b>modification events</b>')
+        + fmtCount(c.defaultEvents,      '<b>default events</b>')
+        + fmtCount(c.prepayPenalty,      '<b>prepayment-penalty bands</b>')
+        + fmtCount(c.lifecycleEvents,    '<b>lifecycle events</b>')
+        // V3 Covenants Small-scope
+        + fmtCount(c.covenants,          '<b>covenants</b>')
         + '</ul>';
       const checkSql = "SELECT name, deal_code, framework, currency, settlement_date, maturity_date, created_at FROM deals WHERE deal_code = '" + res.dealCode + "';";
       showSaveDealResultModal({
@@ -8873,6 +9093,21 @@ function runAccountingImpl(){
             }
           });
         }
+        // Phase B — sync covenant breach log if engine produced enriched covenants
+        if(res.dealId && M.schedule && Array.isArray(M.schedule.covenants) && M.schedule.covenants.length){
+          window.SB.syncBreachLog(res.dealId, M.schedule.covenants, inst.principalSchedule)
+            .then(blRes => {
+              if(blRes && blRes.ok && blRes.stats){
+                const s = blRes.stats;
+                if(s.inserted || s.cured){
+                  toast('Breach log · ' + s.inserted + ' active · ' + s.cured + ' cured', 4000);
+                }
+                console.log('[V3] synced covenant breach log:', s);
+              } else if(blRes && blRes.reason){
+                console.log('[V3] syncBreachLog skipped/failed:', blRes.reason);
+              }
+            });
+        }
       } else if(res && res.reason){
         console.log('[V3] saveAccountingRun skipped/failed:', res.reason);
       }
@@ -9483,6 +9718,79 @@ function renderEvidencePack(inst, summary){
   renderECLTemplates(inst, summary);
   renderECLTrace(inst, summary);
   renderModificationHistory(inst, summary);
+  renderCovenantAdjustments(inst, summary);
+}
+
+// Phase C — Render the "Covenant-Driven Adjustments" evidence pack panel.
+// Pulls from M.schedule.covenants (engine enrichment) for the side-effect
+// summary, and from inst.principalSchedule for synthesised mandatory-prepayment
+// events. Shows §-citations framework-aware so auditors can trace the standard.
+function renderCovenantAdjustments(inst, summary){
+  const section = document.getElementById('covenant-adjustments-section');
+  const out = document.getElementById('covenant-adjustments');
+  if(!section || !out) return;
+  const covs = (typeof M !== 'undefined' && M.schedule && Array.isArray(M.schedule.covenants))
+    ? M.schedule.covenants : [];
+  const breached = covs.filter(c => c && c.status === 'breached');
+  // Hide the panel when nothing to show — keeps evidence pack uncluttered
+  if(!breached.length){
+    section.classList.add('hidden');
+    out.innerHTML = '';
+    return;
+  }
+  section.classList.remove('hidden');
+  const fwUC = (inst.accountingFramework || inst.framework || 'IFRS').toUpperCase();
+  const sicrCite =
+    fwUC === 'USGAAP' ? 'ASC 326-20-30-2' :
+    fwUC === 'AASB'   ? 'AASB 9 §B5.5.17' :
+    fwUC === 'ASPE'   ? 'ASPE 3856.16' :
+                        'IFRS 9 §B5.5.17(k)';
+  const accelCite =
+    fwUC === 'USGAAP' ? 'ASC 470-50-40-10 (acceleration as TDR if uncured)' :
+    fwUC === 'AASB'   ? 'AASB 9 §5.4.3 (substantial modification on acceleration)' :
+    fwUC === 'ASPE'   ? 'ASPE 3856.22 (extinguishment on acceleration)' :
+                        'IFRS 9 §5.4.3 (substantial modification on acceleration)';
+  const stepUpCite = 'Loan agreement default-interest clause (typical §3.5 / §4.4)';
+  let html = '<div class="text-[11px] text-gray-600 mb-3">' + breached.length + ' covenant breach' + (breached.length > 1 ? 'es' : '') + ' triggered engine adjustments in this accounting run. Each adjustment is framework-tagged with the standard citation.</div>';
+  html += '<table class="w-full text-[11.5px]" style="border-collapse:collapse;">';
+  html += '<thead><tr style="background:#FEF2F2; color:#7F1D1D;"><th class="text-left p-2" style="border-bottom:1px solid #FCA5A5;">Covenant</th><th class="text-left p-2" style="border-bottom:1px solid #FCA5A5;">Breach</th><th class="text-left p-2" style="border-bottom:1px solid #FCA5A5;">Side-effect</th><th class="text-left p-2" style="border-bottom:1px solid #FCA5A5;">Standard / Citation</th></tr></thead>';
+  html += '<tbody>';
+  for(const c of breached){
+    const conseqs = Array.isArray(c.consequenceList) ? c.consequenceList : [];
+    const rows = [];
+    if(conseqs.includes('sicrTrigger')){
+      rows.push({ tag: 'SICR · ECL Stage 1 → Stage 2 (lifetime ECL)', cite: sicrCite });
+    }
+    if(conseqs.includes('marginStepUp')){
+      rows.push({ tag: 'Margin step-up · +' + (c.breachStepUpBps || 0) + ' bps from ' + c.breachDate, cite: stepUpCite });
+    }
+    if(conseqs.includes('mandatoryPrepayment') || conseqs.includes('acceleration') || conseqs.includes('eventOfDefault')){
+      // Look up synth event from principalSchedule for date + amount
+      const sched = Array.isArray(inst.principalSchedule) ? inst.principalSchedule : [];
+      const synth = sched.find(e => e && e._covenantSynthesised && e._covenantIdentity === c.covIdentity);
+      const synthDate = synth ? synth.date : (c.curePeriodEndDate || c.breachDate);
+      const synthAmt = synth ? (+synth.amount).toLocaleString(undefined, {maximumFractionDigits:0}) : '?';
+      rows.push({ tag: 'Mandatory prepayment · ' + synthDate + ' · ' + synthAmt, cite: accelCite });
+    }
+    if(!rows.length){
+      rows.push({ tag: '(none configured for this covenant)', cite: '—' });
+    }
+    const dirArrow = (c.direction === 'max' || c.direction === 'maximum') ? '≤' : '≥';
+    rows.forEach((r, idx) => {
+      html += '<tr style="border-bottom:1px solid #F3F4F6;">';
+      if(idx === 0){
+        html += '<td class="p-2 align-top" rowspan="' + rows.length + '"><div style="font-weight:600; color:#7F1D1D;">' + (c.name || c.kpiMetric || 'covenant') + '</div><div class="text-[10px] text-gray-500">' + (c.kpiMetric || c.kpi || '') + '</div></td>';
+        html += '<td class="p-2 align-top" rowspan="' + rows.length + '"><div>' + c.breachDate + '</div><div class="text-[10.5px] text-gray-600">' + (c.lastReportedValue ?? '?') + (c.unit || '') + ' vs ' + dirArrow + ' ' + (c.threshold ?? '?') + (c.unit || '') + '</div></td>';
+      }
+      html += '<td class="p-2 align-top">' + r.tag + '</td>';
+      html += '<td class="p-2 align-top text-[10.5px] text-gray-600 font-mono">' + r.cite + '</td>';
+      html += '</tr>';
+    });
+  }
+  html += '</tbody></table>';
+  // Footnote
+  html += '<div class="text-[10.5px] text-gray-500 mt-3 italic">Phase B persistence — every breach + cure cycle is recorded in <code>covenant_breach_log</code> with detected_at / cured_at timestamps. Access via Stage 0 covenant card → breach history accordion.</div>';
+  out.innerHTML = html;
 }
 
 // Gap #5 — ECL Calculation Trace. Surfaces the explicit IFRS 9 §5.5.17 formula
@@ -11903,7 +12211,31 @@ document.addEventListener('DOMContentLoaded', ()=>{
   //     unit, frequency, nextTestDate, source, note }
   // ============================================================
   function deriveCovenants(inst){
-    if(Array.isArray(inst.covenants) && inst.covenants.length) return inst.covenants.slice();
+    if(Array.isArray(inst.covenants) && inst.covenants.length){
+      // V3 — DB-shape covenants from B.covenants use camelCase field names
+      // (lastReportedValue / kpiMetric / testFrequency / notes / creditAgreementSection)
+      // but the Dashboard panel below reads c.current / c.kpi / c.frequency /
+      // c.note / c.source. Normalise so headroom + KPI label + frequency +
+      // citation render correctly. Fall through values are preserved so
+      // legacy demo-derived covenants (which already use the Dashboard names)
+      // still work unchanged.
+      return inst.covenants.map(c => ({
+        name:         c.name,
+        kpi:          c.kpi          || c.kpiMetric          || c.kpi_metric            || '',
+        direction:    c.direction,
+        threshold:    c.threshold,
+        current:      c.current      != null ? c.current
+                                              : (c.lastReportedValue != null ? c.lastReportedValue : null),
+        unit:         c.unit,
+        frequency:    c.frequency    || c.testFrequency      || c.test_frequency        || '',
+        nextTestDate: c.nextTestDate || c.next_test_date     || '',
+        source:       c.source       || c.creditAgreementSection || c.credit_agreement_section || '',
+        note:         c.note         || c.notes              || '',
+        // Pass through everything else (e.g. category, consequenceOnBreach, breachStepUpBps)
+        // in case future enhancements need them.
+        ...c
+      }));
+    }
     // Frequency → next test date. We anchor to settlement and step forward
     // until we land on a date >= today, so the "next test" is plausible.
     const today = new Date(); today.setHours(0,0,0,0);
@@ -12262,6 +12594,47 @@ document.addEventListener('DOMContentLoaded', ()=>{
         covHTML += '<span class="material-icons-outlined" style="color:#DC2626; font-size:22px;">warning</span>';
         covHTML += '<div style="flex:1;"><div style="font-weight:700; color:#991B1B; font-size:13px;">Covenant breach flagged — IFRS 9 SICR triggered</div>';
         covHTML += '<div style="font-size:11.5px; color:#7F1D1D; margin-top:2px;">ECL stage will force-migrate Stage 1 → Stage 2 (lifetime ECL) on the next accounting run. §B5.5.17 qualitative trigger.</div></div></div>';
+      }
+      // ── Phase C — Engine-detected covenant breaches with auto-applied side-effects ──
+      // Reads M.schedule.covenants (enriched output of applyCovenantSideEffects).
+      // Distinct from the manual "Force breach" toggle above: this shows real,
+      // value-driven breaches and the consequences the engine actually applied
+      // in the current accounting run.
+      const engineBreaches = (typeof M !== 'undefined' && M.schedule && Array.isArray(M.schedule.covenants))
+        ? M.schedule.covenants.filter(c => c && c.status === 'breached')
+        : [];
+      if(engineBreaches.length){
+        const fwUC = (inst.accountingFramework || inst.framework || 'IFRS').toUpperCase();
+        const sicrCite = fwUC === 'USGAAP' ? 'ASC 326-20-30-2'
+                      : fwUC === 'AASB'   ? 'AASB 9 §B5.5.17'
+                      : fwUC === 'ASPE'   ? 'ASPE 3856.16'
+                      :                     'IFRS 9 §B5.5.17';
+        covHTML += '<div class="cov-breach-banner" style="margin-top:10px; flex-direction:column; align-items:stretch;">';
+        covHTML += '<div style="display:flex; align-items:center; gap:10px;">';
+        covHTML += '<span class="material-icons-outlined" style="color:#DC2626; font-size:22px;">error</span>';
+        covHTML += '<div style="font-weight:700; color:#991B1B; font-size:13px;">' + engineBreaches.length + ' covenant' + (engineBreaches.length > 1 ? 's' : '') + ' breached · engine applied side-effects in latest accounting run</div>';
+        covHTML += '</div>';
+        for(const c of engineBreaches){
+          const conseqs = Array.isArray(c.consequenceList) ? c.consequenceList : [];
+          const tags = [];
+          if(conseqs.includes('sicrTrigger')){
+            tags.push('<span style="display:inline-block; background:#DC2626; color:white; font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px;">SICR → ECL Stage 2 (' + sicrCite + ')</span>');
+          }
+          if(conseqs.includes('marginStepUp')){
+            tags.push('<span style="display:inline-block; background:#D97706; color:white; font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px;">Margin +' + (c.breachStepUpBps || 0) + 'bps from ' + c.breachDate + '</span>');
+          }
+          if(conseqs.includes('mandatoryPrepayment') || conseqs.includes('acceleration') || conseqs.includes('eventOfDefault')){
+            tags.push('<span style="display:inline-block; background:#7C2D12; color:white; font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px;">Mandatory prepayment · ' + (c.curePeriodEndDate || c.breachDate) + '</span>');
+          }
+          const dirArrow = (c.direction === 'max' || c.direction === 'maximum') ? '≤' : '≥';
+          covHTML += '<div style="margin-top:8px; padding:9px 11px; background:rgba(220,38,38,0.07); border-left:3px solid #DC2626; border-radius:4px;">';
+          covHTML += '<div style="font-weight:600; color:#7F1D1D; font-size:12px;">' + (c.name || c.kpiMetric || 'covenant') + '</div>';
+          covHTML += '<div style="margin-top:3px; font-size:11px; color:#991B1B;">Breach detected <strong>' + (c.breachDate || '?') + '</strong> · current <strong>' + (c.lastReportedValue ?? '?') + (c.unit || '') + '</strong> vs threshold <strong>' + dirArrow + ' ' + (c.threshold ?? '?') + (c.unit || '') + '</strong></div>';
+          if(tags.length){
+            covHTML += '<div style="margin-top:6px; display:flex; gap:5px; flex-wrap:wrap;">' + tags.join('') + '</div>';
+          }
+        }
+        covHTML += '</div>';
       }
       // Covenant cards
       covHTML += '<div class="cov-grid">';
@@ -14410,6 +14783,199 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     return null;
   }
 
+  // ─── V3 Covenants (Small scope) ─────────────────────────────────────
+  // CRUD over B.covenants. Each covenant carries the contract terms (KPI,
+  // direction, threshold, test frequency, consequence) plus the latest
+  // reported value for compliance tracking. The Dashboard's Covenants
+  // panel reads these directly; the engine consumes them for SICR / margin
+  // ratchet / mandatory-prepayment side effects (next iteration).
+  function newCovenant(){
+    return {
+      id:                  'CV_' + Math.random().toString(36).slice(2, 8),
+      name:                'New Covenant',
+      category:            'maintenance',
+      kpiMetric:           'leverageRatio',
+      direction:           'max',
+      threshold:           4.50,
+      unit:                'x',
+      testFrequency:       'quarterly',
+      firstTestDate:       '',
+      nextTestDate:        '',
+      curePeriodDays:      0,
+      equityCureAvailable: false,
+      maxCureCountPerYear: null,
+      consequenceOnBreach: 'sicrTrigger',
+      breachStepUpBps:     null,
+      lastReportedValue:   null,
+      lastReportedDate:    '',
+      creditAgreementSection: '',
+      notes:               ''
+    };
+  }
+  // Phase C — Stage 0 covenant card breach history accordion.
+  // Reads c.breachLog[] (set by fetchUserDeals reverse-map) and renders a
+  // collapsible <details> with each breach + cure cycle. Returns empty string
+  // when no log exists (manual covenants or fresh DB writes before sync).
+  function renderCovenantBreachHistory(c){
+    const log = Array.isArray(c && c.breachLog) ? c.breachLog : [];
+    if(!log.length) return '';
+    const active = log.filter(r => r.status === 'active').length;
+    const cured = log.filter(r => r.status === 'cured').length;
+    const summary = (active ? active + ' active' : '') + (active && cured ? ' · ' : '') + (cured ? cured + ' cured' : '');
+    const chip = active
+      ? '<span style="background:#FEE2E2; color:#991B1B; padding:1px 7px; border-radius:9px; font-size:10px; font-weight:600;">' + summary + '</span>'
+      : '<span style="background:#D1FAE5; color:#065F46; padding:1px 7px; border-radius:9px; font-size:10px; font-weight:600;">' + summary + '</span>';
+    let rows = '';
+    log.forEach(r => {
+      const dirArrow = r.directionAtBreach === 'max' || r.directionAtBreach === 'maximum' ? '≤' : '≥';
+      const isActive = r.status === 'active';
+      const rowColor = isActive ? '#FEE2E2' : '#F3F4F6';
+      const accentColor = isActive ? '#DC2626' : '#10B981';
+      const statusLabel = isActive ? 'ACTIVE' : (r.status || 'cured').toUpperCase();
+      const conseq = Array.isArray(r.consequenceApplied) ? r.consequenceApplied.join(', ') : (r.consequenceApplied || '—');
+      rows += '<tr style="background:' + rowColor + '; border-bottom:1px solid white;">';
+      rows += '<td style="padding:5px 8px; font-weight:600; color:' + accentColor + ';">' + statusLabel + '</td>';
+      rows += '<td style="padding:5px 8px;">' + (r.breachDate || '—') + '</td>';
+      rows += '<td style="padding:5px 8px;">' + (r.breachValue ?? '—') + ' vs ' + dirArrow + ' ' + (r.thresholdAtBreach ?? '—') + '</td>';
+      rows += '<td style="padding:5px 8px; font-size:10px;">' + conseq + (r.marginStepUpBps ? ' (+' + r.marginStepUpBps + 'bps)' : '') + (r.sicrTriggered ? ' · SICR' : '') + (r.prepaymentTriggered ? ' · Acceleration' : '') + '</td>';
+      rows += '<td style="padding:5px 8px;">' + (r.cureDate || '—') + (r.cureValue != null ? ' · ' + r.cureValue : '') + '</td>';
+      rows += '</tr>';
+    });
+    return '<details style="margin-top:4px; border:1px solid #E5E7EB; border-radius:6px; background:white; padding:6px 10px;">' +
+           '<summary style="cursor:pointer; font-size:11px; font-weight:600; color:#4B5563; display:flex; align-items:center; gap:8px;">' +
+           '<span class="material-icons-outlined" style="font-size:14px;">history</span>Breach history (' + log.length + ') ' + chip +
+           '</summary>' +
+           '<table style="width:100%; margin-top:6px; font-size:11px; border-collapse:collapse;">' +
+           '<thead><tr style="color:#6B7280; font-size:10px; text-transform:uppercase;"><th style="text-align:left; padding:4px 8px;">Status</th><th style="text-align:left; padding:4px 8px;">Breach Date</th><th style="text-align:left; padding:4px 8px;">Reading</th><th style="text-align:left; padding:4px 8px;">Consequences</th><th style="text-align:left; padding:4px 8px;">Cured</th></tr></thead>' +
+           '<tbody>' + rows + '</tbody></table>' +
+           '</details>';
+  }
+
+  function renderCovenants(){
+    const host = $b('covenants-container');
+    const empty = $b('covenants-empty');
+    const chip = $b('covenants-count-chip');
+    if(!host) return;
+    const list = (B.covenants = B.covenants || []);
+    if(chip) chip.textContent = list.length;
+    // Remove existing rows, keep the empty placeholder
+    [...host.querySelectorAll('[data-cv-row]')].forEach(n => n.remove());
+    if(empty) empty.style.display = list.length ? 'none' : '';
+    if(!list.length) return;
+    list.forEach((c, idx) => {
+      const row = document.createElement('div');
+      row.setAttribute('data-cv-row', idx);
+      row.style.cssText = 'border:1px solid #ede9fe; border-radius:8px; padding:10px 12px; background:#FAFAFE; display:grid; gap:8px;';
+      row.innerHTML = `
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input data-cv-field="name" data-cvidx="${idx}" value="${(c.name||'').replace(/"/g,'&quot;')}" placeholder="Covenant name (e.g. Total Net Leverage Ratio)"
+                 style="flex:1; border:1px solid #d1d5db; border-radius:4px; padding:4px 8px; font-size:12px; font-weight:600; background:white;"/>
+          <select data-cv-field="category" data-cvidx="${idx}" style="border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11px; background:white;">
+            ${['maintenance','incurrence','operating','information','sustainability','borrowingBase'].map(v =>
+              `<option value="${v}" ${c.category===v?'selected':''}>${v}</option>`).join('')}
+          </select>
+          <button data-cv-remove="${idx}" title="Delete covenant"
+                  style="border:1px solid #fecaca; background:white; color:#b91c1c; border-radius:4px; padding:4px 8px; font-size:11px; cursor:pointer;">×</button>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(6, 1fr); gap:6px;">
+          <div><label class="text-[9px] uppercase text-gray-500 block">KPI</label>
+            <select data-cv-field="kpiMetric" data-cvidx="${idx}" style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;">
+              ${['leverageRatio','interestCoverage','dscr','icr','currentRatio','minNetWorth','capexLimit','restrictedPayments','borrowingBase','esgScore','none'].map(v =>
+                `<option value="${v}" ${c.kpiMetric===v?'selected':''}>${v}</option>`).join('')}
+            </select>
+          </div>
+          <div><label class="text-[9px] uppercase text-gray-500 block">Direction</label>
+            <select data-cv-field="direction" data-cvidx="${idx}" style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;">
+              <option value="max" ${c.direction==='max'?'selected':''}>max</option>
+              <option value="min" ${c.direction==='min'?'selected':''}>min</option>
+            </select>
+          </div>
+          <div><label class="text-[9px] uppercase text-gray-500 block">Threshold</label>
+            <input data-cv-field="threshold" data-cvidx="${idx}" type="number" step="0.01" value="${c.threshold ?? ''}"
+                   style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;"/>
+          </div>
+          <div><label class="text-[9px] uppercase text-gray-500 block">Unit</label>
+            <input data-cv-field="unit" data-cvidx="${idx}" value="${c.unit || ''}" placeholder="x / % / USD m"
+                   style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;"/>
+          </div>
+          <div><label class="text-[9px] uppercase text-gray-500 block">Test Freq</label>
+            <select data-cv-field="testFrequency" data-cvidx="${idx}" style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;">
+              ${['monthly','quarterly','semiAnnual','annual','event','adHoc'].map(v =>
+                `<option value="${v}" ${c.testFrequency===v?'selected':''}>${v}</option>`).join('')}
+            </select>
+          </div>
+          <div><label class="text-[9px] uppercase text-gray-500 block">Next Test</label>
+            <input data-cv-field="nextTestDate" data-cvidx="${idx}" type="date" value="${c.nextTestDate || ''}"
+                   style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;"/>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;">
+          <div><label class="text-[9px] uppercase text-gray-500 block">On Breach</label>
+            <select data-cv-field="consequenceOnBreach" data-cvidx="${idx}" style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;">
+              ${['notice','marginStepUp','defaultInterest','sicrTrigger','mandatoryPrepayment','acceleration'].map(v =>
+                `<option value="${v}" ${c.consequenceOnBreach===v?'selected':''}>${v}</option>`).join('')}
+            </select>
+          </div>
+          <div><label class="text-[9px] uppercase text-gray-500 block">Step-Up (bps)</label>
+            <input data-cv-field="breachStepUpBps" data-cvidx="${idx}" type="number" step="5" value="${c.breachStepUpBps ?? ''}" placeholder="0"
+                   style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;"/>
+          </div>
+          <div><label class="text-[9px] uppercase text-gray-500 block">Latest Value</label>
+            <input data-cv-field="lastReportedValue" data-cvidx="${idx}" type="number" step="0.01" value="${c.lastReportedValue ?? ''}" placeholder="—"
+                   style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;"/>
+          </div>
+          <div><label class="text-[9px] uppercase text-gray-500 block">As Of</label>
+            <input data-cv-field="lastReportedDate" data-cvidx="${idx}" type="date" value="${c.lastReportedDate || ''}"
+                   style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;"/>
+          </div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:flex-end;">
+          <div style="flex:1;">
+            <label class="text-[9px] uppercase text-gray-500 block">Credit Agreement Ref</label>
+            <input data-cv-field="creditAgreementSection" data-cvidx="${idx}" value="${(c.creditAgreementSection||'').replace(/"/g,'&quot;')}" placeholder="e.g. §8.1(a)"
+                   style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;"/>
+          </div>
+          <div style="flex:2;">
+            <label class="text-[9px] uppercase text-gray-500 block">Notes</label>
+            <input data-cv-field="notes" data-cvidx="${idx}" value="${(c.notes||'').replace(/"/g,'&quot;')}"
+                   style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;"/>
+          </div>
+        </div>
+        ${renderCovenantBreachHistory(c)}
+      `;
+      host.appendChild(row);
+    });
+    // Wire input + select handlers
+    host.querySelectorAll('[data-cv-field]').forEach(el => {
+      el.oninput = el.onchange = () => {
+        const i = +el.getAttribute('data-cvidx');
+        const f = el.getAttribute('data-cv-field');
+        const v = el.value;
+        const cv = list[i]; if(!cv) return;
+        if(['threshold','breachStepUpBps','lastReportedValue','curePeriodDays','maxCureCountPerYear'].indexOf(f) >= 0){
+          cv[f] = (v === '' || v == null) ? null : +v;
+        } else if(['equityCureAvailable'].indexOf(f) >= 0){
+          cv[f] = el.checked;
+        } else {
+          cv[f] = v;
+        }
+        if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+          window.AutoSave.schedule();
+        }
+      };
+    });
+    host.querySelectorAll('[data-cv-remove]').forEach(btn => {
+      btn.onclick = () => {
+        const i = +btn.getAttribute('data-cv-remove');
+        list.splice(i, 1);
+        renderCovenants();
+        if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+          window.AutoSave.schedule();
+        }
+      };
+    });
+  }
+
   // ─── Render forward cashflow table ──────────────────────────────────
   let lastCashflows = [];
   // Track the last-rendered framework so we only re-render fees when it
@@ -14657,10 +15223,23 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // record before swapping it out so the UI behaves like state persists.
     if(existing >= 0){
       const oldInst = INSTRUMENTS[existing];
-      // 1. principalSchedule — keep ALL non-draw events from old; draws come
-      //    from the rebuild (they reflect current Builder state).
-      const oldNonDraws = (oldInst.principalSchedule || []).filter(e => e && e.type !== 'draw');
-      inst.principalSchedule = [...(inst.principalSchedule || []), ...oldNonDraws];
+      // 1. principalSchedule — preserve events the user added in Stage 2 that
+      //    aren't reproducible from B (loanSale / participation / debtEquitySwap /
+      //    writeOff / cure / forbearance / capitalisedCost / recovery / etc.).
+      //
+      //    DON'T re-add paydown / prepayment / mandatoryPrepayment / draw — those
+      //    come fresh from B.tranches[].repayments via builderToInstrument every
+      //    re-register. Appending them again would multiply paydowns geometrically
+      //    on every runAccounting call (balance drifted to -$60M on a 4-call test).
+      //
+      //    Heuristic: any event whose drawdownId is NOT already present in the new
+      //    inst.principalSchedule (i.e., wasn't produced by builderToInstrument
+      //    just now) gets preserved. drawdownId is unique per event in B.
+      const newIds = new Set((inst.principalSchedule || []).map(e => e && e.drawdownId).filter(Boolean));
+      const stage2Only = (oldInst.principalSchedule || []).filter(e =>
+        e && e.type !== 'draw' && (!e.drawdownId || !newIds.has(e.drawdownId))
+      );
+      inst.principalSchedule = [...(inst.principalSchedule || []), ...stage2Only];
       // 2. AASB-specific extras (Tier, ASIC, franking, related-party, GST, APRA)
       if(oldInst.aasbExtras) inst.aasbExtras = { ...oldInst.aasbExtras };
       // 3. IFRS treatment overrides (ecLStage, pdAnnual, lgd, qFactor, etc.)
@@ -15074,6 +15653,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     if(Array.isArray(B.prepaymentPenaltySchedule) && B.prepaymentPenaltySchedule.length){
       inst.prepaymentPenaltySchedule = B.prepaymentPenaltySchedule.map(b => ({ ...b }));
+    }
+    // V3 Covenants Small-scope — project so the Dashboard can read them.
+    if(Array.isArray(B.covenants) && B.covenants.length){
+      inst.covenants = B.covenants.map(c => ({ ...c }));
     }
     // Lifecycle events (#13/#14/#15/#24) — fold into principalSchedule so
     // the engine processes them as events (no separate code path needed).
@@ -15996,6 +16579,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   window.populateDealForm = populateDealForm;
   window.renderTranches   = renderTranches;
   window.renderFees       = renderFees;
+  // V3 Covenants Small-scope — expose for external callers (load paths + autosave)
+  window.renderCovenants  = renderCovenants;
+  window.newCovenant      = newCovenant;
   // V3 — expose registerBuilderInstrument + builderToInstrument so the Dashboard
   // self-heal path (renderDashboard fallback) can rebuild INSTRUMENTS from B
   // on demand. Without this, an early registerBuilderInstrument failure inside
@@ -16054,11 +16640,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.defaultEvents             = built.defaultEvents             || [];
     B.prepaymentPenaltySchedule = built.prepaymentPenaltySchedule || [];
     B.lifecycleEvents           = built.lifecycleEvents           || [];
+    B.covenants                 = built.covenants                  || [];
     B.marketData  = { static: [], pricing: {}, ingestedAt: null };
     console.log('[V3] loadPresetByObject: B updated, calling form refresh functions');
     try { populateDealForm(); console.log('[V3]   populateDealForm OK'); } catch(e){ console.error('[V3]   populateDealForm FAILED:', e); }
     try { renderTranches();   console.log('[V3]   renderTranches OK'); }   catch(e){ console.error('[V3]   renderTranches FAILED:', e); }
     try { renderFees();       console.log('[V3]   renderFees OK'); }       catch(e){ console.error('[V3]   renderFees FAILED:', e); }
+    try { renderCovenants();  console.log('[V3]   renderCovenants OK'); }  catch(e){ console.error('[V3]   renderCovenants FAILED:', e); }
     try { recompute();        console.log('[V3]   recompute OK'); }        catch(e){ console.error('[V3]   recompute FAILED:', e); }
     if(typeof renderMarketData === 'function') renderMarketData();
     if(typeof toast === 'function'){
@@ -17092,6 +17680,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     });
     $b('btn-add-tranche')?.addEventListener('click', () => { B.tranches.push(newTranche()); renderTranches(); recompute(); });
     $b('btn-add-fee')?.addEventListener('click', () => { B.fees.push(newFee()); renderFees(); recompute(); });
+    $b('btn-add-covenant')?.addEventListener('click', () => {
+      B.covenants = B.covenants || [];
+      B.covenants.push(newCovenant());
+      renderCovenants();
+      if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+        window.AutoSave.schedule();
+      }
+    });
     $b('btn-builder-reset')?.addEventListener('click', resetBuilder);
     $b('btn-builder-toS2')?.addEventListener('click', sendToCashflowGen);
     wireStage1Buttons();

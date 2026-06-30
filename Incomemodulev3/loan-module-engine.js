@@ -654,6 +654,94 @@ function expandAmortProfile(instr){
 }
 function round2(x){ return Math.round(x * 100) / 100; }
 
+// ---------------------------------------------------------------------------
+// applyCovenantSideEffects — Phase A medium-scope covenants
+//
+// Reads instr.covenants[] and returns an enriched array tagging each covenant
+// with status (compliant / headroomWarning / breached), breachDate,
+// curePeriodEndDate, and a stable identity (covIdentity) used for idempotent
+// event synthesis. Pure function — does not mutate instr.
+//
+// Inputs per covenant (DB / Builder shape, both supported):
+//   kpiMetric / name           — what's being measured
+//   threshold                  — numeric limit
+//   direction                  — 'max' | 'min' | 'maximum' | 'minimum' | '≤' | '≥' | '=='
+//   lastReportedValue          — most recent observation (number or string-numeric)
+//   reportDate / lastTestDate  — date the observation was taken (fallback = settle)
+//   curePeriodDays             — days from breach to consequence trigger (default 0)
+//   breachStepUpBps            — margin uplift in bps if marginStepUp is in consequenceOnBreach
+//   consequenceOnBreach        — string OR comma-list of: 'sicrTrigger', 'marginStepUp',
+//                                'mandatoryPrepayment', 'acceleration', 'eventOfDefault'
+//   headroomWarnPct            — % below threshold at which to tag headroomWarning (default 0.10)
+//
+// Returns: covenants array with added { status, headroomPct, breachDate,
+//   curePeriodEndDate, covIdentity, consequenceList[] }.
+// ---------------------------------------------------------------------------
+function applyCovenantSideEffects(instr){
+  const list = Array.isArray(instr && instr.covenants) ? instr.covenants : [];
+  if(!list.length) return [];
+  const settleISO = instr.settlementDate || '1970-01-01';
+  return list.map((c, idx) => {
+    const enriched = Object.assign({}, c);
+    const val = (c.lastReportedValue != null) ? +c.lastReportedValue : null;
+    const thr = (c.threshold != null) ? +c.threshold : null;
+    const dir = String(c.direction || c.testDirection || 'max').toLowerCase();
+    const warnPct = (c.headroomWarnPct != null) ? +c.headroomWarnPct : 0.10;
+    let breached = false, headroomWarning = false, headroomPct = null;
+    if(val != null && thr != null && !isNaN(val) && !isNaN(thr)){
+      if(dir === 'max' || dir === 'maximum' || dir === '≤' || dir === '<=' || dir === 'lte'){
+        breached = val > thr;
+        if(!breached && thr !== 0){
+          headroomPct = (thr - val) / Math.abs(thr);
+          headroomWarning = headroomPct < warnPct;
+        }
+      } else if(dir === 'min' || dir === 'minimum' || dir === '≥' || dir === '>=' || dir === 'gte'){
+        breached = val < thr;
+        if(!breached && thr !== 0){
+          headroomPct = (val - thr) / Math.abs(thr);
+          headroomWarning = headroomPct < warnPct;
+        }
+      } else if(dir === '==' || dir === 'equal' || dir === 'eq'){
+        breached = val !== thr;
+      }
+    }
+    enriched.status = breached ? 'breached' : (headroomWarning ? 'headroomWarning' : 'compliant');
+    enriched.headroomPct = headroomPct;
+    // Breach date: prefer explicit breach_date, then last reported/test date, then settle
+    const breachDate = c.breachDate || c.breach_date
+                     || c.lastReportedDate || c.last_reported_date
+                     || c.lastTestDate || c.last_test_date
+                     || c.reportDate || c.report_date
+                     || c.nextTestDate || c.next_test_date
+                     || c.firstTestDate || c.first_test_date
+                     || settleISO;
+    enriched.breachDate = breached ? breachDate : null;
+    // Cure period end = breachDate + curePeriodDays (default 0 = take effect immediately)
+    const cureDays = +(c.curePeriodDays ?? c.cure_period_days ?? 0) || 0;
+    if(breached){
+      if(cureDays > 0){
+        const d = new Date(breachDate + 'T00:00:00Z');
+        d.setUTCDate(d.getUTCDate() + cureDays);
+        enriched.curePeriodEndDate = d.toISOString().slice(0,10);
+      } else {
+        enriched.curePeriodEndDate = breachDate;
+      }
+    } else {
+      enriched.curePeriodEndDate = null;
+    }
+    // Normalise consequence into a list for easier matching
+    const consRaw = c.consequenceOnBreach || c.consequence_on_breach || c.consequence || '';
+    const consList = Array.isArray(consRaw)
+      ? consRaw.map(String)
+      : String(consRaw).split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+    enriched.consequenceList = consList;
+    // Stable identity for idempotent event synthesis across re-invocations
+    enriched.covIdentity = c.id || c.covenant_id || c.name
+      || ((c.kpiMetric || c.kpi_metric || 'covenant') + ':' + (c.threshold ?? idx) + ':' + idx);
+    return enriched;
+  });
+}
+
 function buildSchedule(instr){
   if(!instr) return [];
 
@@ -762,6 +850,78 @@ function buildSchedule(instr){
   if(!settle || !maturity || maturity < settle) return [];
 
   const basis = instr.dayBasis || 'ACT/360';
+
+  // ----- Phase A medium covenants — derive side-effects + synth events ----
+  const enrichedCovenants = applyCovenantSideEffects(instr);
+  // Set of consequence-bearing breached covenants for fast lookup in helpers
+  const breachedCovs = enrichedCovenants.filter(c => c.status === 'breached');
+  // Phase A #4 — Mandatory prepayment synthesis on covenant acceleration.
+  // For any breached covenant with consequence ∈ {mandatoryPrepayment,
+  // acceleration, eventOfDefault}, push a synthetic event into
+  // instr.principalSchedule. The actual amount is materialised inside the
+  // event loop (set to current balance at trigger date), so partial paydowns
+  // earlier in the schedule don't get over- or under-counted. Idempotent —
+  // skipped when a matching event already exists. Stale synth events
+  // (covenant cured / removed) are stripped on each call.
+  const accelCovs = breachedCovs.filter(c =>
+    c.consequenceList.includes('mandatoryPrepayment')
+    || c.consequenceList.includes('acceleration')
+    || c.consequenceList.includes('eventOfDefault'));
+  const accelCovIds = new Set(accelCovs.map(c => c.covIdentity));
+  instr.principalSchedule = instr.principalSchedule || [];
+  // Strip stale synth events whose covenant is no longer breached / present
+  instr.principalSchedule = instr.principalSchedule.filter(e =>
+    !(e && e._covenantSynthesised && e.type === 'mandatoryPrepayment'
+      && !accelCovIds.has(e._covenantIdentity)));
+  // Add fresh synth events for any newly-breached accelerating covenants
+  for(const c of accelCovs){
+    const accelDate = c.curePeriodEndDate || c.breachDate;
+    const already = instr.principalSchedule.some(e =>
+      e && e._covenantSynthesised && e._covenantIdentity === c.covIdentity
+      && e.type === 'mandatoryPrepayment');
+    if(!already && accelDate){
+      instr.principalSchedule.push({
+        type: 'mandatoryPrepayment',
+        date: accelDate,
+        amount: 0,                            // materialised in loop = balance at trigger
+        kind: 'covenantBreach',
+        trigger: 'covenantBreach',
+        reason: 'Covenant breach acceleration: ' + (c.name || c.kpiMetric || c.kpi_metric || 'unnamed'),
+        _covenantSynthesised: true,
+        _covenantIdentity: c.covIdentity,
+      });
+    }
+  }
+
+  // Helper: total margin step-up bps active on a given date across all
+  // breached covenants whose consequence includes marginStepUp. Active window:
+  // [breachDate, curePeriodEndDate]. Multiple breached covenants stack.
+  const covenantMarginStepBpsOn = (dateISO) => {
+    let total = 0;
+    for(const c of breachedCovs){
+      if(!c.consequenceList.includes('marginStepUp')) continue;
+      if(dateISO < c.breachDate) continue;
+      // After cure period ends, the step-up persists until next test cycle.
+      // For Phase A we keep step-up live from breach onward (no auto-cure
+      // without a fresh observation). Phase B adds the breach-log + cure date
+      // wiring that lets us turn this off.
+      total += +(c.breachStepUpBps ?? c.breach_step_up_bps ?? 0) || 0;
+    }
+    return total;
+  };
+
+  // Helper: SICR active when any breached covenant has consequence sicrTrigger
+  // (or any of: marginStepUp + an explicit sicrTrigger tag). Per IFRS 9 §B5.5.17
+  // and ASC 326-20-30-2, a covenant breach is a presumptive SICR indicator —
+  // the user opts in by configuring sicrTrigger on the covenant.
+  const covenantSICRActiveOn = (dateISO) => {
+    for(const c of breachedCovs){
+      if(!c.consequenceList.includes('sicrTrigger')) continue;
+      if(dateISO >= c.breachDate) return true;
+    }
+    return false;
+  };
+
   const events = (instr.principalSchedule||[]).slice().sort((a,b)=> a.date.localeCompare(b.date));
 
   // For revolvers / loans the "balance" starts at initial draw (first event w/ type=draw at settle) or faceValue.
@@ -1102,6 +1262,13 @@ function lookupMarginBps(dateISO){
       //   • penaltyRate: 0 by default — set explicitly if the credit agreement
       //                  applies a make-whole even on mandatory prepay
       else if(e.type==='mandatoryPrepayment'){
+        // Phase A #4 — Covenant-synthesised events carry amount=0 until the
+        // trigger date; materialise the amount as the FULL outstanding balance
+        // (acceleration), recomputed at the actual trigger date so prior
+        // paydowns inside the schedule are netted correctly.
+        if(e._covenantSynthesised && (!e.amount || e.amount === 0)){
+          e.amount = Math.max(0, balance);
+        }
         mandatoryPrepayment += e.amount;
         // Also feed into the overall prepayment bucket so dashboard / cashflow
         // charts continue to display the principal flow correctly (the voluntary
@@ -1346,6 +1513,20 @@ function lookupMarginBps(dateISO){
       couponRate = r;
     }
 
+    // ----- Phase A #3 — Covenant breach margin step-up -----
+    // Applied uniformly across Fixed / Floating / RFR coupons so any breached
+    // covenant with consequence=marginStepUp lifts the rate from breachDate
+    // onward. Multiple breaches stack additively. Floor/cap are NOT
+    // re-applied: the step-up represents a credit-spread penalty per the loan
+    // agreement and is intentionally permitted to push above the contractual
+    // cap.
+    const covenantBreachStepUpBps = covenantMarginStepBpsOn(todayISO);
+    if(covenantBreachStepUpBps > 0){
+      couponRate += covenantBreachStepUpBps / 10000;
+    }
+    // Compute SICR flag once per day so both ECL block and row push can read it
+    const covenantSICRActive = covenantSICRActiveOn(todayISO);
+
     // ----- Holiday skip (Req 18): when enabled, zero the day-count factor on holidays -----
     const onHoliday = instr.holidayCalendar && instr.holidayCalendar!=='none' && isHoliday(d, instr.holidayCalendar);
     const skipToday = !!(instr.skipHolidays && onHoliday);
@@ -1407,7 +1588,14 @@ function lookupMarginBps(dateISO){
     // Daily change = target - allowance (positive grows allowance, negative reverses).
     let dailyECLChange = 0;
     if(instr.ifrs && instr.ifrs.computeECL !== false){
-      const stage = instr.ifrs.ecLStage || 1;
+      // Phase A #2 — SICR auto-migration on covenant breach.
+      // Per IFRS 9 §B5.5.17(k) and ASC 326-20-30-2, a covenant breach is a
+      // qualitative indicator of significant increase in credit risk. When
+      // any covenant with consequence=sicrTrigger is breached, escalate
+      // Stage 1 → Stage 2 from breachDate onward (manual Stage 3 overrides
+      // still win; we only escalate, never de-escalate).
+      let stage = instr.ifrs.ecLStage || 1;
+      if(covenantSICRActive && stage < 2) stage = 2;
       const pdAnn = instr.ifrs.pdAnnual || 0;
       const lgd   = instr.ifrs.lgd || 0;
       if(pdAnn > 0 && lgd > 0 && balance > 0){
@@ -1741,6 +1929,9 @@ function lookupMarginBps(dateISO){
       dailyHedgeOCI, dailyHedgePL, dailyHedgeReclass,
       cashFlowHedgeReserve, cumHedgeOCI, cumHedgePL, cumHedgeReclass,
       hedgeEffectiveness,
+      // Phase A covenants — daily diagnostics for JE memos + Dashboard
+      covenantMarginStepBps: covenantBreachStepUpBps,
+      covenantSICRActive,
       hasEvent: evs.length > 0 || capitalized > 0 || dailyDefaultFee > 0
     });
   }
@@ -1749,6 +1940,9 @@ function lookupMarginBps(dateISO){
   rows.effectiveYield = effectiveYield;
   rows.feeBreakdown   = feeAccum;          // per-fee cumulative accrual
   rows.deferredEIRPool = deferredEIRPool;  // total IFRS-9 deferred income at t0
+  // Phase A covenants — surface enriched covenant array for Dashboard / JE
+  // generator to render breach banners + framework-aware memos.
+  rows.covenants = enrichedCovenants;
   return rows;
 }
 
@@ -1815,7 +2009,13 @@ function summarize(rows, beginISO, endISO){
     closingBalance:   win[win.length-1]?.balance ?? 0,
     closingCarrying:  win[win.length-1]?.carryingValue ?? 0,
     periodStart:      win[0]?.date,
-    periodEnd:        win[win.length-1]?.date
+    periodEnd:        win[win.length-1]?.date,
+    // Phase A covenants — period-level breach signals for JE memo tagging.
+    // covenantSICRTriggered = any day in window had a covenant-driven SICR
+    // (forces Stage 2 ECL even if user set Stage 1). covenantMarginStepUpBpsMax
+    // is the highest step-up active across the window — used for memo only.
+    covenantSICRTriggered: win.some(r => r.covenantSICRActive),
+    covenantMarginStepUpBpsMax: Math.max(0, ...win.map(r => r.covenantMarginStepBps || 0))
   };
 }
 
@@ -2407,8 +2607,15 @@ function generateDIU(instr, summary, opts){
     // Direction fix: accrual JE is DR Receivable / CR Income (asset up, revenue
     // up). Previously emitted with the legs flipped — caught during Transtype #3
     // regression. Affects every loan with non-zero accrued cash interest.
-    add('Interest Receivable',           summary.totalCashAccrual, true,  '40100', summary.periodEnd, `Interest Adjustment for ${summary.periodEnd}`);
-    add('Income - Daily Accrued Interest', summary.totalCashAccrual, false, '23000', summary.periodEnd, `Interest Adjustment for ${summary.periodEnd}`);
+    // Phase A covenants — when a covenant breach margin step-up was active in
+    // this period, suffix the memo so the auditor sees the rate uplift source
+    // in the workpaper. Step-up only shows up when at least one day in the
+    // window had a non-zero covenantMarginStepBps.
+    const stepUpSuffix = (summary.covenantMarginStepUpBpsMax || 0) > 0
+      ? ` — includes covenant-breach step-up +${summary.covenantMarginStepUpBpsMax}bps`
+      : '';
+    add('Interest Receivable',           summary.totalCashAccrual, true,  '40100', summary.periodEnd, `Interest Adjustment for ${summary.periodEnd}${stepUpSuffix}`);
+    add('Income - Daily Accrued Interest', summary.totalCashAccrual, false, '23000', summary.periodEnd, `Interest Adjustment for ${summary.periodEnd}${stepUpSuffix}`);
     jeIndex++;
   }
   // PIK pair (capitalization)
@@ -2521,12 +2728,23 @@ function generateDIU(instr, summary, opts){
       fw === 'AASB'   ? 'AASB 9 ECL' :
       fw === 'ASPE'   ? 'ASPE 3856 incurred-loss' :
                         'IFRS 9 ECL';
+    // Phase A covenants — when a covenant-driven SICR escalated the stage in
+    // this period, suffix the memo with the standard's SICR citation so the
+    // workpaper trail shows the trigger source.
+    const sicrCitation =
+      fw === 'USGAAP' ? 'ASC 326-20-30-2' :
+      fw === 'AASB'   ? 'AASB 9 §B5.5.17' :
+      fw === 'ASPE'   ? 'ASPE 3856.16' :
+                        'IFRS 9 §B5.5.17';
+    const sicrSuffix = summary.covenantSICRTriggered
+      ? ` — SICR triggered by covenant breach (${sicrCitation})`
+      : '';
     if(v > 0){
-      add('Impairment Expense (ECL)',           v, true,  '70100', summary.periodEnd, `${eclLabel} provision for ${summary.periodEnd}`);
-      add('Loan Loss Allowance (Contra-Asset)', v, false, '15500', summary.periodEnd, `${eclLabel} provision for ${summary.periodEnd}`);
+      add('Impairment Expense (ECL)',           v, true,  '70100', summary.periodEnd, `${eclLabel} provision for ${summary.periodEnd}${sicrSuffix}`);
+      add('Loan Loss Allowance (Contra-Asset)', v, false, '15500', summary.periodEnd, `${eclLabel} provision for ${summary.periodEnd}${sicrSuffix}`);
     } else {
-      add('Impairment Reversal (ECL)',          -v, false, '70100', summary.periodEnd, `${eclLabel} release for ${summary.periodEnd}`);
-      add('Loan Loss Allowance Reversal',       -v, true,  '15500', summary.periodEnd, `${eclLabel} release for ${summary.periodEnd}`);
+      add('Impairment Reversal (ECL)',          -v, false, '70100', summary.periodEnd, `${eclLabel} release for ${summary.periodEnd}${sicrSuffix}`);
+      add('Loan Loss Allowance Reversal',       -v, true,  '15500', summary.periodEnd, `${eclLabel} release for ${summary.periodEnd}${sicrSuffix}`);
     }
     jeIndex++;
   }
