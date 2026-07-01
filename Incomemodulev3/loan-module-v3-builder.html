@@ -3025,8 +3025,11 @@ window.SB = (function(){
             threshold_at_breach:     c.threshold != null ? +c.threshold : null,
             direction_at_breach:     c.direction || null,
             consequence_applied:     Array.isArray(c.consequenceList) ? c.consequenceList : [],
-            margin_step_up_bps:      (c.consequenceList || []).includes('marginStepUp')
-                                     ? (+c.breachStepUpBps || 0) : null,
+            // Phase C bugfix — persist step-up bps whenever the field is set,
+            // not only when consequence includes 'marginStepUp'. Real-world
+            // contracts pair SICR with rate uplifts, so the engine and the
+            // log both treat breachStepUpBps as the authoritative signal.
+            margin_step_up_bps:      (+c.breachStepUpBps > 0) ? +c.breachStepUpBps : null,
             sicr_triggered:          (c.consequenceList || []).includes('sicrTrigger'),
             prepayment_triggered:    !!prepEvt,
             prepayment_event_date:   prepEvt ? prepEvt.date : null,

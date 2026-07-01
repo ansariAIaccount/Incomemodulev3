@@ -894,18 +894,25 @@ function buildSchedule(instr){
   }
 
   // Helper: total margin step-up bps active on a given date across all
-  // breached covenants whose consequence includes marginStepUp. Active window:
+  // breached covenants with a non-zero breachStepUpBps. Active window:
   // [breachDate, curePeriodEndDate]. Multiple breached covenants stack.
+  //
+  // Phase C bugfix — apply step-up whenever breachStepUpBps > 0, regardless of
+  // whether 'marginStepUp' is the named consequence. Real-world contracts
+  // commonly pair sicrTrigger with a rate uplift (e.g. "breach forces SICR
+  // for accounting AND adds 150bps to the spread"). Treating the bps field
+  // as the sole authoritative signal removes the ambiguity.
   const covenantMarginStepBpsOn = (dateISO) => {
     let total = 0;
     for(const c of breachedCovs){
-      if(!c.consequenceList.includes('marginStepUp')) continue;
+      const bps = +(c.breachStepUpBps ?? c.breach_step_up_bps ?? 0) || 0;
+      if(bps <= 0) continue;
       if(dateISO < c.breachDate) continue;
       // After cure period ends, the step-up persists until next test cycle.
       // For Phase A we keep step-up live from breach onward (no auto-cure
       // without a fresh observation). Phase B adds the breach-log + cure date
       // wiring that lets us turn this off.
-      total += +(c.breachStepUpBps ?? c.breach_step_up_bps ?? 0) || 0;
+      total += bps;
     }
     return total;
   };
@@ -1231,7 +1238,18 @@ function lookupMarginBps(dateISO){
       }
       // 'repayment' is an alias for 'paydown' used by guarantee / equity-fund
       // examples — semantically clearer when reading the schedule.
-      else if(e.type==='paydown' || e.type==='repayment'){ paydown += e.amount; balance -= e.amount; drawnBalance -= e.amount; carryingValue -= e.amount; }
+      // Phase C bugfix — clamp the deduction to current balance so a previously-
+      // executed acceleration (covenant-breach mandatoryPrepayment that already
+      // zeroed the balance) doesn't get further reduced by the remaining
+      // scheduled paydowns. The loan is extinguished; subsequent scheduled
+      // payments are no-ops.
+      else if(e.type==='paydown' || e.type==='repayment'){
+        const actual = Math.min(Math.max(0, balance), e.amount);
+        paydown += actual;
+        balance -= actual;
+        drawnBalance = Math.max(0, drawnBalance - actual);
+        carryingValue = Math.max(0, carryingValue - actual);
+      }
       // Transtype #4 — Prepayment. Same balance / carrying effect as paydown,
       // tagged separately so generateDIU emits a distinct "Loan Prepayment" JE.
       else if(e.type==='prepayment'){
