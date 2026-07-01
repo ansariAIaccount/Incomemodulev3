@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PCS Loan Module V3 — Guided Demo Walkthrough</title>
+<style>
+:root {
+  --brand: #10B981;
+  --brand-dark: #059669;
+  --ink: #0F172A;
+  --slate-600: #475569;
+  --slate-500: #64748B;
+  --slate-400: #94A3B8;
+  --slate-100: #F1F5F9;
+  --slate-50: #F8FAFC;
+  --red: #DC2626;
+  --red-tint: #FEE2E2;
+  --amber: #D97706;
+  --amber-tint: #FEF3C7;
+  --green: #10B981;
+  --green-tint: #D1FAE5;
+  --indigo: #6366F1;
+  --indigo-tint: #E0E7FF;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--slate-50); color: var(--ink); }
+body { font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+
+/* Hero */
+.hero {
+  background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+  color: white; padding: 60px 40px; border-radius: 16px; margin-bottom: 40px;
+  position: relative; overflow: hidden;
+}
+.hero::before {
+  content: ""; position: absolute; top: -100px; right: -100px;
+  width: 300px; height: 300px; border-radius: 50%;
+  background: radial-gradient(circle, var(--brand) 0%, transparent 70%);
+  opacity: 0.3;
+}
+.hero h1 { font-size: 42px; margin: 0 0 12px; letter-spacing: -0.02em; }
+.hero .tagline { font-size: 17px; color: #94A3B8; margin: 0 0 24px; max-width: 640px; line-height: 1.5; }
+.hero .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px; }
+.hero .chip { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.15);
+}
+.hero .chip.brand { background: var(--brand); border-color: var(--brand); }
+
+/* Section */
+section { background: white; border-radius: 14px; padding: 36px 40px; margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  border: 1px solid rgba(15,23,42,0.05);
+}
+section h2 {
+  font-size: 22px; margin: 0 0 6px; letter-spacing: -0.01em; color: var(--ink);
+  display: flex; align-items: center; gap: 12px;
+}
+section h2::before {
+  content: attr(data-num); background: var(--brand); color: white;
+  width: 32px; height: 32px; border-radius: 8px; font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+section h2 + .lead { color: var(--slate-500); font-size: 15px; margin: 0 0 24px 44px; }
+section h3 { font-size: 16px; margin: 26px 0 8px; color: var(--ink); }
+section p { color: var(--slate-600); margin: 0 0 14px; }
+
+/* Screenshot slot */
+.screenshot {
+  background: linear-gradient(135deg, var(--slate-100), white);
+  border: 2px dashed var(--slate-400); border-radius: 10px;
+  padding: 40px 20px; text-align: center;
+  color: var(--slate-500); font-size: 13px;
+  margin: 20px 0; min-height: 140px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+}
+.screenshot img { width: 100%; max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.screenshot .filename { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--slate-600); font-size: 12px;
+  background: white; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--slate-100); }
+
+/* Diagrams */
+.diagram { margin: 20px 0; }
+.diagram svg { width: 100%; height: auto; display: block; border-radius: 8px; background: white; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; font-size: 13.5px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--slate-100); }
+th { background: var(--slate-50); color: var(--slate-600); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+td.mono { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--slate-600); }
+td .chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.chip-red { background: var(--red-tint); color: var(--red); }
+.chip-amber { background: var(--amber-tint); color: var(--amber); }
+.chip-green { background: var(--green-tint); color: var(--brand-dark); }
+.chip-indigo { background: var(--indigo-tint); color: var(--indigo); }
+
+/* Callouts */
+.callout {
+  border-left: 4px solid var(--indigo); padding: 14px 18px; border-radius: 6px;
+  background: var(--slate-50); margin: 16px 0; font-size: 14px;
+}
+.callout strong { color: var(--indigo); }
+.callout.tip { border-color: var(--brand); background: var(--green-tint); }
+.callout.tip strong { color: var(--brand-dark); }
+.callout.warn { border-color: var(--amber); background: var(--amber-tint); }
+.callout.warn strong { color: var(--amber); }
+
+/* Steps */
+.steps { list-style: none; padding: 0; counter-reset: step; }
+.steps li { position: relative; padding: 14px 14px 14px 56px; margin: 8px 0;
+  background: var(--slate-50); border-radius: 8px; counter-increment: step;
+  border-left: 3px solid var(--brand);
+}
+.steps li::before {
+  content: counter(step); position: absolute; left: 14px; top: 14px;
+  width: 28px; height: 28px; background: white; border: 2px solid var(--brand);
+  color: var(--brand-dark); border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px;
+}
+.steps li strong { color: var(--ink); }
+.steps code { background: white; padding: 1px 6px; border-radius: 4px; font-size: 12.5px;
+  color: var(--indigo); border: 1px solid var(--slate-100); }
+
+/* Code */
+pre { background: #1E293B; color: #E2E8F0; padding: 16px 20px; border-radius: 8px;
+  font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; line-height: 1.55;
+  overflow-x: auto; margin: 14px 0;
+}
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px;
+  background: var(--slate-100); padding: 1px 6px; border-radius: 4px; color: var(--indigo);
+}
+pre code { background: none; padding: 0; color: inherit; }
+
+/* TOC */
+.toc { background: white; padding: 24px 32px; border-radius: 14px; margin-bottom: 24px;
+  border: 1px solid var(--slate-100);
+}
+.toc h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; color: var(--slate-500); letter-spacing: 0.05em; }
+.toc ol { margin: 0; padding-left: 20px; color: var(--slate-600); }
+.toc li { padding: 4px 0; }
+.toc a { color: var(--brand-dark); text-decoration: none; font-weight: 500; }
+.toc a:hover { text-decoration: underline; }
+
+/* Footer */
+footer { text-align: center; color: var(--slate-400); font-size: 12px; padding: 30px 0; margin-top: 30px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="hero">
+  <h1>PCS Loan Module V3</h1>
+  <p class="tagline">A self-contained loan accounting system: build any deal structure, watch the engine model daily accruals under IFRS 9 / USGAAP / AASB / ASPE, cascade covenant breaches into engine consequences, then push the resulting journal entries into Investran DIU.</p>
+  <div class="chips">
+    <span class="chip brand">Frontend + Engine + Backend</span>
+    <span class="chip">10 loan structures</span>
+    <span class="chip">4 accounting frameworks</span>
+    <span class="chip">25 accounting transtypes</span>
+    <span class="chip">Auto-covenant enforcement</span>
+    <span class="chip">DIU proxy</span>
+  </div>
+</div>
+
+<div class="toc">
+  <h3>Guided Demo</h3>
+  <ol>
+    <li><a href="#s1">The 30-second architecture</a></li>
+    <li><a href="#s2">Stage 0 — Loan Builder (Cascade Capital)</a></li>
+    <li><a href="#s3">Stage 1 → Stage 2 — Daily engine + journals</a></li>
+    <li><a href="#s4">Dashboard — a healthy deal</a></li>
+    <li><a href="#s5">Multi-breach demo (Cypress Distressed)</a></li>
+    <li><a href="#s6">Covenant enforcement — three cascading effects</a></li>
+    <li><a href="#s7">Breach lifecycle persistence</a></li>
+    <li><a href="#s8">RFR fixings ingestion</a></li>
+    <li><a href="#s9">Stage 3 — Post to Investran DIU</a></li>
+    <li><a href="#s10">What's next</a></li>
+  </ol>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s1">
+  <h2 data-num="1">The 30-second architecture</h2>
+  <p class="lead">Every layer is transparent. You can inspect the engine's math on every row, drill into every JE memo, and follow the trail from a builder edit to a DIU batch ID.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="stageGrad" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stop-color="#10B981" stop-opacity="0.9"/>
+          <stop offset="1" stop-color="#059669" stop-opacity="1"/>
+        </linearGradient>
+        <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <polygon points="0,0 10,5 0,10" fill="#64748B"/>
+        </marker>
+      </defs>
+      <!-- Frontend row -->
+      <rect x="30"  y="40" width="140" height="60" rx="8" fill="url(#stageGrad)"/>
+      <text x="100" y="66" text-anchor="middle" fill="white" font-size="13" font-weight="600">Stage 0 · Builder</text>
+      <text x="100" y="84" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Deal / fees / covenants</text>
+      <rect x="185" y="40" width="140" height="60" rx="8" fill="#334155"/>
+      <text x="255" y="66" text-anchor="middle" fill="white" font-size="13" font-weight="600">Stage 1 · Cashflows</text>
+      <text x="255" y="84" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Daily schedule (1,827 rows)</text>
+      <rect x="340" y="40" width="140" height="60" rx="8" fill="#334155"/>
+      <text x="410" y="66" text-anchor="middle" fill="white" font-size="13" font-weight="600">Stage 2 · Journals</text>
+      <text x="410" y="84" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Framework-aware JEs</text>
+      <rect x="495" y="40" width="140" height="60" rx="8" fill="#334155"/>
+      <text x="565" y="66" text-anchor="middle" fill="white" font-size="13" font-weight="600">Stage 3 · DIU</text>
+      <text x="565" y="84" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Post to Investran</text>
+      <rect x="650" y="40" width="140" height="60" rx="8" fill="#334155"/>
+      <text x="720" y="66" text-anchor="middle" fill="white" font-size="13" font-weight="600">Dashboard</text>
+      <text x="720" y="84" text-anchor="middle" fill="white" font-size="10" opacity="0.85">KPIs · covenants · charts</text>
+      <!-- Arrows -->
+      <line x1="170" y1="70" x2="185" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="325" y1="70" x2="340" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="480" y1="70" x2="495" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="635" y1="70" x2="650" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- Layers -->
+      <text x="30" y="150" fill="#94A3B8" font-size="10" font-weight="600" letter-spacing="1">CORE ENGINE (loan-module-engine.js)</text>
+      <rect x="30" y="160" width="760" height="50" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-dasharray="4,3"/>
+      <text x="410" y="180" text-anchor="middle" fill="#334155" font-size="12">Daily accrual · EIR · ECL · Hedge · Modifications · Covenants</text>
+      <text x="410" y="198" text-anchor="middle" fill="#64748B" font-size="10">Pure functions · framework-aware · idempotent</text>
+      <!-- Backend -->
+      <text x="30" y="240" fill="#94A3B8" font-size="10" font-weight="600" letter-spacing="1">BACKEND</text>
+      <rect x="30" y="250" width="180" height="50" rx="8" fill="#0F172A"/>
+      <text x="120" y="270" text-anchor="middle" fill="white" font-size="12" font-weight="600">Supabase</text>
+      <text x="120" y="286" text-anchor="middle" fill="#94A3B8" font-size="10">Deals · JEs · covenants · fixings</text>
+      <rect x="225" y="250" width="180" height="50" rx="8" fill="#0F172A"/>
+      <text x="315" y="270" text-anchor="middle" fill="white" font-size="12" font-weight="600">DIU Proxy (Node)</text>
+      <text x="315" y="286" text-anchor="middle" fill="#94A3B8" font-size="10">OAuth · multipart forward</text>
+      <rect x="420" y="250" width="180" height="50" rx="8" fill="#0F172A"/>
+      <text x="510" y="270" text-anchor="middle" fill="white" font-size="12" font-weight="600">Investran DIU</text>
+      <text x="510" y="286" text-anchor="middle" fill="#94A3B8" font-size="10">Sub-ledger commit</text>
+      <rect x="615" y="250" width="175" height="50" rx="8" fill="#0F172A"/>
+      <text x="702" y="270" text-anchor="middle" fill="white" font-size="12" font-weight="600">Market data</text>
+      <text x="702" y="286" text-anchor="middle" fill="#94A3B8" font-size="10">RFR fixings CSV import</text>
+    </svg>
+  </div>
+
+  <p><strong>The core engine is pure.</strong> All state — instrument definition, schedule, JEs, breach log — flows through <code>loan-module-engine.js</code> as functions. The V3 HTML page is just an orchestrator around it, with Supabase for persistence and a small Node proxy for Investran.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s2">
+  <h2 data-num="2">Stage 0 — Loan Builder</h2>
+  <p class="lead">Open the app, click <strong>Load Active Deal</strong> → pick <strong>Cascade Capital Term Loan</strong>. Every field in the Builder populates from Supabase.</p>
+
+  <div class="screenshot">
+    <span class="filename">assets/shot_02_cascade_stage0.png</span>
+    <span>Cascade Capital loaded · Deal Setup + Facility + Tranche fully populated</span>
+  </div>
+
+  <h3>What the Builder captures</h3>
+  <table>
+    <thead><tr><th>Section</th><th>Fields</th></tr></thead>
+    <tbody>
+      <tr><td>Deal Setup</td><td>Name, counterparty, LE, framework (IFRS/USGAAP/AASB/ASPE), currency, settlement/maturity dates</td></tr>
+      <tr><td>Facility</td><td>Commitment, day basis, holiday calendar, facility type (term/revolver/delayed-draw/bridge), repayment type</td></tr>
+      <tr><td>Tranches</td><td>N tranches, each with face value, drawn-initially, seniority, PIK toggle, drawdowns[], paydowns[]</td></tr>
+      <tr><td>Interest Components</td><td>Base index (SOFR/SONIA/TermSOFR/ESTR/EURIBOR/FIXED), base rate, spreads[], ratchet KPIs, ESG adjustment, <strong>RFR fixings series</strong></td></tr>
+      <tr><td>Fees</td><td>Arrangement, commitment, utilisation, agency, other. Modes: fixPct, fixAmount, floatBps. Framework-aware treatment (ASC 310-20 EIR / IFRS 15 point-in-time / etc.)</td></tr>
+      <tr><td>Covenants</td><td>N covenants — KPI, direction, threshold, latest reading, consequence on breach, cure period</td></tr>
+      <tr><td>Treatment overrides (Stage 2 mirror)</td><td>ECL stage, PD/LGD/q-factor, IFRS 9 classification, WHT, FX cadence, modification thresholds</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout tip">
+    <strong>Autosave</strong> — every edit debounces 1.5s and writes through to Supabase. The chip in the header turns green when saved. No manual save button needed.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s3">
+  <h2 data-num="3">Stage 1 → Stage 2 — Daily engine + journals</h2>
+  <p class="lead">Click <strong>Send to Cashflow Generation</strong>, then <strong>Run Accounting</strong>. The engine builds a 1,827-row daily schedule and 50 monthly JE batches for a 5-year loan.</p>
+
+  <div class="screenshot">
+    <span class="filename">assets/shot_03_stage2_run.png</span>
+    <span>Stage 2 · Ready · 50 JE rows · toast: "Run persisted to Supabase"</span>
+  </div>
+
+  <h3>What the engine computes daily</h3>
+  <ul>
+    <li><strong>Interest accrual</strong> — balance × coupon × day-count factor. ACT/360, ACT/365, ACT/ACT, 30/360, 30E/360.</li>
+    <li><strong>RFR compounding</strong> — lookback, observation shift, lockout, daily compounding — when a fixings series is loaded (see §8).</li>
+    <li><strong>PIK</strong> — capitalisation on a configurable schedule, tracked separately from cash interest.</li>
+    <li><strong>EIR fee accretion</strong> — deferred fee pool amortised to income over life. Crystallises on derecognition. Framework-tagged (ASC 310-20 / IFRS 9 §B5.4).</li>
+    <li><strong>ECL provisioning</strong> — Stage 1 (12-month) / Stage 2 (lifetime) / Stage 3 (net carrying). Automatic on covenant breach (see §6).</li>
+    <li><strong>FX revaluation</strong> — daily / monthly / quarterly cadence for cross-border deals.</li>
+    <li><strong>Hedge accounting</strong> — CFH effective vs ineffective split, reclassification on settlement, de-designation.</li>
+    <li><strong>Modifications</strong> — substantial (10% PV test) → derecognise + new instrument. Non-substantial → carrying-value adjustment + P&amp;L.</li>
+  </ul>
+
+  <h3>Framework-aware JE memos</h3>
+  <p>Every journal entry carries a citation appropriate to the deal's framework:</p>
+  <table>
+    <thead><tr><th>Deal framework</th><th>ECL memo</th><th>EIR fee memo</th></tr></thead>
+    <tbody>
+      <tr><td>IFRS 9</td><td class="mono">IFRS 9 §5.5 ECL provision</td><td class="mono">IFRS 9 §B5.4 EIR accretion</td></tr>
+      <tr><td>USGAAP (CECL)</td><td class="mono">ASC 326 CECL provision</td><td class="mono">ASC 310-20 EIR accretion</td></tr>
+      <tr><td>AASB 9</td><td class="mono">AASB 9 ECL provision</td><td class="mono">AASB 9 §B5.4</td></tr>
+      <tr><td>ASPE</td><td class="mono">ASPE 3856 incurred-loss</td><td class="mono">ASPE 3856.16</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s4">
+  <h2 data-num="4">Dashboard — a healthy deal</h2>
+  <p class="lead">Click the Dashboard tab. Cascade Capital is compliant so the Covenants panel shows the leverage ratio at 2.80x vs 4.00x threshold — 30% headroom, green chip.</p>
+
+  <div class="screenshot">
+    <span class="filename">assets/shot_04_cascade_dashboard.png</span>
+    <span>Dashboard · Cascade · Carrying value chart · Covenants panel (green)</span>
+  </div>
+
+  <p>The Dashboard renders 6 KPI cards, the carrying-value waterfall chart (a straight decline from $19.8M to $0 over 5 years), the Principal Ladder (20 quarterly $1M green repayments + 1 navy $20M drawdown), the Quarterly Income Composition (navy interest + amber EIR fee accretion), and the Covenants panel.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s5">
+  <h2 data-num="5">Multi-breach demo — Cypress Distressed Loan</h2>
+  <p class="lead">Now the interesting bit. Load <strong>Cypress Distressed Loan</strong> — a $50M USGAAP term loan with 5 covenants, 3 already breached out of the box.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg">
+      <text x="10" y="20" fill="#94A3B8" font-size="10" font-weight="600" letter-spacing="1">CYPRESS DISTRESSED · CURRENT COVENANT STATE</text>
+      <!-- Row 1 breached -->
+      <g>
+        <rect x="10" y="35" width="880" height="42" rx="6" fill="#FEE2E2"/>
+        <rect x="10" y="35" width="6" height="42" fill="#DC2626"/>
+        <text x="26" y="53" fill="#7F1D1D" font-size="13" font-weight="700">Total Net Leverage Ratio</text>
+        <text x="26" y="69" fill="#991B1B" font-size="11">breached · 6.80x vs ≤ 5.00x · SICR → ECL Stage 2 + 150bps</text>
+        <text x="640" y="60" fill="#7F1D1D" font-size="14" font-weight="700" text-anchor="end">6.80x</text>
+        <text x="660" y="60" fill="#991B1B" font-size="11">vs</text>
+        <text x="720" y="60" fill="#7F1D1D" font-size="14" font-weight="700" text-anchor="end">≤ 5.00x</text>
+        <rect x="750" y="46" width="130" height="20" rx="10" fill="#DC2626"/>
+        <text x="815" y="60" text-anchor="middle" fill="white" font-size="10" font-weight="600">BREACHED</text>
+      </g>
+      <!-- Row 2 breached -->
+      <g>
+        <rect x="10" y="83" width="880" height="42" rx="6" fill="#FEE2E2"/>
+        <rect x="10" y="83" width="6" height="42" fill="#DC2626"/>
+        <text x="26" y="101" fill="#7F1D1D" font-size="13" font-weight="700">Interest Coverage Ratio</text>
+        <text x="26" y="117" fill="#991B1B" font-size="11">breached · 1.80x vs ≥ 2.50x · Margin +75bps</text>
+        <text x="640" y="108" fill="#7F1D1D" font-size="14" font-weight="700" text-anchor="end">1.80x</text>
+        <text x="660" y="108" fill="#991B1B" font-size="11">vs</text>
+        <text x="720" y="108" fill="#7F1D1D" font-size="14" font-weight="700" text-anchor="end">≥ 2.50x</text>
+        <rect x="750" y="94" width="130" height="20" rx="10" fill="#DC2626"/>
+        <text x="815" y="108" text-anchor="middle" fill="white" font-size="10" font-weight="600">BREACHED</text>
+      </g>
+      <!-- Row 3 breached -->
+      <g>
+        <rect x="10" y="131" width="880" height="42" rx="6" fill="#FEE2E2"/>
+        <rect x="10" y="131" width="6" height="42" fill="#DC2626"/>
+        <text x="26" y="149" fill="#7F1D1D" font-size="13" font-weight="700">Debt Service Coverage Ratio</text>
+        <text x="26" y="165" fill="#991B1B" font-size="11">breached · 0.95x vs ≥ 1.20x · Mandatory prepayment (60d cure)</text>
+        <text x="640" y="156" fill="#7F1D1D" font-size="14" font-weight="700" text-anchor="end">0.95x</text>
+        <text x="660" y="156" fill="#991B1B" font-size="11">vs</text>
+        <text x="720" y="156" fill="#7F1D1D" font-size="14" font-weight="700" text-anchor="end">≥ 1.20x</text>
+        <rect x="750" y="142" width="130" height="20" rx="10" fill="#DC2626"/>
+        <text x="815" y="156" text-anchor="middle" fill="white" font-size="10" font-weight="600">BREACHED</text>
+      </g>
+      <!-- Row 4 compliant -->
+      <g>
+        <rect x="10" y="179" width="880" height="34" rx="6" fill="#D1FAE5"/>
+        <rect x="10" y="179" width="6" height="34" fill="#10B981"/>
+        <text x="26" y="200" fill="#065F46" font-size="13" font-weight="600">Minimum Liquidity · $7M vs ≥ $5M (40% headroom)</text>
+        <rect x="750" y="187" width="130" height="18" rx="10" fill="#10B981"/>
+        <text x="815" y="199" text-anchor="middle" fill="white" font-size="10" font-weight="600">COMPLIANT</text>
+      </g>
+      <!-- Row 5 headroom warning -->
+      <g>
+        <rect x="10" y="219" width="880" height="34" rx="6" fill="#FEF3C7"/>
+        <rect x="10" y="219" width="6" height="34" fill="#D97706"/>
+        <text x="26" y="240" fill="#78350F" font-size="13" font-weight="600">ESG Score · 75 vs ≥ 70 (7% headroom — WATCH)</text>
+        <rect x="750" y="227" width="130" height="18" rx="10" fill="#D97706"/>
+        <text x="815" y="239" text-anchor="middle" fill="white" font-size="10" font-weight="600">WATCH</text>
+      </g>
+    </svg>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s6">
+  <h2 data-num="6">Covenant enforcement — three cascading effects</h2>
+  <p class="lead">Click Run Accounting on Cypress. The engine detects breaches automatically and cascades three consequences into a single accounting run.</p>
+
+  <div class="screenshot">
+    <span class="filename">assets/shot_05_cypress_dashboard_banner.png</span>
+    <span>Dashboard · Cypress · Red breach banner with 3 breach blocks + consequence chips</span>
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 220" xmlns="http://www.w3.org/2000/svg">
+      <text x="10" y="20" fill="#94A3B8" font-size="10" font-weight="600" letter-spacing="1">HOW ONE RUN ACCOUNTING CLICK PROPAGATES 3 EFFECTS</text>
+      <!-- Trigger -->
+      <rect x="10" y="35" width="200" height="60" rx="8" fill="#DC2626"/>
+      <text x="110" y="60" text-anchor="middle" fill="white" font-size="13" font-weight="700">Breach detected</text>
+      <text x="110" y="78" text-anchor="middle" fill="white" font-size="10" opacity="0.85">applyCovenantSideEffects()</text>
+      <!-- Arrows -->
+      <line x1="215" y1="65" x2="245" y2="65" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- 3 branches -->
+      <rect x="250" y="10" width="240" height="60" rx="8" fill="#7C2D12"/>
+      <text x="370" y="35" text-anchor="middle" fill="white" font-size="12" font-weight="700">1. SICR auto-migration</text>
+      <text x="370" y="52" text-anchor="middle" fill="white" font-size="10" opacity="0.85">ECL Stage 1 → 2 · lifetime allowance</text>
+      <text x="370" y="65" text-anchor="middle" fill="white" font-size="10" opacity="0.85">~4-5x jump in provision</text>
+
+      <rect x="250" y="80" width="240" height="60" rx="8" fill="#D97706"/>
+      <text x="370" y="105" text-anchor="middle" fill="white" font-size="12" font-weight="700">2. Margin step-up</text>
+      <text x="370" y="122" text-anchor="middle" fill="white" font-size="10" opacity="0.85">+225bps stacks (Leverage 150 + ICR 75)</text>
+      <text x="370" y="135" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Interest income up $360k+</text>
+
+      <rect x="250" y="150" width="240" height="60" rx="8" fill="#991B1B"/>
+      <text x="370" y="175" text-anchor="middle" fill="white" font-size="12" font-weight="700">3. Mandatory prepayment</text>
+      <text x="370" y="192" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Synthetic event at breach+cure</text>
+      <text x="370" y="205" text-anchor="middle" fill="white" font-size="10" opacity="0.85">$48M full balance acceleration</text>
+
+      <!-- Arrows from branches to persistence -->
+      <line x1="495" y1="40" x2="525" y2="40" stroke="#64748B" stroke-width="1" marker-end="url(#arr)"/>
+      <line x1="495" y1="110" x2="525" y2="110" stroke="#64748B" stroke-width="1" marker-end="url(#arr)"/>
+      <line x1="495" y1="180" x2="525" y2="180" stroke="#64748B" stroke-width="1" marker-end="url(#arr)"/>
+
+      <!-- Persistence -->
+      <rect x="530" y="10" width="180" height="60" rx="8" fill="#0F172A"/>
+      <text x="620" y="35" text-anchor="middle" fill="white" font-size="12" font-weight="700">JE memo tagged</text>
+      <text x="620" y="52" text-anchor="middle" fill="#94A3B8" font-size="10">ASC 326-20-30-2</text>
+      <text x="620" y="65" text-anchor="middle" fill="#94A3B8" font-size="10">or IFRS 9 §B5.5.17</text>
+
+      <rect x="530" y="80" width="180" height="60" rx="8" fill="#0F172A"/>
+      <text x="620" y="105" text-anchor="middle" fill="white" font-size="12" font-weight="700">JE memo suffixed</text>
+      <text x="620" y="122" text-anchor="middle" fill="#94A3B8" font-size="10">"+225bps step-up"</text>
+
+      <rect x="530" y="150" width="180" height="60" rx="8" fill="#0F172A"/>
+      <text x="620" y="175" text-anchor="middle" fill="white" font-size="12" font-weight="700">Prepayment JE pair</text>
+      <text x="620" y="192" text-anchor="middle" fill="#94A3B8" font-size="10">Cash / Loan Asset</text>
+
+      <line x1="715" y1="110" x2="745" y2="110" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+
+      <!-- Log -->
+      <rect x="750" y="80" width="140" height="60" rx="8" fill="#10B981"/>
+      <text x="820" y="105" text-anchor="middle" fill="white" font-size="12" font-weight="700">Breach log</text>
+      <text x="820" y="122" text-anchor="middle" fill="white" font-size="10" opacity="0.85">DB row inserted</text>
+      <text x="820" y="135" text-anchor="middle" fill="white" font-size="10" opacity="0.85">status='active'</text>
+    </svg>
+  </div>
+
+  <h3>Where you see each effect surface in the UI</h3>
+  <table>
+    <thead><tr><th>Location</th><th>What renders</th></tr></thead>
+    <tbody>
+      <tr><td>Dashboard · Covenants panel</td><td>Red banner with a block per breached covenant. Each block shows breach date, current vs threshold, and colored chips per consequence (SICR / Margin +Xbps / Mandatory prepayment date)</td></tr>
+      <tr><td>Stage 2 · Evidence Pack</td><td>New collapsible panel "Covenant-Driven Adjustments" with a citation table (framework-aware §-refs)</td></tr>
+      <tr><td>Stage 0 · Covenant cards</td><td>"Breach history (N)" accordion at the bottom of each covenant card — every breach + cure cycle with status chip + timestamps</td></tr>
+      <tr><td>Toast after Run Accounting</td><td>"Breach log · N active · M cured"</td></tr>
+      <tr><td>JE memos in Post JE modal</td><td>Every affected row's <code>transactionComments</code> is tagged</td></tr>
+    </tbody>
+  </table>
+
+  <div class="screenshot">
+    <span class="filename">assets/shot_06_evidence_pack.png</span>
+    <span>Stage 2 · Evidence Pack · "Covenant-Driven Adjustments" panel expanded</span>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s7">
+  <h2 data-num="7">Breach lifecycle persistence</h2>
+  <p class="lead">Every breach + cure cycle is a row in <code>covenant_breach_log</code>. When you set <code>lastReportedValue</code> back to compliant and re-run, the row toggles to <code>cured</code>. Full audit trail forever.</p>
+
+  <div class="screenshot">
+    <span class="filename">assets/shot_07_breach_history.png</span>
+    <span>Stage 0 · Cascade · Covenant card · "Breach history (4)" accordion expanded with cycle log</span>
+  </div>
+
+  <h3>Round-trip demo (in DevTools console)</h3>
+  <pre><code>// Trigger a breach
+B.covenants[0].lastReportedValue = 4.10;
+window.registerBuilderInstrument();
+runAccounting();
+// Toast: "Breach log · 1 active · 0 cured"
+
+// Cure it
+B.covenants[0].lastReportedValue = 2.80;
+window.registerBuilderInstrument();
+runAccounting();
+// Toast: "Breach log · 0 active · 1 cured"
+// The row is now permanently marked cured with a cure_date timestamp.</code></pre>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s8">
+  <h2 data-num="8">RFR fixings ingestion</h2>
+  <p class="lead">On any Floating-rate interest component, the RFR Fixings Series widget lets you drag-drop a CSV of daily observed benchmark rates. The engine's compounded-RFR math (lookback / observation shift / lockout / daily compounding / weighted) consumes them.</p>
+
+  <div class="screenshot">
+    <span class="filename">assets/shot_08_rfr_fixings.png</span>
+    <span>Stage 0 · IC card · RFR Fixings Series expanded with sparkline + row list</span>
+  </div>
+
+  <h3>CSV format</h3>
+  <pre><code>date,rate
+2026-01-15,0.0425
+2026-01-16,0.0428
+2026-01-17,0.0432
+2026-01-20,0.0435</code></pre>
+
+  <p>Auto-detects percent vs decimal (values &gt; 1 are treated as %). Supports YYYY-MM-DD, DD/MM/YYYY, YYYY/MM/DD formats. Tab-separated works too. Optional third column: <code>source</code> (e.g. "Bloomberg BGN", "BoE", "ICE").</p>
+
+  <div class="callout">
+    <strong>Merge semantics:</strong> Uploads append + merge on date. Uploading the same file twice doesn't duplicate — the second load updates the row. Idempotent all the way to the DB (UNIQUE on interest_component_id + fixing_date).
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s9">
+  <h2 data-num="9">Stage 3 — Post to Investran DIU</h2>
+  <p class="lead">The end of the pipeline: click <strong>Post JE to Investran</strong>. When the DIU proxy is wired up, this is a real live batch post. Otherwise it runs a 6-step simulator with a "DEMO MODE" banner.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg">
+      <text x="10" y="20" fill="#94A3B8" font-size="10" font-weight="600" letter-spacing="1">DIU POST FLOW — 6 STEPS</text>
+      <g font-family="sans-serif">
+        <!-- Steps -->
+        <g>
+          <rect x="10" y="40" width="130" height="60" rx="8" fill="#10B981"/>
+          <text x="75" y="60" text-anchor="middle" fill="white" font-size="11" font-weight="700">1. Create job</text>
+          <text x="75" y="76" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Template · name</text>
+          <text x="75" y="90" text-anchor="middle" fill="white" font-size="10" opacity="0.85">jobId returned</text>
+        </g>
+        <g>
+          <rect x="155" y="40" width="130" height="60" rx="8" fill="#10B981"/>
+          <text x="220" y="60" text-anchor="middle" fill="white" font-size="11" font-weight="700">2. Upload XLSX</text>
+          <text x="220" y="76" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Multipart</text>
+          <text x="220" y="90" text-anchor="middle" fill="white" font-size="10" opacity="0.85">GL + Position tabs</text>
+        </g>
+        <g>
+          <rect x="300" y="40" width="130" height="60" rx="8" fill="#10B981"/>
+          <text x="365" y="60" text-anchor="middle" fill="white" font-size="11" font-weight="700">3. Load</text>
+          <text x="365" y="76" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Parse to staging</text>
+          <text x="365" y="90" text-anchor="middle" fill="white" font-size="10" opacity="0.85">processId</text>
+        </g>
+        <g>
+          <rect x="445" y="40" width="130" height="60" rx="8" fill="#10B981"/>
+          <text x="510" y="60" text-anchor="middle" fill="white" font-size="11" font-weight="700">4. Validate</text>
+          <text x="510" y="76" text-anchor="middle" fill="white" font-size="10" opacity="0.85">CoA + FK check</text>
+          <text x="510" y="90" text-anchor="middle" fill="white" font-size="10" opacity="0.85">errors / warnings</text>
+        </g>
+        <g>
+          <rect x="590" y="40" width="130" height="60" rx="8" fill="#10B981"/>
+          <text x="655" y="60" text-anchor="middle" fill="white" font-size="11" font-weight="700">5. Commit</text>
+          <text x="655" y="76" text-anchor="middle" fill="white" font-size="10" opacity="0.85">To sub-ledger</text>
+          <text x="655" y="90" text-anchor="middle" fill="white" font-size="10" opacity="0.85">batchId + rows</text>
+        </g>
+        <g>
+          <rect x="735" y="40" width="130" height="60" rx="8" fill="#10B981"/>
+          <text x="800" y="60" text-anchor="middle" fill="white" font-size="11" font-weight="700">6. Confirm</text>
+          <text x="800" y="76" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Fetch processes</text>
+          <text x="800" y="90" text-anchor="middle" fill="white" font-size="10" opacity="0.85">Confirmation</text>
+        </g>
+        <!-- Arrows -->
+        <line x1="140" y1="70" x2="155" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="285" y1="70" x2="300" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="430" y1="70" x2="445" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="575" y1="70" x2="590" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="720" y1="70" x2="735" y2="70" stroke="#64748B" stroke-width="1.5" marker-end="url(#arr)"/>
+      </g>
+      <!-- Proxy layer -->
+      <rect x="10" y="130" width="855" height="50" rx="8" fill="#334155"/>
+      <text x="437" y="150" text-anchor="middle" fill="white" font-size="12" font-weight="600">DIU Proxy (Node.js)</text>
+      <text x="437" y="167" text-anchor="middle" fill="#94A3B8" font-size="10">OAuth2 client-credentials · token caching · multipart forward · CORS</text>
+    </svg>
+  </div>
+
+  <div class="callout tip">
+    <strong>Deploy runbook:</strong> See <code>DIU_PROXY_QUICKSTART.md</code> for 3 deploy paths — local dev (5 min), Render.com (10 min), or internal VM behind a firewall.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section id="s10">
+  <h2 data-num="10">Where the product stands + what's next</h2>
+  <p class="lead">Everything you saw is live. Here's the honest state.</p>
+
+  <table>
+    <thead><tr><th>Category</th><th>Coverage</th><th>What's left</th></tr></thead>
+    <tbody>
+      <tr><td>Loan structures</td><td><span class="chip chip-green">100%</span></td><td>Every common structure supported (fixed, floating, RFR, PIK, revolver, delayed-draw, bridge, guarantee, equity)</td></tr>
+      <tr><td>Accrual engine</td><td><span class="chip chip-green">~95%</span></td><td>RFR fixings ingestion done (§8). Everything else in place.</td></tr>
+      <tr><td>Complex features</td><td><span class="chip chip-green">~95%</span></td><td>ASC 815 hedge edges not all modelled</td></tr>
+      <tr><td>Outputs</td><td><span class="chip chip-green">100%</span></td><td>Daily schedule CSV, JE batch XLSX, filled DIU template, evidence pack</td></tr>
+      <tr><td>Investran integration</td><td><span class="chip chip-amber">70%</span></td><td>DIU proxy built and ready to deploy. ARM (allocation rules) + ATM (templates) + RW/RM (reporting) not yet wired.</td></tr>
+      <tr><td>Governance</td><td><span class="chip chip-amber">70%</span></td><td>Audit trail + lineage solid. Multi-user auth + approval workflow buttons pending.</td></tr>
+      <tr><td>Covenants (Phases A + B + C)</td><td><span class="chip chip-green">100%</span></td><td>Engine reacts, DB persists, UI surfaces. Cheatsheet at <code>COVENANTS_CHEATSHEET.md</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Three moves to close the production gap</h3>
+  <ol class="steps">
+    <li><strong>Deploy DIU proxy</strong> to Render (<code>DIU_PROXY_QUICKSTART.md</code>). ~10 min, flips Stage 3 to live posts.</li>
+    <li><strong>Supabase auth + tight RLS</strong> — replace open-policy demo with <code>auth.uid()</code> checks. ~1 day, prerequisite for real users.</li>
+    <li><strong>Approval workflow buttons</strong> — the DB columns exist (<code>accounting_runs.status</code> / <code>approved_by</code> / <code>posted_by</code>). Wire the maker-checker gate. ~half day.</li>
+  </ol>
+</section>
+
+<footer>
+  <p>PCS Loan Module V3 — self-hosted demo · Supabase · Investran DIU · Node</p>
+</footer>
+
+</div>
+
+<script>
+// Auto-load screenshots from ./assets/ if present. Each .screenshot div's
+// filename hint is used as the src. Falls back to the placeholder styling.
+document.querySelectorAll('.screenshot').forEach(box => {
+  const hint = box.querySelector('.filename');
+  if(!hint) return;
+  const path = hint.textContent.trim();
+  const img = new Image();
+  img.onload = () => {
+    box.innerHTML = '';
+    img.style.maxWidth = '100%';
+    img.style.borderRadius = '8px';
+    img.style.boxShadow = '0 4px 16px rgba(15,23,42,0.12)';
+    box.style.padding = '4px';
+    box.style.border = 'none';
+    box.style.background = 'transparent';
+    box.appendChild(img);
+  };
+  img.onerror = () => { /* keep placeholder */ };
+  img.src = path;
+  img.alt = path;
+});
+</script>
+</body>
+</html>

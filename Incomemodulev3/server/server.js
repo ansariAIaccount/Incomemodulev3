@@ -28,7 +28,9 @@ const cors    = require('cors');
 const multer  = require('multer');
 const FormData = require('form-data');
 
-const PORT = parseInt(process.env.PROXY_PORT || '4318', 10);
+// PORT: cloud hosts (Render, Fly, Heroku, Railway) inject $PORT.
+// Local dev uses PROXY_PORT from .env, or falls back to 4318.
+const PORT = parseInt(process.env.PORT || process.env.PROXY_PORT || '4318', 10);
 const BASE_URL = (process.env.INVESTRAN_BASE_URL || '').replace(/\/$/, '');
 const CLIENT_ID = process.env.INVESTRAN_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.INVESTRAN_CLIENT_SECRET || '';

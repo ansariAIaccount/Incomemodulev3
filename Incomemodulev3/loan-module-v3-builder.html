@@ -923,6 +923,16 @@
               title="Post the journal-entry batch via Investran Data Import Utility (DIU) API — create job → upload XLSX → load → validate → commit. Auto-runs accounting if not yet run.">
         <span class="material-icons-outlined text-[16px]">cloud_upload</span>Post JE
       </button>
+      <!-- DIU mode chip — shows Live / Simulator / Not reachable status.
+           Clicking opens the Settings modal so the user can configure the proxy URL. -->
+      <button id="diu-mode-chip"
+              class="chip self-center"
+              onclick="window.openDBConfigModal && window.openDBConfigModal()"
+              title="Click to open DIU settings"
+              style="cursor:pointer; font-size:10.5px; font-weight:600; padding:3px 9px; border-radius:12px; background:#3B82F6; color:white; border:none; display:inline-flex; align-items:center; gap:4px;">
+        <span class="material-icons-outlined" style="font-size:12px;">circle</span>
+        <span id="diu-mode-chip-text">DIU · Simulator</span>
+      </button>
       <div class="flex items-center gap-1 border border-gray-300 rounded px-2 py-1 bg-white" title="Date this JE batch is posted to the GL. Leave blank for AUTO mode (glDate = effectiveDate per row). Set a date to override every row to that close date.">
         <span class="material-icons-outlined text-[14px] text-gray-500">event</span>
         <label for="opt-gl-date" class="text-[10px] font-semibold uppercase tracking-wider text-gray-600">GL Posting Date</label>
@@ -2396,9 +2406,9 @@
       <div>
         <div class="font-semibold text-[14px] flex items-center gap-2">
           <span class="material-icons-outlined text-[20px]" style="color:#3ECF8E">settings</span>
-          Database Connection Settings
+          Backend &amp; Integration Settings
         </div>
-        <div id="dbcfg-sub" class="text-[11px] text-gray-500">Switch Supabase project for UAT / staging</div>
+        <div id="dbcfg-sub" class="text-[11px] text-gray-500">Supabase backend · Investran DIU proxy</div>
       </div>
       <button class="mat-btn outline !py-1 !px-2" data-close-dbcfg="1" title="Close">
         <span class="material-icons-outlined text-[16px]">close</span>
@@ -2470,6 +2480,57 @@
             </div>
           </div>
           <div style="font-size:10.5px; color:#6B7280; margin-top:6px;">For PostgREST raw: provide the JWT your auth layer issues. For Custom REST: any value your backend recognises.</div>
+        </div>
+      </div>
+
+      <!-- ═══ DIU Proxy config — Investran Data Import Utility integration ═══ -->
+      <div style="margin-top:20px; padding:14px 16px; border:1px solid #0D2645; border-radius:10px; background:linear-gradient(135deg,#0D2645 0%,#1A3A6E 100%); color:white;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+          <span class="material-icons-outlined text-[20px]" style="color:#93C5FD;">cloud_upload</span>
+          <div style="font-weight:700; font-size:13px;">Investran DIU Integration</div>
+          <span id="diucfg-status-chip" class="chip" style="margin-left:auto; font-size:10px; font-weight:600; padding:3px 8px; border-radius:10px; background:#334155; color:#E2E8F0;">simulator</span>
+        </div>
+        <div style="font-size:11px; color:#CBD5E1; margin-bottom:12px; line-height:1.5;">
+          Point Stage 2's <b>Post JE</b> button at a live Investran DIU proxy. When blank, the button falls back to the built-in simulator with a DEMO MODE banner.
+          See <code style="background:rgba(255,255,255,0.1); padding:1px 5px; border-radius:3px;">DIU_PROXY_QUICKSTART.md</code> for deploy paths.
+        </div>
+        <div style="display:grid; gap:10px;">
+          <div>
+            <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
+              DIU Proxy URL <span style="color:#94A3B8; font-weight:400; text-transform:none; letter-spacing:0;">— leave blank for simulator</span>
+            </label>
+            <input id="diucfg-proxy-url" type="text" placeholder="http://localhost:4318 · https://investran-diu-proxy.onrender.com" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:12px;"/>
+            <div style="font-size:10.5px; color:#93C5FD; margin-top:4px;">The proxy holds the OAuth client secret. Browser never sees Investran credentials.</div>
+          </div>
+          <div style="display:grid; gap:10px; grid-template-columns:1fr 1fr 1fr;">
+            <div>
+              <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
+                Template Override <span style="color:#94A3B8; font-weight:400; text-transform:none; letter-spacing:0;">— optional</span>
+              </label>
+              <input id="diucfg-template" type="text" placeholder="auto (framework-based)" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
+              <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Blank = pick from framework (USGAAP → USGAAP_Loan_GL_DIU_Template etc.)</div>
+            </div>
+            <div>
+              <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
+                LE Domain
+              </label>
+              <input id="diucfg-le-domain" type="text" placeholder="NWF" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
+              <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Default: NWF</div>
+            </div>
+            <div>
+              <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
+                Allocation Rule
+              </label>
+              <input id="diucfg-allocation-rule" type="text" placeholder="No Allocation" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
+              <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Default: No Allocation</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:2px;">
+            <button id="btn-diucfg-test" type="button" style="padding:6px 14px; background:#10B981; color:white; border:none; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;">
+              <span class="material-icons-outlined" style="font-size:14px;">network_check</span>Test DIU Connection
+            </button>
+            <div id="diucfg-test-result" style="font-size:11px; color:#CBD5E1;">—</div>
+          </div>
         </div>
       </div>
 
@@ -3451,6 +3512,26 @@ window.SB = (function(){
             if(rtErr){ console.error('[SB] saveDeal: ratchet_tiers:', rtErr); return { ok:false, reason: rtErr.message }; }
             counts.ratchets += rows.length;
           }
+          // RFR fixings — daily observed benchmark rate history for compounded-RFR
+          // engine paths. Idempotent upsert on (interest_component_id, fixing_date).
+          const fixings = Array.isArray(ic.fixings) ? ic.fixings : [];
+          if(fixings.length){
+            const rows = fixings
+              .filter(f => f && f.date && f.rate != null)
+              .map(f => ({
+                interest_component_id: icId,
+                fixing_date:           f.date,
+                rate:                  +f.rate,
+                source:                f.source || null
+              }));
+            if(rows.length){
+              const { error: fxErr } = await _client
+                .from('rfr_fixings')
+                .upsert(rows, { onConflict: 'interest_component_id,fixing_date' });
+              if(fxErr){ console.error('[SB] saveDeal: rfr_fixings:', fxErr); return { ok:false, reason: fxErr.message }; }
+              counts.fixings = (counts.fixings || 0) + rows.length;
+            }
+          }
         }
       }
 
@@ -3788,7 +3869,7 @@ window.SB = (function(){
           'facility:facilities(*), ' +
           'tranches(*, ' +
             'interest_components(*, ' +
-              'interest_terms(*), interest_spreads(*), ratchet_tiers(*)' +
+              'interest_terms(*), interest_spreads(*), ratchet_tiers(*), rfr_fixings(*)' +
             '), ' +
             'drawdowns(*), paydowns(*)' +
           '), ' +
@@ -3867,7 +3948,18 @@ window.SB = (function(){
                   marginBps:  +rt.margin_bps || 0,
                   note:       rt.note || ''
                 }))
-              }
+              },
+              // RFR fixings — daily observed benchmark rates. Sorted ascending
+              // by date. Consumed by engine's computeCompoundedRFR when the
+              // interest component uses a SONIA / SOFR / ESTR / BBSW base.
+              fixings: (Array.isArray(ic.rfr_fixings) ? ic.rfr_fixings : [])
+                .slice()
+                .sort((a, b) => (a.fixing_date || '').localeCompare(b.fixing_date || ''))
+                .map(f => ({
+                  date:   f.fixing_date,
+                  rate:   +f.rate,
+                  source: f.source || null
+                }))
             }))
           })),
           fees: sort(row.fees, 'fee_no').map((f, fi) => ({
@@ -5767,10 +5859,25 @@ function postJEsToInvestran(){
   const batchId   = 'DIU-' + stamp.slice(0,8) + '-' + String(Math.floor(Math.random()*900+100)).padStart(3,'0');
   const jeRange   = `JE-${stamp.slice(0,8)}-${String(Math.floor(Math.random()*900+100)).padStart(3,'0')}-${String(jeCount).padStart(3,'0')}`;
   const xlsxName  = `investran-diu-${(inst.id||'deal')}-${stamp.slice(0,8)}.xlsx`;
-  const templateName = inst.framework === 'AASB' ? 'AASB_Loan_GL_DIU_Template' :
-                       inst.framework === 'ASC'  ? 'USGAAP_Loan_GL_DIU_Template' :
-                       inst.framework === 'ASPE' ? 'ASPE_Loan_GL_DIU_Template' :
-                                                   'IFRS_Loan_GL_DIU_Template';
+  // Template — user override in Settings takes priority, else derive from framework
+  let templateName;
+  try { templateName = (localStorage.getItem('pcs_v3_diu_template') || '').trim(); } catch(_){}
+  if(!templateName){
+    templateName = inst.framework === 'AASB'   ? 'AASB_Loan_GL_DIU_Template' :
+                   inst.framework === 'ASC' || inst.framework === 'USGAAP' ? 'USGAAP_Loan_GL_DIU_Template' :
+                   inst.framework === 'ASPE'   ? 'ASPE_Loan_GL_DIU_Template' :
+                                                 'IFRS_Loan_GL_DIU_Template';
+  }
+  // LE domain + allocation rule — user overrides in Settings
+  let leDomainOverride  = ''; try { leDomainOverride  = (localStorage.getItem('pcs_v3_diu_le_domain') || '').trim(); } catch(_){}
+  let allocRuleOverride = ''; try { allocRuleOverride = (localStorage.getItem('pcs_v3_diu_allocation_rule') || '').trim(); } catch(_){}
+  if(leDomainOverride || allocRuleOverride){
+    // Apply overrides to every JE row before upload
+    M.acctJournals.forEach(j => {
+      if(leDomainOverride)  j.leDomain       = leDomainOverride;
+      if(allocRuleOverride) j.allocationRule = allocRuleOverride;
+    });
+  }
 
   // ── 3. Open modal & run the simulated 5-step sequence.
   const modal = $('investran-post-modal');
@@ -6164,6 +6271,64 @@ window.openDBConfigModal = function(){
   dfltLblEl.textContent = dflt.label;
   testResult.style.display = 'none';
 
+  // ─── DIU config load ───────────────────────────────────────
+  const diuProxyEl    = $g('diucfg-proxy-url');
+  const diuTemplateEl = $g('diucfg-template');
+  const diuLeDomainEl = $g('diucfg-le-domain');
+  const diuAllocEl    = $g('diucfg-allocation-rule');
+  const diuStatusChip = $g('diucfg-status-chip');
+  const diuTestResult = $g('diucfg-test-result');
+  const btnDiuTest    = $g('btn-diucfg-test');
+  try {
+    diuProxyEl.value    = localStorage.getItem('pcs_v3_diu_proxy_url') || '';
+    diuTemplateEl.value = localStorage.getItem('pcs_v3_diu_template') || '';
+    diuLeDomainEl.value = localStorage.getItem('pcs_v3_diu_le_domain') || '';
+    diuAllocEl.value    = localStorage.getItem('pcs_v3_diu_allocation_rule') || '';
+  } catch(_){}
+  // Live status chip (shows the current mode based on saved URL)
+  const refreshDiuStatusChip = () => {
+    const url = diuProxyEl.value.trim();
+    if(!url){
+      diuStatusChip.textContent = 'simulator';
+      diuStatusChip.style.background = '#3B82F6';
+      diuStatusChip.style.color = 'white';
+    } else {
+      diuStatusChip.textContent = 'live · ' + url.replace(/^https?:\/\//, '').split('/')[0];
+      diuStatusChip.style.background = '#10B981';
+      diuStatusChip.style.color = 'white';
+    }
+  };
+  refreshDiuStatusChip();
+  diuProxyEl.oninput = refreshDiuStatusChip;
+  // Test DIU Connection — pings /healthz on the proxy
+  btnDiuTest.onclick = async () => {
+    const url = diuProxyEl.value.trim().replace(/\/$/, '');
+    if(!url){
+      diuTestResult.innerHTML = '<span style="color:#FBBF24;">◐ No proxy URL — Post JE will run in simulator mode.</span>';
+      return;
+    }
+    diuTestResult.innerHTML = '<span style="color:#CBD5E1;">◌ Pinging ' + escapeHTML(url) + '/healthz…</span>';
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 8000);
+      const res = await fetch(url + '/healthz', { method:'GET', signal: ac.signal });
+      clearTimeout(timer);
+      if(!res.ok){
+        diuTestResult.innerHTML = '<span style="color:#F87171;">✕ HTTP ' + res.status + ' · ' + res.statusText + '</span>';
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if(data.investranConfigured){
+        diuTestResult.innerHTML = '<span style="color:#34D399;">✓ Live · configured for ' + escapeHTML(data.investranBase || '(unknown)') + (data.tokenCached ? ' · OAuth token cached' : '') + '</span>';
+      } else {
+        diuTestResult.innerHTML = '<span style="color:#FBBF24;">◐ Proxy reachable but Investran credentials are blank in .env — Post JE will error until CLIENT_ID/SECRET are set on the proxy.</span>';
+      }
+    } catch(err) {
+      const msg = err && err.name === 'AbortError' ? 'timeout after 8s' : (err && err.message ? err.message : String(err));
+      diuTestResult.innerHTML = '<span style="color:#F87171;">✕ ' + escapeHTML(msg) + '</span>';
+    }
+  };
+
   // Update the per-type UI when the dropdown changes.
   function applyTypeUI(){
     const t = typeEl.value;
@@ -6270,7 +6435,7 @@ window.openDBConfigModal = function(){
   };
 
   btnReset.onclick = () => {
-    if(!confirm('Reset DB connection back to the built-in defaults (Supabase · Ferhat Income Module)?')) return;
+    if(!confirm('Reset ALL backend + DIU settings back to defaults (Supabase built-in URL, DIU proxy blank → simulator mode)?')) return;
     window.SB.resetConfig();
     typeEl.value = 'supabase';
     labelEl.value = dflt.label;
@@ -6279,8 +6444,18 @@ window.openDBConfigModal = function(){
     authSchemeEl.value = 'bearer';
     authValueEl.value  = '';
     testResult.style.display = 'none';
+    // Clear DIU fields
+    try {
+      localStorage.removeItem('pcs_v3_diu_proxy_url');
+      localStorage.removeItem('pcs_v3_diu_template');
+      localStorage.removeItem('pcs_v3_diu_le_domain');
+      localStorage.removeItem('pcs_v3_diu_allocation_rule');
+    } catch(_){}
+    diuProxyEl.value = ''; diuTemplateEl.value = ''; diuLeDomainEl.value = ''; diuAllocEl.value = '';
+    refreshDiuStatusChip();
+    diuTestResult.innerHTML = '—';
     applyTypeUI();
-    if(typeof toast === 'function') toast('Reset to defaults — click Save & Reload to apply', 4000);
+    if(typeof toast === 'function') toast('All settings reset — click Save & Reload to apply', 4000);
   };
 
   btnSave.onclick = () => {
@@ -6311,6 +6486,22 @@ window.openDBConfigModal = function(){
       label:      newLabel
     });
     if(!ok){ alert('Failed to save to localStorage. Check browser privacy settings.'); return; }
+    // ─── Save DIU integration settings alongside DB config ────
+    try {
+      const dProxy = (diuProxyEl.value || '').trim().replace(/\/$/, '');
+      const dTpl   = (diuTemplateEl.value || '').trim();
+      const dLE    = (diuLeDomainEl.value || '').trim();
+      const dAlloc = (diuAllocEl.value || '').trim();
+      if(dProxy){
+        if(!/^https?:\/\//.test(dProxy)){ alert('DIU Proxy URL must start with https:// (or http://)'); diuProxyEl.focus(); return; }
+        localStorage.setItem('pcs_v3_diu_proxy_url', dProxy);
+      } else {
+        localStorage.removeItem('pcs_v3_diu_proxy_url');
+      }
+      if(dTpl)   localStorage.setItem('pcs_v3_diu_template', dTpl);        else localStorage.removeItem('pcs_v3_diu_template');
+      if(dLE)    localStorage.setItem('pcs_v3_diu_le_domain', dLE);         else localStorage.removeItem('pcs_v3_diu_le_domain');
+      if(dAlloc) localStorage.setItem('pcs_v3_diu_allocation_rule', dAlloc); else localStorage.removeItem('pcs_v3_diu_allocation_rule');
+    } catch(_){}
     if(typeof toast === 'function') toast('Saved · reloading…', 2000);
     setTimeout(() => location.reload(), 400);
   };
@@ -11793,6 +11984,45 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   }
   populateInstrumentPicker();
+
+  // ─── DIU status chip on Stage 2 toolbar ─────────────────────
+  // Reads pcs_v3_diu_proxy_url from localStorage. Blank → "Simulator" (blue).
+  // Non-blank → best-effort ping /healthz. Reachable + investranConfigured =
+  // "Live" (green). Reachable but not configured = "Live · creds missing"
+  // (amber). Unreachable = "Not reachable" (red). Clicking opens the modal.
+  (async () => {
+    const chipText = document.getElementById('diu-mode-chip-text');
+    const chip = document.getElementById('diu-mode-chip');
+    if(!chip || !chipText) return;
+    const url = (localStorage.getItem('pcs_v3_diu_proxy_url') || '').trim().replace(/\/$/, '');
+    const paint = (label, bg, tip) => {
+      chipText.textContent = label;
+      chip.style.background = bg;
+      chip.title = (tip || '') + ' · Click to open DIU settings';
+    };
+    if(!url){
+      paint('DIU · Simulator', '#3B82F6', 'No proxy configured — Post JE runs a 6-step animation instead of hitting Investran');
+      return;
+    }
+    paint('DIU · Pinging…', '#6B7280', 'Checking proxy reachability');
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 5000);
+      const res = await fetch(url + '/healthz', { method:'GET', signal: ac.signal });
+      clearTimeout(timer);
+      if(!res.ok){ paint('DIU · Not reachable', '#DC2626', 'HTTP ' + res.status + ' from ' + url + '/healthz'); return; }
+      const data = await res.json().catch(() => ({}));
+      const host = url.replace(/^https?:\/\//, '').split('/')[0];
+      if(data.investranConfigured){
+        paint('DIU · Live · ' + host, '#10B981', 'Connected to ' + (data.investranBase || 'Investran'));
+      } else {
+        paint('DIU · Creds missing', '#D97706', 'Proxy is up but INVESTRAN_CLIENT_ID/SECRET are blank in .env — commit will fail');
+      }
+    } catch(err) {
+      paint('DIU · Not reachable', '#DC2626', (err && err.name === 'AbortError') ? 'Ping timed out after 5s' : (err && err.message ? err.message : 'Unknown error'));
+    }
+  })();
+
   // Snapshot the seed defaults + populate the editable treatment form before
   // the first reset so the dropdowns show the deal's actual treatment.
   snapshotTreatmentDefaults(currentInstrument());
@@ -14006,7 +14236,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       terms: [ newTerm() ],
       spreads: [ { from:'', to:'', bps: 250, note:'Initial margin' } ],
       ratchet: { kpi:'none', tiers:[] },
-      esgAdjustmentBps: 0
+      esgAdjustmentBps: 0,
+      // RFR fixings — daily observed benchmark rates. Empty by default; when
+      // populated the engine's computeCompoundedRFR consumes them per its
+      // lookback / observation_shift / lockout / daily_compounding conventions.
+      // Import via the "Import CSV" button on the IC card or add rows manually.
+      fixings: []
     };
   }
   function newTerm(){
@@ -14172,6 +14407,91 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           <label>ESG adjustment (bps)</label>
           <input data-ic-field="esgAdjustmentBps" data-tidx="${tidx}" data-icidx="${ici}" type="number" step="0.5" value="${ic.esgAdjustmentBps || 0}" class="border rounded px-1 py-0.5 text-[10px] bg-white w-16"/>
         </div>
+
+        <!-- RFR Fixings — daily observed benchmark rate series -->
+        ${renderRfrFixingsBlock(ic, tidx, ici)}
+      </div>`;
+  }
+
+  // Compact summary line: "N fixings · latest YYYY-MM-DD · X.XXXX%" or empty state
+  function fixingsSummaryText(fixings){
+    const list = Array.isArray(fixings) ? fixings : [];
+    if(!list.length) return 'No fixings — engine falls back to Base value above';
+    const sorted = list.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+    const last = sorted[sorted.length - 1];
+    return list.length + ' fixings · latest ' + (last.date || '?') + ' · ' + ((last.rate || 0) * 100).toFixed(4) + '%';
+  }
+
+  // Compact SVG sparkline of the fixings series (last 60 pts). Renders as inline SVG.
+  function renderFixingsSparkline(fixings){
+    const list = (Array.isArray(fixings) ? fixings : [])
+      .filter(f => f && f.date && f.rate != null)
+      .slice()
+      .sort((a,b) => a.date.localeCompare(b.date))
+      .slice(-60);
+    if(list.length < 2) return '';
+    const rates = list.map(f => +f.rate);
+    const min = Math.min(...rates), max = Math.max(...rates);
+    const range = (max - min) || 1;
+    const W = 240, H = 32, pad = 2;
+    const pts = list.map((f, i) => {
+      const x = pad + (i * (W - 2*pad)) / (list.length - 1);
+      const y = pad + (H - 2*pad) * (1 - (+f.rate - min) / range);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="display:block; margin:2px 0 4px; background:#F9FAFB; border-radius:3px;">
+      <polyline points="${pts}" fill="none" stroke="#6366F1" stroke-width="1.4"/>
+      <text x="${W - pad}" y="${H - pad - 1}" text-anchor="end" font-size="8" fill="#9CA3AF">${(min * 100).toFixed(3)}% → ${(max * 100).toFixed(3)}%</text>
+    </svg>`;
+  }
+
+  // The whole RFR Fixings section. Hidden for FIXED-index components.
+  function renderRfrFixingsBlock(ic, tidx, ici){
+    // Fixed-rate coupons don't consume a fixings series — hide the block
+    if(ic.baseIndex === 'FIXED') return '';
+    const fixings = Array.isArray(ic.fixings) ? ic.fixings : [];
+    const totalCount = fixings.length;
+    const sorted = fixings.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+    const showLast = 10;
+    const startIdx = Math.max(0, sorted.length - showLast);
+    const shown = sorted.slice(startIdx);
+    return `
+      <div class="mt-2 border-t border-dashed border-indigo-200 pt-1.5">
+        <details ${totalCount ? 'open' : ''}>
+          <summary class="text-[10px] uppercase text-gray-600 cursor-pointer flex items-center gap-1.5" style="list-style:none;">
+            <span class="material-icons-outlined text-[12px]">show_chart</span>
+            RFR Fixings Series
+            <span class="chip ${totalCount ? 'green' : 'blue'} text-[9px] !px-1.5 !py-0" style="line-height:1.2;">${totalCount}</span>
+            <span class="text-[9px] text-gray-500 ml-auto italic">${fixingsSummaryText(fixings)}</span>
+          </summary>
+          <div class="mt-1.5">
+            <div class="flex items-center gap-1 mb-1 flex-wrap">
+              <label class="mat-btn outline !py-0.5 !px-2 text-[10px] cursor-pointer" style="margin:0;">
+                <span class="material-icons-outlined text-[12px]" style="vertical-align:middle;">upload_file</span>
+                Import CSV
+                <input type="file" accept=".csv,.txt" style="display:none;" data-fx-import data-tidx="${tidx}" data-icidx="${ici}"/>
+              </label>
+              <button data-t-action="addFixing" data-tidx="${tidx}" data-icidx="${ici}" class="mat-btn outline !py-0.5 !px-2 text-[10px]">
+                <span class="material-icons-outlined text-[12px]" style="vertical-align:middle;">add</span>Add row
+              </button>
+              <span class="text-[9px] text-gray-500">CSV: <code>date,rate</code> · rate as decimal (0.0425)</span>
+              ${totalCount ? `<button data-t-action="clearFixings" data-tidx="${tidx}" data-icidx="${ici}" class="text-red-600 underline text-[10px] ml-auto">clear all</button>` : ''}
+            </div>
+            ${renderFixingsSparkline(fixings)}
+            <div class="max-h-28 overflow-y-auto space-y-0.5">
+              ${shown.map((fx, fi) => {
+                const actualIdx = fixings.indexOf(fx);
+                return `<div class="flex gap-1 items-center text-[10px] bg-gray-50 rounded px-2 py-0.5">
+                  <input data-fx-field="date" data-tidx="${tidx}" data-icidx="${ici}" data-fxidx="${actualIdx}" type="date" value="${fx.date || ''}" class="border rounded px-1 py-0.5 text-[10px] bg-white"/>
+                  <input data-fx-field="rate" data-tidx="${tidx}" data-icidx="${ici}" data-fxidx="${actualIdx}" type="number" step="0.00001" value="${fx.rate ?? ''}" placeholder="0.0425" class="border rounded px-1 py-0.5 text-[10px] bg-white w-24"/>
+                  <span class="text-gray-500">= ${((fx.rate || 0) * 100).toFixed(4)}%</span>
+                  <button data-t-action="rmFixing" data-tidx="${tidx}" data-icidx="${ici}" data-fxidx="${actualIdx}" class="text-red-600 underline text-[10px] ml-auto">x</button>
+                </div>`;
+              }).join('')}
+            </div>
+            ${totalCount > showLast ? `<div class="text-[10px] text-gray-500 italic mt-1">Showing last ${showLast} of ${totalCount}. Import CSV for bulk load.</div>` : ''}
+          </div>
+        </details>
       </div>`;
   }
 
@@ -14301,10 +14621,120 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           t.repayments = t.repayments || [];
           t.repayments.splice(payidx, 1);
         }
+        // RFR fixings actions
+        else if(a === 'addFixing'){
+          const ic = t.interestComponents[icidx];
+          ic.fixings = ic.fixings || [];
+          ic.fixings.push({ date: new Date().toISOString().slice(0,10), rate: 0, source: null });
+        }
+        else if(a === 'rmFixing'){
+          const ic = t.interestComponents[icidx];
+          const fxidx = +el.dataset.fxidx;
+          if(Array.isArray(ic.fixings)) ic.fixings.splice(fxidx, 1);
+        }
+        else if(a === 'clearFixings'){
+          const ic = t.interestComponents[icidx];
+          if(!confirm('Remove all ' + (ic.fixings || []).length + ' fixings from this component?')) return;
+          ic.fixings = [];
+        }
         renderTranches();
         recompute();
       };
     });
+    // Fixings — inline field edits + CSV import
+    document.querySelectorAll(`[data-tidx="${idx}"][data-fx-field]`).forEach(el => {
+      el.oninput = el.onchange = () => {
+        const ic = t.interestComponents[+el.dataset.icidx];
+        ic.fixings = ic.fixings || [];
+        const fxidx = +el.dataset.fxidx;
+        if(!ic.fixings[fxidx]) return;
+        const f = el.dataset.fxField;
+        ic.fixings[fxidx][f] = (f === 'rate') ? (parseFloat(el.value) || 0) : el.value;
+        if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+          window.AutoSave.schedule();
+        }
+        recompute();
+      };
+    });
+    document.querySelectorAll(`[data-tidx="${idx}"][data-fx-import]`).forEach(el => {
+      el.onchange = (evt) => {
+        const file = evt.target.files && evt.target.files[0];
+        if(!file) return;
+        const ic = t.interestComponents[+el.dataset.icidx];
+        const reader = new FileReader();
+        reader.onload = () => {
+          const parsed = parseFixingsCSV(String(reader.result || ''));
+          if(!parsed.rows.length){
+            alert('No valid rows found. Expected CSV with columns: date, rate\nDate format: YYYY-MM-DD. Rate as decimal (0.0425 = 4.25%) or percentage (4.25).\n\n' + (parsed.error || ''));
+            return;
+          }
+          ic.fixings = ic.fixings || [];
+          // Merge — replace by date, keep existing dates not in the CSV
+          const byDate = new Map(ic.fixings.map(f => [f.date, f]));
+          for(const r of parsed.rows) byDate.set(r.date, r);
+          ic.fixings = Array.from(byDate.values()).sort((a,b) => (a.date||'').localeCompare(b.date||''));
+          renderTranches();
+          recompute();
+          if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+            window.AutoSave.schedule();
+          }
+          if(typeof toast === 'function'){
+            toast('Imported ' + parsed.rows.length + ' fixings' + (parsed.warnings.length ? ' · ' + parsed.warnings.length + ' warnings (see console)' : ''), 4000);
+          }
+          if(parsed.warnings.length) console.warn('[fixings CSV warnings]', parsed.warnings.slice(0,10));
+          evt.target.value = '';   // reset so re-uploading same file re-triggers
+        };
+        reader.readAsText(file);
+      };
+    });
+  }
+
+  // Parse CSV — expect header row or first row with 'date' + 'rate' columns.
+  // Rate accepted as either decimal (0.0425) or percent (4.25). Blank rows +
+  // malformed rows are collected in warnings.
+  function parseFixingsCSV(text){
+    const out = { rows: [], warnings: [], error: null };
+    const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(l => l.length);
+    if(!lines.length){ out.error = 'File is empty.'; return out; }
+    // Detect delimiter
+    const delim = (lines[0].indexOf('\t') > -1) ? '\t' : ',';
+    // Header detection
+    const first = lines[0].toLowerCase().split(delim).map(s => s.trim());
+    const hasHeader = first.includes('date') || first.includes('rate') || first.includes('fixing_date');
+    let dateIdx = 0, rateIdx = 1, srcIdx = -1;
+    let bodyStart = 0;
+    if(hasHeader){
+      dateIdx = first.findIndex(c => c === 'date' || c === 'fixing_date' || c === 'as_of');
+      rateIdx = first.findIndex(c => c === 'rate' || c === 'fixing' || c === 'value');
+      srcIdx  = first.findIndex(c => c === 'source' || c === 'provider' || c === 'src');
+      if(dateIdx < 0 || rateIdx < 0){ out.error = 'CSV header must include a "date" column and a "rate" column.'; return out; }
+      bodyStart = 1;
+    }
+    for(let i = bodyStart; i < lines.length; i++){
+      const cells = lines[i].split(delim).map(s => s.trim().replace(/^"|"$/g, ''));
+      if(!cells[dateIdx] || !cells[rateIdx]){
+        out.warnings.push('line ' + (i+1) + ': skipped (missing date or rate)');
+        continue;
+      }
+      // Normalise date: accept YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY
+      let dateStr = cells[dateIdx];
+      const iso = dateStr.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+      const eu  = dateStr.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+      if(iso){ dateStr = iso[1] + '-' + iso[2].padStart(2,'0') + '-' + iso[3].padStart(2,'0'); }
+      else if(eu){ dateStr = eu[3] + '-' + eu[2].padStart(2,'0') + '-' + eu[1].padStart(2,'0'); }
+      else { out.warnings.push('line ' + (i+1) + ': unrecognised date format "' + cells[dateIdx] + '"'); continue; }
+      const rateStr = cells[rateIdx].replace(/%$/, '');
+      let rate = parseFloat(rateStr);
+      if(isNaN(rate)){ out.warnings.push('line ' + (i+1) + ': non-numeric rate "' + cells[rateIdx] + '"'); continue; }
+      // Auto-detect percent vs decimal — anything > 1 is treated as a percentage
+      if(rate > 1 || cells[rateIdx].endsWith('%')) rate = rate / 100;
+      out.rows.push({
+        date:   dateStr,
+        rate:   rate,
+        source: srcIdx >= 0 ? (cells[srcIdx] || null) : null
+      });
+    }
+    return out;
   }
 
   // ─── Render: fees ───────────────────────────────────────────────────
