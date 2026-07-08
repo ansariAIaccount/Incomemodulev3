@@ -422,10 +422,24 @@
       <span id="active-deal-chip" class="chip blue" style="font-size:11px;" title="Currently-loaded deal">No deal loaded</span>
     </div>
   </div>
-  <!-- Row 2: THREE primary entry buttons — full-bleed gradient cards inside the
-       sticky header so the user can pivot at any stage. Click → routes to the
-       respective flow (manual builder / ISIN modal / active deal picker). -->
-  <div class="max-w-[1400px] mx-auto px-6 pb-3">
+  <!-- Row 2 — Deal Selection panel · collapsible. Toggle button in the sub-header
+       row hides the 3 entry cards + integration paragraph to reclaim vertical
+       space once a deal is loaded. State persists in localStorage. -->
+  <div id="deal-selection-toggle-row" class="max-w-[1400px] mx-auto px-6 pt-1 pb-1">
+    <button id="btn-deal-selection-toggle" type="button"
+            onclick="window.toggleDealSelectionPanel && window.toggleDealSelectionPanel()"
+            style="width:100%; display:flex; align-items:center; gap:8px; padding:5px 10px; background:rgba(15,23,42,0.03); border:1px dashed #cbd5e1; border-radius:6px; cursor:pointer; font-size:11px; color:#475569; transition:background 0.15s;"
+            onmouseover="this.style.background='rgba(15,23,42,0.06)';" onmouseout="this.style.background='rgba(15,23,42,0.03)';"
+            title="Show / hide the deal-selection panel">
+      <span class="material-icons-outlined" id="deal-selection-toggle-icon" style="font-size:16px; transition:transform 0.18s;">expand_less</span>
+      <span style="font-weight:600;">Deal Selection</span>
+      <span style="opacity:0.7;">— manual build · security master · preset library</span>
+      <span style="flex:1;"></span>
+      <span id="deal-selection-toggle-hint" style="font-size:10px; opacity:0.6;">click to collapse</span>
+    </button>
+  </div>
+  <!-- Row 2 body: collapsible entry cards -->
+  <div id="deal-selection-panel" class="max-w-[1400px] mx-auto px-6 pb-3" style="overflow:hidden; transition:max-height 0.25s ease-out; max-height:400px;">
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
       <button id="btn-header-manual" type="button"
               onclick="window.handleHeaderManualClick && window.handleHeaderManualClick()"
@@ -471,9 +485,9 @@
          change-handler all keep reading this; the Active Deal modal writes
          sel.value + dispatches a change event when a card is clicked. -->
     <select id="sel-instrument" style="display:none;"></select>
-  </div>
-  <div class="max-w-[1400px] mx-auto px-6 pb-3 text-[11px] text-gray-500 leading-snug">
-    Integration architecture: the Loan Builder is the self-contained system of record for deal capture; Cashflow Generation computes transparent forward cashflows; the Accounting Engine is the IFRS-aligned accounting sub-ledger; the Cash Movements system is the downstream General Ledger. This module orchestrates the data flow between them with full reconciliation.
+    <div class="text-[11px] text-gray-500 leading-snug pt-3">
+      Integration architecture: the Loan Builder is the self-contained system of record for deal capture; Cashflow Generation computes transparent forward cashflows; the Accounting Engine is the IFRS-aligned accounting sub-ledger; the Cash Movements system is the downstream General Ledger. This module orchestrates the data flow between them with full reconciliation.
+    </div>
   </div>
 
   <!-- ─── Stage tab navigation — pinned inside the sticky header frame so it stays
@@ -11984,6 +11998,40 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   }
   populateInstrumentPicker();
+
+  // ─── Deal-Selection panel collapse toggle ─────────────────────
+  // Persist collapsed state in localStorage. Auto-collapse the first time a
+  // deal loads so the user doesn't have to hunt for the fold when the
+  // three-card row becomes noise once the deal is picked.
+  (function(){
+    const panel = document.getElementById('deal-selection-panel');
+    const icon  = document.getElementById('deal-selection-toggle-icon');
+    const hint  = document.getElementById('deal-selection-toggle-hint');
+    if(!panel) return;
+    let collapsed = false;
+    try { collapsed = localStorage.getItem('pcs_v3_deal_selection_collapsed') === '1'; } catch(_){}
+    const apply = () => {
+      if(collapsed){
+        panel.style.maxHeight = '0px';
+        panel.style.paddingTop = '0';
+        panel.style.paddingBottom = '0';
+        if(icon) icon.textContent = 'expand_more';
+        if(hint) hint.textContent = 'click to expand';
+      } else {
+        panel.style.maxHeight = '400px';
+        panel.style.paddingTop = '';
+        panel.style.paddingBottom = '';
+        if(icon) icon.textContent = 'expand_less';
+        if(hint) hint.textContent = 'click to collapse';
+      }
+    };
+    apply();
+    window.toggleDealSelectionPanel = function(){
+      collapsed = !collapsed;
+      try { localStorage.setItem('pcs_v3_deal_selection_collapsed', collapsed ? '1' : '0'); } catch(_){}
+      apply();
+    };
+  })();
 
   // ─── DIU status chip on Stage 2 toolbar ─────────────────────
   // Reads pcs_v3_diu_proxy_url from localStorage. Blank → "Simulator" (blue).
