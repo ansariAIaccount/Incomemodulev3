@@ -968,8 +968,38 @@
        the relationship between what's displayed and what's booked. -->
   <div id="participation-banner" class="hidden mb-3"></div>
 
+  <!-- ═══ Stage 2 sub-tab bar — Run & JEs / Treatment / Evidence Pack ═══
+       Splits the wall of controls into three focused views. State persists in
+       localStorage. Content elements below carry data-substab attributes;
+       switchStage2Sub() shows only those matching the active sub-tab. -->
+  <div id="s2-subtab-bar" style="display:flex; gap:6px; margin-bottom:14px; padding:4px; background:rgba(15,23,42,0.04); border-radius:8px;">
+    <button data-s2sub="run" class="s2-subtab-btn" style="flex:1; padding:8px 12px; border:none; background:white; border-radius:6px; font-size:12px; font-weight:600; color:#21295C; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 1px 2px rgba(15,23,42,0.06);">
+      <span class="material-icons-outlined" style="font-size:16px;">play_circle</span>
+      <span>Run &amp; JEs</span>
+      <span id="s2-tab-je-count" class="chip green" style="font-size:9px; padding:1px 6px; margin-left:4px; display:none;">0</span>
+    </button>
+    <button data-s2sub="treatment" class="s2-subtab-btn" style="flex:1; padding:8px 12px; border:none; background:transparent; border-radius:6px; font-size:12px; font-weight:500; color:#64748B; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+      <span class="material-icons-outlined" style="font-size:16px;">tune</span>
+      <span>Treatment Overrides</span>
+      <span id="s2-tab-tr-count" class="chip amber" style="font-size:9px; padding:1px 6px; margin-left:4px; display:none;">0 mods</span>
+    </button>
+    <button data-s2sub="evidence" class="s2-subtab-btn" style="flex:1; padding:8px 12px; border:none; background:transparent; border-radius:6px; font-size:12px; font-weight:500; color:#64748B; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+      <span class="material-icons-outlined" style="font-size:16px;">verified</span>
+      <span>Evidence Pack</span>
+    </button>
+  </div>
+
+  <!-- Empty state for Run & JEs sub-tab — shows when no active deal OR when
+       accounting hasn't been run yet. Auto-hides once M.acctJournals populates. -->
+  <div id="s2-empty-state" data-substab="run" style="display:none; text-align:center; padding:60px 20px; background:linear-gradient(135deg,#F8FAFC 0%,#F1F5F9 100%); border:2px dashed #CBD5E1; border-radius:12px; margin-bottom:14px;">
+    <span class="material-icons-outlined" style="font-size:48px; color:#94A3B8; display:block; margin-bottom:12px;">receipt_long</span>
+    <div id="s2-empty-title" style="font-size:15px; font-weight:700; color:#21295C; margin-bottom:6px;">Ready to run accounting</div>
+    <div id="s2-empty-desc" style="font-size:12.5px; color:#475569; max-width:480px; margin:0 auto 18px; line-height:1.55;">Click <b>Run Accounting</b> above to build the daily cashflow schedule and framework-aware journal entries from your loan definition.</div>
+    <div style="font-size:11px; color:#64748B;">Use the <b>Treatment Overrides</b> tab to adjust ECL / EIR / classification before running. View the <b>Evidence Pack</b> tab after running for audit trace.</div>
+  </div>
+
   <!-- ─────────── Editable Accounting Treatment Panel ─────────── -->
-  <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3 mb-4">
+  <div id="s2-treatment-panel" data-substab="treatment" class="bg-indigo-50 border border-indigo-200 rounded-lg p-3 mb-4">
     <div class="flex items-center gap-2 mb-2 flex-wrap">
       <span class="material-icons-outlined text-[18px]" style="color:#4338ca">tune</span>
       <h3 class="text-[13px] font-bold text-indigo-900">Accounting Treatment — Editable Policy</h3>
@@ -1874,14 +1904,26 @@
   </div>
 
   <!-- Period summary KPIs -->
-  <div id="acct-kpis" class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 hidden"></div>
+  <div id="acct-kpis" data-substab="run" class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 hidden"></div>
 
   <!-- ─────────── Accounting Evidence Pack — 5 new collapsible panels ─────────── -->
-  <div id="evidence-pack" class="hidden">
-    <div class="flex items-center gap-2 mb-2">
+  <div id="evidence-pack" data-substab="evidence" class="hidden">
+    <div class="flex items-center gap-2 mb-2 flex-wrap">
       <span class="material-icons-outlined text-[18px]" style="color:var(--brand-600)">verified</span>
       <h3 class="text-[13px] font-bold">Accounting Evidence Pack</h3>
       <span class="text-[11px] text-gray-500">All evidence the accounting agenda asks for — drill into each panel</span>
+      <div style="margin-left:auto; display:flex; gap:4px;">
+        <button onclick="document.querySelectorAll('#evidence-pack details').forEach(d => d.open = true)"
+                class="mat-btn outline !py-0.5 !px-2 text-[10.5px]"
+                title="Open all evidence pack sections at once">
+          <span class="material-icons-outlined" style="font-size:12px; vertical-align:middle;">unfold_more</span>Expand all
+        </button>
+        <button onclick="document.querySelectorAll('#evidence-pack details').forEach(d => d.open = false)"
+                class="mat-btn outline !py-0.5 !px-2 text-[10.5px]"
+                title="Collapse all sections to headers only">
+          <span class="material-icons-outlined" style="font-size:12px; vertical-align:middle;">unfold_less</span>Collapse all
+        </button>
+      </div>
     </div>
 
     <!-- A) Month-End Close Workflow + Run Metadata -->
@@ -1981,7 +2023,7 @@
 
   <!-- Daily schedule view — rebuilt on every Run Accounting / treatment change.
        Reflects every override (PIK, mod events, ECL stage, fees, etc.) -->
-  <details id="acct-schedule-section" class="hidden">
+  <details id="acct-schedule-section" data-substab="run" class="hidden">
     <summary class="text-[12px] mb-2 cursor-pointer">View daily schedule (engine output that drives every JE)</summary>
     <div class="flex items-center gap-2 mb-2 flex-wrap">
       <span id="schedule-row-count" class="chip blue text-[11px]">0 rows</span>
@@ -8723,7 +8765,54 @@ function syncBuilderFromInstrument(inst){
   }
 }
 
+// Snapshot the entire treatment form + relevant inst state as a compact hash
+// string. Used by onTreatmentChange to short-circuit when nothing actually
+// changed (e.g. when the treatment panel becomes visible via a sub-tab click
+// and browsers fire spurious change events, or when programmatic .value
+// assignments in loadTreatmentForm cascade to secondary handlers).
+function _treatmentStateHash(){
+  const parts = [];
+  const ids = [
+    'opt-framework','opt-eir-method','opt-eir-override','opt-oid-treatment','opt-oid-method',
+    'opt-ifrs9-class','opt-business-model','opt-sppi','opt-fv-level',
+    'opt-ecl-stage','opt-pd','opt-lgd','opt-compute-ecl',
+    'opt-poci','opt-stage3-int','opt-suspended','opt-ccf',
+    'opt-dpd-stage2','opt-dpd-stage3','opt-dpd-current','opt-covenant-breach','opt-watchlist','opt-macro-weight',
+    'opt-mod-threshold','opt-mod-reir','opt-mod-default','opt-continuing',
+    'opt-wht-rate','opt-wht-recoverable','opt-deferred-tax','opt-fx-cadence',
+    'opt-pik-enabled','opt-pik-rate','opt-pik-freq',
+    'opt-aasb-tier','opt-aasb-asic','opt-aasb-franking','opt-aasb-relatedparty','opt-aasb-gst','opt-aasb-apra',
+    'opt-t3-accrued'
+  ];
+  for(const id of ids){
+    const el = document.getElementById(id);
+    parts.push(el ? (el.value || '') : '');
+  }
+  // Also fold in the length of event arrays that can be mutated outside the form
+  const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+  if(inst){
+    parts.push('me:' + (inst.modificationEvents || []).length);
+    parts.push('ps:' + (inst.principalSchedule || []).length);
+    parts.push('de:' + (inst.defaultEvents || []).length);
+    parts.push('le:' + (inst.lifecycleEvents || []).length);
+  }
+  return parts.join('|');
+}
+
 function onTreatmentChange(){
+  // Guard: skip the whole downstream cascade (autosave · Stage 1 dirty flag
+  // · runAccounting) when nothing has actually changed since last invocation.
+  // Prevents spurious re-runs from sub-tab visibility, focus events, or
+  // programmatic .value assignments in loadTreatmentForm. Real user edits
+  // will always produce a hash delta.
+  try {
+    const hash = _treatmentStateHash();
+    if(M._lastTreatmentHash === hash){
+      // No-op — nothing changed, don't touch any downstream state.
+      return;
+    }
+    M._lastTreatmentHash = hash;
+  } catch(_){ /* if hashing fails for any reason, fall through to full flow */ }
   applyTreatmentFromForm();
   // V3 — Snapshot inst → B so the change is captured for DB persistence.
   // This runs after EVERY Stage 2 mutation (transtype add/remove, treatment
@@ -9279,6 +9368,15 @@ function runAccountingImpl(){
   $('workday-out-status').className = 'chip blue self-center';
   $('workday-out-status').textContent = 'Ready to push';
   toast('Accounting run complete — ' + M.acctJournals.length + ' journal rows generated');
+  // Refresh Stage 2 sub-tab badges + empty state after every successful run
+  if(typeof window.refreshS2RunBadge === 'function') window.refreshS2RunBadge();
+  if(typeof window.refreshS2FrameworkHiding === 'function') window.refreshS2FrameworkHiding();
+  if(typeof window.refreshS2TreatmentBadge === 'function') window.refreshS2TreatmentBadge();
+  // Prime the treatment-state hash so a subsequent spurious onTreatmentChange
+  // (from sub-tab visibility / form focus / programmatic .value writes) can be
+  // detected as a no-op and skip the re-run. Real user edits will still show
+  // a hash delta and cascade through.
+  try { if(typeof _treatmentStateHash === 'function') M._lastTreatmentHash = _treatmentStateHash(); } catch(_){}
   // V3 — persist the run to Supabase. Best-effort; failure doesn't block UX.
   if(typeof window.SB !== 'undefined' && window.SB.connected){
     const glPostingDate = (document.getElementById('opt-gl-date') || {}).value || null;
@@ -11998,6 +12096,146 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   }
   populateInstrumentPicker();
+
+  // ═══ Stage 2 sub-tab switcher ═══════════════════════════════
+  // Splits Stage 2 into 3 focused views: Run & JEs / Treatment / Evidence.
+  // Content elements carry data-substab attributes. Persist selection so
+  // the same view comes back on reload.
+  (function(){
+    const buttons = document.querySelectorAll('.s2-subtab-btn');
+    if(!buttons.length) return;
+    const activeBtnStyle = { background:'white', color:'#21295C', fontWeight:'600', boxShadow:'0 1px 2px rgba(15,23,42,0.06)' };
+    const inactiveBtnStyle = { background:'transparent', color:'#64748B', fontWeight:'500', boxShadow:'none' };
+    const applyBtn = (btn, active) => {
+      const style = active ? activeBtnStyle : inactiveBtnStyle;
+      Object.keys(style).forEach(k => btn.style[k] = style[k]);
+    };
+    window.switchStage2Sub = function(target){
+      // Show/hide content by data-substab
+      document.querySelectorAll('[data-substab]').forEach(el => {
+        // Skip the buttons themselves and the sub-tab bar
+        if(el.classList.contains('s2-subtab-btn')) return;
+        const wanted = el.getAttribute('data-substab');
+        if(wanted === target){
+          // Restore the previous display (respect any existing 'hidden' class)
+          el.style.removeProperty('display');
+        } else {
+          el.style.display = 'none';
+        }
+      });
+      // Refresh button visual state
+      buttons.forEach(b => applyBtn(b, b.dataset.s2sub === target));
+      // Empty state visibility — only in "run" sub-tab, and only when M.acctJournals is empty
+      const empty = document.getElementById('s2-empty-state');
+      if(empty){
+        const hasJEs = (typeof M !== 'undefined' && Array.isArray(M.acctJournals) && M.acctJournals.length > 0);
+        const inst = typeof currentInstrument === 'function' ? currentInstrument() : null;
+        empty.style.display = (target === 'run' && !hasJEs) ? '' : 'none';
+        // Update title + description based on state
+        const title = document.getElementById('s2-empty-title');
+        const desc  = document.getElementById('s2-empty-desc');
+        if(title && desc){
+          if(!inst){
+            title.textContent = 'No deal loaded';
+            desc.innerHTML = 'Go to <b>Stage 0 — Loan Builder</b> and pick a deal from <b>Load Active Deal</b>, or build one manually. The accounting engine needs a loan definition to run.';
+          } else {
+            title.textContent = 'Ready to run accounting';
+            desc.innerHTML = 'Click <b>Run Accounting</b> above to build the daily cashflow schedule and framework-aware journal entries for <b>' + escapeHTML(inst.deal || inst.id || 'this deal') + '</b>.';
+          }
+        }
+      }
+      try { localStorage.setItem('pcs_v3_s2_subtab', target); } catch(_){}
+    };
+    buttons.forEach(btn => { btn.onclick = () => window.switchStage2Sub(btn.dataset.s2sub); });
+    let initial = 'run';
+    try { initial = localStorage.getItem('pcs_v3_s2_subtab') || 'run'; } catch(_){}
+    // Delay slightly so any framework-aware hiding logic in other init blocks lands first
+    setTimeout(() => window.switchStage2Sub(initial), 50);
+  })();
+
+  // ═══ Stage 2 Treatment override counter ═════════════════════
+  // Reads live from the treatment form and shows "N mods" chip on the tab.
+  // Considers a field "modified" if its value differs from the deal default.
+  window.refreshS2TreatmentBadge = function(){
+    const chip = document.getElementById('s2-tab-tr-count');
+    if(!chip) return;
+    // Snapshot current form vs defaults would require deep introspection.
+    // Simplified: count how many <input>/<select> inside #s2-treatment-panel
+    // have a non-default value marker (data-modified attribute set by the
+    // treatment form change handlers, or a fallback: non-empty inputs).
+    const panel = document.getElementById('s2-treatment-panel');
+    if(!panel){ chip.style.display = 'none'; return; }
+    const inst = typeof currentInstrument === 'function' ? currentInstrument() : null;
+    if(!inst){ chip.style.display = 'none'; return; }
+    // Use M.treatmentDirty as source of truth — set by loadTreatmentForm's
+    // change handlers when a user edits a field. If dirty, show "•".
+    const dirty = (typeof M !== 'undefined' && M.treatmentDirty && M.treatmentDirty[inst.id]);
+    if(dirty){
+      chip.textContent = 'modified';
+      chip.style.display = '';
+    } else {
+      chip.style.display = 'none';
+    }
+  };
+
+  // ═══ Stage 2 JE count badge on Run tab ══════════════════════
+  window.refreshS2RunBadge = function(){
+    const chip = document.getElementById('s2-tab-je-count');
+    if(!chip) return;
+    const n = (typeof M !== 'undefined' && Array.isArray(M.acctJournals)) ? M.acctJournals.length : 0;
+    if(n > 0){
+      chip.textContent = n + ' JE';
+      chip.style.display = '';
+    } else {
+      chip.style.display = 'none';
+    }
+    // Also hide empty state when JEs exist
+    const empty = document.getElementById('s2-empty-state');
+    if(empty && n > 0) empty.style.display = 'none';
+  };
+
+  // ═══ Framework-aware treatment section hiding ═══════════════
+  // Hedge accounting: IFRS/AASB only (ASC 815 is materially different from
+  // IFRS 9 §6 — surface via a separate flag if the user wants it later).
+  // POCI flag: IFRS/AASB only (CECL doesn't stage; ASPE is incurred-loss).
+  // AASB extras panel: AASB only (already handled by existing code).
+  window.refreshS2FrameworkHiding = function(){
+    const inst = typeof currentInstrument === 'function' ? currentInstrument() : null;
+    if(!inst) return;
+    const fw = (inst.accountingFramework || inst.framework || 'IFRS').toUpperCase();
+    // Hedge sub-panels — search by section id / label
+    const hedgeIds = ['s2-hedge-panel','hedge-designation-panel','opt-hedge-type'];
+    hedgeIds.forEach(id => {
+      const el = document.getElementById(id);
+      if(el){
+        const wrap = el.closest('.grid, .bg-white, .bg-gray-50, .bg-indigo-50') || el;
+        wrap.style.display = (fw === 'IFRS' || fw === 'AASB') ? '' : 'none';
+      }
+    });
+    // POCI flag — hide for non-IFRS/AASB
+    const poci = document.getElementById('opt-poci');
+    if(poci){
+      const wrap = poci.closest('.flex, .grid, div');
+      if(wrap) wrap.style.display = (fw === 'IFRS' || fw === 'AASB') ? '' : 'none';
+    }
+    // WHT (withholding tax) — hide unless cross-border (approximation: dealCurrency !== 'USD' or explicit tax setup)
+    // Skip for now — no clear signal.
+  };
+
+  // Hook the framework selector to auto-refresh hiding + treatment badge
+  const _optFramework = document.getElementById('opt-framework');
+  if(_optFramework){
+    _optFramework.addEventListener('change', () => {
+      window.refreshS2FrameworkHiding();
+      window.refreshS2TreatmentBadge();
+    });
+  }
+  // Refresh once at boot after everything else
+  setTimeout(() => {
+    window.refreshS2FrameworkHiding();
+    window.refreshS2TreatmentBadge();
+    window.refreshS2RunBadge();
+  }, 400);
 
   // ─── Deal-Selection panel collapse toggle ─────────────────────
   // Persist collapsed state in localStorage. Auto-collapse the first time a
@@ -15799,11 +16037,25 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         else alert('runAccounting function not loaded');
       };
     }
+    // Preserve the "Ready · N JE rows" state when we still have journals in
+    // memory — otherwise navigating away and back to Stage 2 would falsely
+    // reset the chip to "Ready to run" even though the run's already done.
+    // Only reset to "Ready to run" when there are no journals (fresh state
+    // OR the caller deliberately wiped them on instrument switch).
+    const hasJEs = (typeof M !== 'undefined' && Array.isArray(M.acctJournals) && M.acctJournals.length > 0);
     const acctStatus = document.getElementById('acct-status');
-    if(acctStatus){ acctStatus.className = 'chip blue self-center'; acctStatus.textContent = 'Ready to run'; }
+    if(acctStatus && !hasJEs){
+      acctStatus.className = 'chip blue self-center';
+      acctStatus.textContent = 'Ready to run';
+    }
     const portfStatus = document.getElementById('portf-status');
     if(portfStatus){ portfStatus.className = 'chip green self-center'; portfStatus.textContent = inst ? 'Built · ' + (inst.deal || inst.id) : 'Built'; }
-    if(typeof setStage === 'function'){ setStage('stage-1', 'done'); setStage('stage-2', 'active'); }
+    // Same for the stage indicator — if we already have JEs, Stage 2 is done,
+    // not "active" (which means "next in line"). Preserve done status.
+    if(typeof setStage === 'function'){
+      setStage('stage-1', 'done');
+      setStage('stage-2', hasJEs ? 'done' : 'active');
+    }
     // Defensively re-bind the Stage 3 / 4 buttons too — they share the same
     // problem if init()'s closure captured the wrong function references.
     const pushBtn = document.getElementById('btn-workday-push');
