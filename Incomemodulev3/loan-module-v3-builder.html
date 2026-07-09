@@ -2298,7 +2298,15 @@
   .da-msg .a p { margin:6px 0; }
   .da-cost { font-size:9.5px; color:#9ca3af; margin-top:4px; }
 </style>
-<button id="da-fab" title="Loan Assistant — ask a question about accounting, IFRS, ECL, or how the application works">
+<!-- Bulletproof toggle: inline onclick guarantees the FAB works even if
+     setupDemoAssistant() failed to run due to a JS error earlier in init.
+     If setupDemoAssistant did run, addEventListener still fires too — the
+     two just toggle in sequence with no visible glitch since both call
+     classList.toggle('open') and end in the same visible state on odd
+     clicks. Odd/even parity across double-toggles gives the correct
+     result: the panel opens on first click. -->
+<button id="da-fab" title="Loan Assistant — ask a question about accounting, IFRS, ECL, or how the application works"
+        onclick="(function(){var p=document.getElementById('da-panel');if(!p)return;p.classList.toggle('open');if(p.classList.contains('open')){setTimeout(function(){document.getElementById('da-input')?.focus();},50);}})();return false;">
   <span class="material-icons-outlined">chat</span>
 </button>
 <div id="da-panel">
@@ -2309,15 +2317,19 @@
       <div class="sub">Accounting · IFRS · ECL · Loan-module workflow</div>
     </div>
     <span id="da-mode-badge" class="offline">offline</span>
-    <span class="close material-icons-outlined" id="da-settings-toggle" title="Settings — API key, model">settings</span>
-    <span class="close material-icons-outlined" id="da-close">close</span>
+    <span class="close material-icons-outlined" id="da-settings-toggle" title="Settings — API key, model"
+          onclick="(function(){var s=document.getElementById('da-settings');if(!s)return;s.classList.toggle('open');if(s.classList.contains('open'))setTimeout(function(){document.getElementById('da-api-key')?.focus();},50);})();return false;">settings</span>
+    <span class="close material-icons-outlined" id="da-close"
+          onclick="document.getElementById('da-panel')?.classList.remove('open');">close</span>
   </div>
   <div id="da-settings">
     <label for="da-api-key">Anthropic API key</label>
     <div class="row">
       <input id="da-api-key" type="password" placeholder="sk-ant-..." autocomplete="off"/>
-      <button id="da-key-save" class="save-btn">Save</button>
-      <button id="da-key-clear" class="clear-btn">Clear</button>
+      <button id="da-key-save" class="save-btn"
+              onclick="(function(){var i=document.getElementById('da-api-key'),v=(i?.value||'').trim();if(!v){alert('Enter an API key first');return;}if(!/^sk-ant-[\w-]+/.test(v)&&!confirm('Does not look like an Anthropic key (sk-ant-...). Save anyway?'))return;localStorage.setItem('lmil:da:apiKey',v);if(i){i.value='';i.placeholder='••••••••••••'+v.slice(-4)+' (saved)';}if(typeof daUpdateModeBadge==='function'){daUpdateModeBadge();}else{var b=document.getElementById('da-mode-badge');if(b){b.textContent='online';b.className='online';}}if(typeof toast==='function'){toast('API key saved · AI mode enabled',3000);}else{alert('API key saved · AI mode enabled');}})();return false;">Save</button>
+      <button id="da-key-clear" class="clear-btn"
+              onclick="(function(){if(!confirm('Clear saved API key? Assistant will drop back to offline keyword search.'))return;localStorage.removeItem('lmil:da:apiKey');var i=document.getElementById('da-api-key');if(i){i.value='';i.placeholder='sk-ant-...';}if(typeof daUpdateModeBadge==='function'){daUpdateModeBadge();}else{var b=document.getElementById('da-mode-badge');if(b){b.textContent='offline';b.className='offline';}}if(typeof toast==='function'){toast('API key cleared · offline FAQ mode',3000);}})();return false;">Clear</button>
     </div>
     <div class="help">
       Stored locally in your browser only. Never transmitted to anyone except <code>api.anthropic.com</code>.
@@ -11932,41 +11944,17 @@ function setupDemoAssistant(){
   };
   refreshKeyHint();
 
-  // Toggle panel
-  fab.addEventListener('click', () => {
-    panel.classList.toggle('open');
-    if(panel.classList.contains('open')) setTimeout(() => input?.focus(), 50);
-  });
-  closeBtn?.addEventListener('click', () => panel.classList.remove('open'));
+  // Toggle panel — inline onclick attribute on #da-fab handles the open/close
+  // toggle. That guarantees the button works even if setupDemoAssistant() never
+  // ran (e.g. an earlier JS error broke the init sequence). Not adding a
+  // second addEventListener here — it would double-toggle and cancel out.
+  // Same principle for the close button.
 
-  // Settings toggle
-  settingsToggle?.addEventListener('click', () => {
-    settings.classList.toggle('open');
-    if(settings.classList.contains('open')) setTimeout(() => apiKeyInput?.focus(), 50);
-  });
-
-  // Save key
-  keySave?.addEventListener('click', () => {
-    const v = (apiKeyInput.value || '').trim();
-    if(!v){ toast('Enter an API key first'); return; }
-    if(!/^sk-ant-[\w-]+/.test(v)){
-      if(!confirm("Doesn't look like an Anthropic key (sk-ant-...). Save anyway?")) return;
-    }
-    localStorage.setItem(DA_KEY_STORE, v);
-    apiKeyInput.value = '';
-    refreshKeyHint();
-    daUpdateModeBadge();
-    toast('API key saved · AI mode enabled');
-  });
-
-  // Clear key
-  keyClear?.addEventListener('click', () => {
-    localStorage.removeItem(DA_KEY_STORE);
-    apiKeyInput.value = '';
-    refreshKeyHint();
-    daUpdateModeBadge();
-    toast('API key cleared · offline FAQ mode');
-  });
+  // Settings toggle · Save · Clear — inline onclick attributes on the buttons
+  // themselves guarantee these work even if setupDemoAssistant() never runs.
+  // Not adding addEventListeners here (would double-fire and toggle back).
+  // The inline handlers use the localStorage key 'lmil:da:apiKey' directly;
+  // if you change DA_KEY_STORE, also update the inline attribute above.
 
   // Model change
   modelSelect?.addEventListener('change', () => {
