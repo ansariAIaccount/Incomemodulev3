@@ -12227,9 +12227,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }, 400);
 
   // ─── Deal-Selection panel collapse toggle ─────────────────────
-  // Persist collapsed state in localStorage. Auto-collapse the first time a
-  // deal loads so the user doesn't have to hunt for the fold when the
-  // three-card row becomes noise once the deal is picked.
+  // Persist collapsed state in localStorage. Auto-collapse when a deal loads
+  // so the user doesn't have to hunt for the fold when the three-card row
+  // becomes noise once the deal is picked. Manual toggle still works to
+  // re-expand any time.
   (function(){
     const panel = document.getElementById('deal-selection-panel');
     const icon  = document.getElementById('deal-selection-toggle-icon');
@@ -12256,6 +12257,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
     window.toggleDealSelectionPanel = function(){
       collapsed = !collapsed;
       try { localStorage.setItem('pcs_v3_deal_selection_collapsed', collapsed ? '1' : '0'); } catch(_){}
+      apply();
+    };
+    // Public: collapse the panel programmatically without flipping state again.
+    // Called by deal-load flows so the entry cards get out of the way once
+    // a real deal is active. If already collapsed → no-op (idempotent).
+    window.collapseDealSelectionPanelIfOpen = function(){
+      if(collapsed) return;
+      collapsed = true;
+      try { localStorage.setItem('pcs_v3_deal_selection_collapsed', '1'); } catch(_){}
       apply();
     };
   })();
@@ -17288,6 +17298,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         : '';
       toast('Loaded · ' + p.label + viewLabel);
     }
+    // Auto-collapse the Deal Selection panel — user is now inside a deal
+    setTimeout(() => {
+      if(typeof window.collapseDealSelectionPanelIfOpen === 'function'){
+        window.collapseDealSelectionPanelIfOpen();
+      }
+    }, 100);
     return p;
   }
   // Expose for the dropdown handler
@@ -17375,6 +17391,15 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const viewLabel = viewMode === 'participation' && pct < 100 ? ' (' + pct + '% participation)' : '';
       toast('Loaded · ' + p.label + viewLabel);
     }
+    // Auto-collapse the Deal Selection panel now that a deal is loaded — the
+    // three hero cards are noise once the user is inside a deal. Idempotent
+    // (no-op if already collapsed by user). Small delay so it happens after
+    // any layout thrash from the form re-render.
+    setTimeout(() => {
+      if(typeof window.collapseDealSelectionPanelIfOpen === 'function'){
+        window.collapseDealSelectionPanelIfOpen();
+      }
+    }, 100);
     // V3 — Show or hide the autosave chip depending on whether this is a DB deal.
     // For non-DB presets the chip stays hidden (autosave does nothing because
     // saving would create duplicate DB rows). Lift the load-time suspension
