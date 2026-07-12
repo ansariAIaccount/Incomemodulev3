@@ -2327,7 +2327,9 @@
 <!-- ═══ App-wide message dialog — replaces browser alert()/confirm() ═══
      Consistent styling, icon per severity, primary/secondary actions.
      Backdrop click and Esc key both close via cancel path. -->
-<div id="app-dialog" style="display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; padding:20px;">
+<!-- z-index 100000 sits above any other modal (json-modal / auth-modal / etc. use 9999)
+     so confirmation dialogs opened FROM inside those modals still render on top. -->
+<div id="app-dialog" style="display:none; position:fixed; inset:0; z-index:100000; align-items:center; justify-content:center; padding:20px;">
   <div id="app-dialog-bd" style="position:absolute; inset:0; background:rgba(15, 23, 42, 0.55); backdrop-filter:blur(3px);"></div>
   <div id="app-dialog-pn" style="position:relative; width:min(460px, 96vw); background:white; border-radius:14px; box-shadow:0 20px 45px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.05); overflow:hidden; animation:appDialogIn 180ms cubic-bezier(0.16, 1, 0.3, 1);">
     <!-- Header: coloured band + icon + title -->
@@ -4716,7 +4718,7 @@ window.SB = (function(){
     if(!runUuid) return { ok:false, reason:'runUuid required' };
     const { data, error } = await _client
       .from('accounting_runs')
-      .select('id, run_id, deal_id, status, run_by, approved_by, approved_at, posted_by, posted_at, je_rows_count, framework_used, created_at')
+      .select('id, run_id, deal_id, status, run_by, approved_by, approved_at, posted_by, posted_at, je_rows_count, framework_used, run_at')
       .eq('id', runUuid).single();
     if(error) return { ok:false, reason: error.message };
     return { ok:true, run: data };
@@ -4724,6 +4726,10 @@ window.SB = (function(){
   async function approveRun(runUuid){
     if(!_client || !_connected) return { ok:false, reason:'not connected' };
     if(!_currentUser) return { ok:false, reason:'You must be signed in to approve a run.' };
+    // Defensive: re-fetch admin flag if it's currently false. The initial fetch
+    // may have failed silently (e.g. before the is_admin() recursion migration
+    // shipped) and cached _isAdmin=false. Cheap SELECT on user_profiles.
+    if(!_isAdmin){ await _refreshAdminFlag(); }
     const runRes = await getRun(runUuid);
     if(!runRes.ok) return runRes;
     const run = runRes.run;
@@ -4738,12 +4744,20 @@ window.SB = (function(){
     }
     const _approveMemo = (run.run_by === _currentUser.id && _isAdmin) ? '[admin bypass]' : '';
     if(_approveMemo) console.log('[SB] approveRun — admin bypass applied:', run.run_id);
+    console.log('[SB] approveRun — attempting UPDATE. user=' + _currentUser.email + ' isAdmin=' + _isAdmin + ' runStatus=' + run.status + ' runBy=' + run.run_by + ' runUuid=' + runUuid);
     const { data, error } = await _client
       .from('accounting_runs')
       .update({ status:'Approved', approved_by:_currentUser.id, approved_at: new Date().toISOString() })
       .eq('id', runUuid).select().single();
-    if(error) return { ok:false, reason: error.message };
-    console.log('[SB] run approved:', run.run_id, 'by', _currentUser.email);
+    if(error){
+      console.error('[SB] approveRun UPDATE failed:', error);
+      // The 'PGRST116' code means RLS matched 0 rows — surface a clearer message.
+      const friendlier = (error.code === 'PGRST116')
+        ? 'RLS blocked the approval. This usually means your admin flag hasn\'t been picked up yet — refresh the page and try again.'
+        : (error.message || 'Unknown DB error.');
+      return { ok:false, reason: friendlier };
+    }
+    console.log('[SB] run approved:', run.run_id, 'by', _currentUser.email, (_isAdmin ? '(admin)' : ''));
     return { ok:true, run: data };
   }
   async function postRun(runUuid){
