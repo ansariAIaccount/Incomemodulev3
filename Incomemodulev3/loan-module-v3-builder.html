@@ -369,6 +369,62 @@
   .kpi .sub { font-size:10.5px; color:#5f6478; margin-top:2px; }
   details > summary { cursor:pointer; user-select:none; font-weight:500; color:#3f4456; }
   details > summary::marker { color:var(--brand); }
+
+  /* ═══ Print / PDF export CSS (#232) ═══
+     When `body.printing-evidence` is set, hide every non-evidence UI element
+     and format the evidence pack as a clean printable document. The browser's
+     native print dialog then lets the user save as PDF. */
+  @media print {
+    body.printing-evidence { background:white !important; }
+    body.printing-evidence header,
+    body.printing-evidence #db-config-modal,
+    body.printing-evidence #auth-modal,
+    body.printing-evidence #active-deal-modal,
+    body.printing-evidence #json-modal,
+    body.printing-evidence #eir-trace-modal,
+    body.printing-evidence #da-fab,
+    body.printing-evidence #da-panel,
+    body.printing-evidence #approval-strip,
+    body.printing-evidence #s2-subtab-bar,
+    body.printing-evidence #s2-treatment-panel,
+    body.printing-evidence #s2-empty-state,
+    body.printing-evidence #participation-banner,
+    body.printing-evidence #acct-schedule-section,
+    body.printing-evidence #evidence-pack .flex.items-center.gap-2.mb-2,   /* Header row w/ Expand/Collapse buttons */
+    body.printing-evidence #stage-0,
+    body.printing-evidence #stage-1,
+    body.printing-evidence #stage-3,
+    body.printing-evidence #stage-4,
+    body.printing-evidence #stage-5,
+    body.printing-evidence #dashboard,
+    body.printing-evidence #stage-2 > .step-indicator,
+    body.printing-evidence #stage-2 > .flex.items-start   /* Toolbar */
+      { display:none !important; }
+    /* Reveal the evidence pack even if it was hidden */
+    body.printing-evidence #evidence-pack { display:block !important; }
+    /* Open every details section */
+    body.printing-evidence details { break-inside:avoid; }
+    body.printing-evidence details > summary { list-style:none; font-weight:700; font-size:14px; padding:8px 0; border-bottom:2px solid #4F46E5; margin-bottom:10px; page-break-after:avoid; }
+    body.printing-evidence details > summary::marker,
+    body.printing-evidence details > summary::-webkit-details-marker { display:none; }
+    body.printing-evidence details[open] > *:not(summary) { display:block !important; }
+    /* Page breaks between top-level evidence sections */
+    body.printing-evidence #evidence-pack > details { page-break-before:always; padding-top:0; }
+    body.printing-evidence #evidence-pack > details:first-of-type { page-break-before:auto; }
+    /* Reveal the print-only cover page */
+    body.printing-evidence #evidence-pack-print-cover { display:block !important; page-break-after:always; padding:0 0 40px; }
+    /* Kill hover/focus effects; ensure text is dark */
+    body.printing-evidence * { color:black !important; background:white !important; box-shadow:none !important; }
+    body.printing-evidence h1, body.printing-evidence h2, body.printing-evidence h3, body.printing-evidence h4 { color:#1F2937 !important; }
+    body.printing-evidence table { border-collapse:collapse; width:100%; font-size:11px; }
+    body.printing-evidence th, body.printing-evidence td { border:1px solid #D1D5DB !important; padding:4px 6px; }
+    /* Restore some accent colours for readability */
+    body.printing-evidence .chip-red    { background:#FEE2E2 !important; color:#991B1B !important; }
+    body.printing-evidence .chip-green  { background:#D1FAE5 !important; color:#065F46 !important; }
+    body.printing-evidence .chip-amber  { background:#FEF3C7 !important; color:#92400E !important; }
+    /* Comfortable margins for A4/Letter */
+    @page { margin:14mm 12mm; size:auto; }
+  }
 </style>
 </head>
 <body class="min-h-screen">
@@ -407,6 +463,15 @@
       </div>
     </div>
     <div class="ml-auto flex items-center gap-2 flex-wrap">
+      <!-- User identity chip — shows sign-in state. Click to open sign-in / out. -->
+      <button id="auth-identity-chip"
+              onclick="window.openAuthModal && window.openAuthModal()"
+              class="chip"
+              style="font-size:11px; cursor:pointer; background:#F1F5F9; color:#475569; border:1px solid #E2E8F0; padding:3px 9px; display:inline-flex; align-items:center; gap:5px;"
+              title="Sign in / manage session">
+        <span class="material-icons-outlined" style="font-size:13px;">login</span>
+        <span id="auth-identity-chip-text">Sign in</span>
+      </button>
       <!-- v3 Supabase connection status chip — set by SB.init at boot. -->
       <span id="sb-status-chip" class="chip gray" style="font-size:11px; cursor:default;" title="Supabase backend status">
         <span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">cloud_off</span> Connecting…
@@ -968,6 +1033,54 @@
        amounts but JEs are auto-scaled to participation, so the user can see
        the relationship between what's displayed and what's booked. -->
   <div id="participation-banner" class="hidden mb-3"></div>
+
+  <!-- ═══ Approval workflow strip (#231) — Draft → Approved → Posted ═══
+       Auto-shown once a run has been persisted. Maker-checker enforced by SB:
+       the person who ran cannot approve. -->
+  <div id="approval-strip" class="mb-3" style="display:none;">
+    <div style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:linear-gradient(135deg,#F0F9FF 0%,#EEF2FF 100%); border:1px solid #C7D2FE; border-radius:10px; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="material-icons-outlined" style="font-size:20px; color:#4338CA;">verified</span>
+        <div>
+          <div style="font-size:12.5px; font-weight:700; color:#312E81;">Run status</div>
+          <div id="approval-run-id" style="font-size:10.5px; color:#4B5563; font-family:ui-monospace,monospace;">—</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; flex:1; min-width:280px;">
+        <!-- Three status pills — Draft, Approved, Posted -->
+        <div id="approval-pill-draft"    class="approval-pill" data-state="active">1 · Draft</div>
+        <span style="color:#9CA3AF;">→</span>
+        <div id="approval-pill-approved" class="approval-pill" data-state="pending">2 · Approved</div>
+        <span style="color:#9CA3AF;">→</span>
+        <div id="approval-pill-posted"   class="approval-pill" data-state="pending">3 · Posted</div>
+      </div>
+      <div style="display:flex; gap:6px; margin-left:auto;">
+        <button id="btn-approval-approve"
+                onclick="window.handleApproveRun && window.handleApproveRun()"
+                class="mat-btn" style="background:#10B981; color:white; border-color:#10B981; padding:6px 14px; font-size:12px;">
+          <span class="material-icons-outlined" style="font-size:14px; vertical-align:middle;">check_circle</span> Approve
+        </button>
+        <button id="btn-approval-post"
+                onclick="window.handlePostRun && window.handlePostRun()"
+                class="mat-btn" style="background:#4F46E5; color:white; border-color:#4F46E5; padding:6px 14px; font-size:12px;" disabled>
+          <span class="material-icons-outlined" style="font-size:14px; vertical-align:middle;">upload</span> Post
+        </button>
+        <button id="btn-approval-reopen"
+                onclick="window.handleReopenRun && window.handleReopenRun()"
+                class="mat-btn outline" style="padding:6px 10px; font-size:11px; color:#DC2626; border-color:#FCA5A5; display:none;">
+          Re-open
+        </button>
+      </div>
+    </div>
+    <div id="approval-audit" style="margin-top:6px; font-size:10.5px; color:#6B7280; padding:0 8px; display:none;"></div>
+  </div>
+  <style>
+    .approval-pill { padding:4px 10px; border-radius:12px; font-size:11px; font-weight:600; border:1px solid transparent; }
+    .approval-pill[data-state="active"]    { background:#4F46E5; color:white; }
+    .approval-pill[data-state="done"]      { background:#10B981; color:white; }
+    .approval-pill[data-state="pending"]   { background:white; color:#94A3B8; border-color:#E5E7EB; }
+    .approval-pill[data-state="rejected"]  { background:#DC2626; color:white; }
+  </style>
 
   <!-- ═══ Stage 2 sub-tab bar — Run & JEs / Treatment / Evidence Pack ═══
        Splits the wall of controls into three focused views. State persists in
@@ -1924,8 +2037,16 @@
                 title="Collapse all sections to headers only">
           <span class="material-icons-outlined" style="font-size:12px; vertical-align:middle;">unfold_less</span>Collapse all
         </button>
+        <button onclick="window.exportEvidencePackPdf && window.exportEvidencePackPdf()"
+                class="mat-btn !py-0.5 !px-2 text-[10.5px]"
+                style="background:#4F46E5; color:white; border-color:#4F46E5;"
+                title="Print or save the entire Evidence Pack as PDF — uses your browser's print dialog for maximum fidelity + your OS's PDF settings">
+          <span class="material-icons-outlined" style="font-size:12px; vertical-align:middle;">picture_as_pdf</span>Export PDF
+        </button>
       </div>
     </div>
+    <!-- Print-only cover page — hidden on screen, first page in printed output -->
+    <div id="evidence-pack-print-cover" style="display:none;"></div>
 
     <!-- A) Month-End Close Workflow + Run Metadata -->
     <details class="bg-white border border-gray-200 rounded-lg mb-2 p-3" open>
@@ -2202,6 +2323,157 @@
 </main>
 
 <div id="toast" class="toast"></div>
+
+<!-- ═══ App-wide message dialog — replaces browser alert()/confirm() ═══
+     Consistent styling, icon per severity, primary/secondary actions.
+     Backdrop click and Esc key both close via cancel path. -->
+<div id="app-dialog" style="display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; padding:20px;">
+  <div id="app-dialog-bd" style="position:absolute; inset:0; background:rgba(15, 23, 42, 0.55); backdrop-filter:blur(3px);"></div>
+  <div id="app-dialog-pn" style="position:relative; width:min(460px, 96vw); background:white; border-radius:14px; box-shadow:0 20px 45px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.05); overflow:hidden; animation:appDialogIn 180ms cubic-bezier(0.16, 1, 0.3, 1);">
+    <!-- Header: coloured band + icon + title -->
+    <div id="app-dialog-header" style="padding:22px 24px 16px; display:flex; gap:14px; align-items:flex-start;">
+      <div id="app-dialog-icon-wrap" style="width:44px; height:44px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <span id="app-dialog-icon" class="material-icons-outlined" style="font-size:26px;">info</span>
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div id="app-dialog-title" style="font-size:15px; font-weight:700; color:#0F172A; line-height:1.35; letter-spacing:-0.2px;">Notice</div>
+        <div id="app-dialog-body" style="font-size:12.5px; color:#475569; line-height:1.55; margin-top:6px; white-space:pre-line;"></div>
+        <!-- Optional extra help/detail block (small, collapsible-looking) -->
+        <div id="app-dialog-detail" style="display:none; margin-top:10px; padding:10px 12px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; font-size:11.5px; color:#475569; line-height:1.55;"></div>
+      </div>
+    </div>
+    <!-- Footer: actions right-aligned, tight -->
+    <div style="padding:14px 24px 18px; display:flex; gap:8px; justify-content:flex-end; background:#F8FAFC; border-top:1px solid #E2E8F0;">
+      <button id="app-dialog-cancel" style="padding:8px 14px; border-radius:8px; border:1px solid #CBD5E1; background:white; font-size:12.5px; font-weight:500; color:#334155; cursor:pointer;">Cancel</button>
+      <button id="app-dialog-ok" style="padding:8px 16px; border-radius:8px; border:1px solid transparent; background:#4F46E5; color:white; font-size:12.5px; font-weight:600; cursor:pointer;">OK</button>
+    </div>
+  </div>
+</div>
+<style>
+  @keyframes appDialogIn {
+    from { opacity:0; transform: translateY(8px) scale(0.98); }
+    to   { opacity:1; transform: translateY(0)   scale(1); }
+  }
+</style>
+
+<!-- ===== Auth modal — sign-in / sign-up / magic link / sign-out ===== -->
+<div id="auth-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeAuthModal && window.closeAuthModal()"></div>
+  <div class="json-modal-pn" style="width:min(440px,96vw); max-height:88vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[20px]" style="color:#10B981">verified_user</span>
+          <span id="auth-modal-title">Sign in to PCS Loan Module</span>
+        </div>
+        <div id="auth-modal-sub" class="text-[11px] text-gray-500">Multi-user access with team-based deal ownership</div>
+      </div>
+      <button onclick="window.closeAuthModal && window.closeAuthModal()" class="mat-btn outline !py-1 !px-2" title="Close">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:20px 24px;">
+      <!-- Signed-in state -->
+      <div id="auth-signed-in-view" style="display:none;">
+        <div style="display:flex; align-items:center; gap:12px; padding:14px; background:#ECFDF5; border:1.5px solid #10B981; border-radius:10px;">
+          <span class="material-icons-outlined" style="font-size:32px; color:#059669;">account_circle</span>
+          <div style="flex:1;">
+            <div style="font-weight:700; color:#065F46; font-size:14px;" id="auth-signed-in-email">—</div>
+            <div style="font-size:11.5px; color:#065F46; opacity:0.85;">Signed in · <span id="auth-signed-in-since">now</span></div>
+          </div>
+        </div>
+        <div style="margin-top:16px; font-size:12px; color:#4B5563;">
+          Your deals, accounting runs, and covenant edits are tagged to your account. Team-based access controls the deals you can see.
+        </div>
+        <div style="margin-top:16px; display:flex; gap:8px;">
+          <button onclick="window.handleSignOut && window.handleSignOut()" class="mat-btn outline" style="width:100%; color:#DC2626; border-color:#FCA5A5;">
+            <span class="material-icons-outlined" style="font-size:16px; vertical-align:middle;">logout</span> Sign out
+          </button>
+        </div>
+      </div>
+      <!-- Signed-out state — email/password + magic link tabs -->
+      <div id="auth-signed-out-view">
+        <!-- Mode toggle -->
+        <div style="display:flex; gap:6px; margin-bottom:16px; padding:4px; background:#F1F5F9; border-radius:8px;">
+          <button data-auth-mode="signin" class="auth-mode-btn" style="flex:1; padding:6px 10px; border:none; background:white; border-radius:6px; font-size:12px; font-weight:600; color:#21295C; cursor:pointer;">Sign in</button>
+          <button data-auth-mode="signup" class="auth-mode-btn" style="flex:1; padding:6px 10px; border:none; background:transparent; border-radius:6px; font-size:12px; font-weight:500; color:#64748B; cursor:pointer;">Sign up</button>
+          <button data-auth-mode="magic"  class="auth-mode-btn" style="flex:1; padding:6px 10px; border:none; background:transparent; border-radius:6px; font-size:12px; font-weight:500; color:#64748B; cursor:pointer;">Magic link</button>
+        </div>
+        <!-- Email + password form -->
+        <div id="auth-form-passwd">
+          <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#4B5563; margin-bottom:4px;">Email</label>
+          <input id="auth-email" type="email" placeholder="you@firm.com" autocomplete="email" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"/>
+          <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#4B5563; margin:12px 0 4px;">Password</label>
+          <input id="auth-password" type="password" placeholder="•••••••••" autocomplete="current-password" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"/>
+          <div id="auth-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; font-size:11.5px; color:#7F1D1D;"></div>
+          <button id="auth-submit-btn" onclick="window.handleAuthSubmit && window.handleAuthSubmit()"
+                  class="mat-btn primary" style="width:100%; margin-top:16px; padding:10px;">
+            <span id="auth-submit-label">Sign in</span>
+          </button>
+          <!-- Forgot password link — visible only in signin mode -->
+          <div id="auth-forgot-link-row" style="margin-top:10px; text-align:right;">
+            <a href="#" id="auth-forgot-link"
+               onclick="event.preventDefault(); window.handleForgotPassword && window.handleForgotPassword()"
+               style="font-size:11px; color:#4F46E5; text-decoration:none;"
+               title="Send yourself a password reset link">Forgot your password?</a>
+          </div>
+        </div>
+        <!-- Reset-password (send email) form — shown when user picks "Reset password" -->
+        <div id="auth-form-reset" style="display:none;">
+          <div style="font-size:12px; color:#4B5563; margin-bottom:12px; line-height:1.5;">
+            Enter the email you signed up with. We'll send a link you can click to set a new password.
+          </div>
+          <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#4B5563; margin-bottom:4px;">Email</label>
+          <input id="auth-reset-email" type="email" placeholder="you@firm.com" autocomplete="email" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"/>
+          <div id="auth-reset-result" style="display:none; margin-top:10px; padding:8px 10px; border-radius:6px; font-size:11.5px;"></div>
+          <button onclick="window.handleSendResetEmail && window.handleSendResetEmail()"
+                  class="mat-btn primary" style="width:100%; margin-top:16px; padding:10px;">
+            <span class="material-icons-outlined" style="font-size:16px; vertical-align:middle;">lock_reset</span> Send reset link
+          </button>
+          <div style="margin-top:12px; font-size:11px; color:#6B7280; text-align:center;">
+            <a href="#" onclick="event.preventDefault(); window.setAuthMode && window.setAuthMode('signin')"
+               style="color:#4F46E5; text-decoration:none;">← Back to sign in</a>
+          </div>
+        </div>
+        <!-- Set-new-password form — shown when user clicks the email link and lands
+             back in the app with a PASSWORD_RECOVERY event -->
+        <div id="auth-form-newpw" style="display:none;">
+          <div style="padding:10px 12px; background:#ECFDF5; border:1px solid #6EE7B7; border-radius:6px; font-size:12px; color:#065F46; margin-bottom:14px; line-height:1.5;">
+            <b style="display:flex; align-items:center; gap:6px;">
+              <span class="material-icons-outlined" style="font-size:16px;">check_circle</span> Recovery link verified
+            </b>
+            <span style="font-size:11px;">Pick a new password below. You'll stay signed in once you save.</span>
+          </div>
+          <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#4B5563; margin-bottom:4px;">New password</label>
+          <input id="auth-newpw" type="password" placeholder="At least 8 characters" autocomplete="new-password" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"/>
+          <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#4B5563; margin:12px 0 4px;">Confirm password</label>
+          <input id="auth-newpw-confirm" type="password" placeholder="Retype your new password" autocomplete="new-password" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"/>
+          <div id="auth-newpw-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; font-size:11.5px; color:#7F1D1D;"></div>
+          <button onclick="window.handleSetNewPassword && window.handleSetNewPassword()"
+                  class="mat-btn primary" style="width:100%; margin-top:16px; padding:10px;">
+            <span class="material-icons-outlined" style="font-size:16px; vertical-align:middle;">lock</span> Save new password
+          </button>
+        </div>
+        <!-- Magic link form -->
+        <div id="auth-form-magic" style="display:none;">
+          <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#4B5563; margin-bottom:4px;">Email</label>
+          <input id="auth-magic-email" type="email" placeholder="you@firm.com" autocomplete="email" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"/>
+          <div id="auth-magic-result" style="display:none; margin-top:10px; padding:8px 10px; border-radius:6px; font-size:11.5px;"></div>
+          <button onclick="window.handleMagicLinkSubmit && window.handleMagicLinkSubmit()"
+                  class="mat-btn primary" style="width:100%; margin-top:16px; padding:10px;">
+            <span class="material-icons-outlined" style="font-size:16px; vertical-align:middle;">email</span> Send magic link
+          </button>
+          <div style="margin-top:12px; font-size:11px; color:#6B7280; text-align:center; line-height:1.5;">
+            Click the link in your email · no password needed
+          </div>
+        </div>
+        <div style="margin-top:16px; padding-top:14px; border-top:1px solid #E5E7EB; font-size:11px; color:#6B7280; line-height:1.5;">
+          <b>New here?</b> Use <b>Sign up</b> to create an account. Data lives in your firm's Supabase project. Team-based access is admin-managed.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ===== Loan Assistant — floating chat panel =====
      Offline FAQ chat covering Accounting / IFRS / ECL / loan-module workflow. -->
@@ -2765,6 +3037,12 @@
       <div class="flex items-center gap-2">
         <input id="active-deal-search" type="text" placeholder="Search by name, framework, team…"
                class="border border-gray-300 rounded px-2 py-1 text-[12px]" style="min-width:240px"/>
+        <button onclick="window.openBulkImportModal && window.openBulkImportModal()"
+                class="mat-btn !py-1 !px-2 text-[12px]"
+                style="background:#4F46E5; color:white; border-color:#4F46E5;"
+                title="Import an entire loan book from an Excel template — one row per loan.">
+          <span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">upload_file</span> Bulk Import
+        </button>
         <button class="mat-btn outline !py-1 !px-2" data-close-active-deal="1" title="Close">
           <span class="material-icons-outlined text-[16px]">close</span>
         </button>
@@ -2774,6 +3052,84 @@
     <div class="json-modal-f">
       <span id="active-deal-count" class="text-[11px] text-gray-600 mr-auto">—</span>
       <button class="mat-btn outline" data-close-active-deal="1">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Bulk XLSX loan-book import modal (#233) ═══
+     Takes an Excel template with one loan per row and saves each to the DB.
+     Row-level validation → results grid → optional rollback. -->
+<div id="bulk-import-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeBulkImportModal && window.closeBulkImportModal()"></div>
+  <div class="json-modal-pn" style="width:min(1180px,96vw); max-height:92vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#4F46E5">upload_file</span>
+          Bulk Loan-Book Import
+        </div>
+        <div class="text-[11px] text-gray-500">Upload a filled Excel template — one row per loan. Every row is validated, then saved to Supabase.</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="window.downloadBulkImportTemplate && window.downloadBulkImportTemplate()"
+                class="mat-btn outline !py-1 !px-2 text-[12px]" title="Download an empty Excel template with column headers, sample rows, and enum reference sheet">
+          <span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">download</span> Download template
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeBulkImportModal && window.closeBulkImportModal()" title="Close">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" id="bulk-import-body" style="font-size:12px;">
+      <!-- Step 1: Dropzone -->
+      <div id="bulk-import-step-upload" style="padding:32px 24px;">
+        <label id="bulk-import-dropzone" style="display:block; border:2px dashed #C7D2FE; border-radius:12px; padding:44px 20px; text-align:center; cursor:pointer; background:linear-gradient(135deg,#F0F9FF 0%,#EEF2FF 100%);">
+          <span class="material-icons-outlined" style="font-size:44px; color:#4F46E5;">cloud_upload</span>
+          <div style="font-size:14px; font-weight:600; color:#3730A3; margin-top:8px;">Click to choose your XLSX file</div>
+          <div style="font-size:11px; color:#6366F1; margin-top:4px;">Or drag &amp; drop it here · max 500 loans per file</div>
+          <input type="file" id="bulk-import-file" accept=".xlsx,.xls" style="display:none"/>
+        </label>
+        <div style="margin-top:20px; padding:12px 14px; background:#F9FAFB; border-radius:8px; border:1px solid #E5E7EB; font-size:11.5px; color:#4B5563; line-height:1.6;">
+          <b style="color:#1F2937;">Template shape</b> — Sheet <b>Loans</b> · Row 1 = column headers · Row 2+ = one loan per row.<br>
+          Required columns: <code style="background:white; padding:1px 4px; border-radius:3px;">deal, legalEntity, notional, framework, currency, startDate, maturityDate, marginBps, dayCount, couponFreq</code>.<br>
+          Optional: <code style="background:white; padding:1px 4px; border-radius:3px;">rfrIndex, fixedRate, amortMethod, arrangementFeeBps, commitmentFeeBps, purpose, team</code>.<br>
+          Enum values (framework: IFRS/USGAAP/AASB/ASPE · dayCount: 30/360, ACT/360, ACT/365, ACT/ACT · couponFreq: monthly/quarterly/semi/annual) are documented in the template's Reference sheet.
+        </div>
+      </div>
+      <!-- Step 2: Preview + Validate -->
+      <div id="bulk-import-step-preview" style="display:none; padding:8px 4px;">
+        <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px; padding:8px 12px; background:#F9FAFB; border-radius:6px;">
+          <span id="bulk-import-file-info" style="font-size:12px; color:#374151; font-weight:500;"></span>
+          <span id="bulk-import-summary" style="font-size:12px; color:#374151; margin-left:auto;"></span>
+        </div>
+        <div style="max-height:52vh; overflow:auto; border:1px solid #E5E7EB; border-radius:6px;">
+          <table id="bulk-import-table" style="width:100%; border-collapse:collapse; font-size:11px;">
+            <thead style="position:sticky; top:0; background:#F3F4F6; z-index:1;">
+              <tr>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB; width:36px;">#</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Deal</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Legal Entity</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;">Notional</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Framework</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">CCY</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Start</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Maturity</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;">Margin</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Status</th>
+              </tr>
+            </thead>
+            <tbody id="bulk-import-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="json-modal-f" id="bulk-import-footer">
+      <span id="bulk-import-progress" class="text-[11px] text-gray-600 mr-auto">Choose a file above to get started.</span>
+      <button class="mat-btn outline" onclick="window.closeBulkImportModal && window.closeBulkImportModal()">Close</button>
+      <button id="btn-bulk-import-back" class="mat-btn outline" style="display:none;" onclick="window.bulkImportBack && window.bulkImportBack()">Choose different file</button>
+      <button id="btn-bulk-import-save" class="mat-btn" style="display:none; background:#059669; color:white; border-color:#059669;" onclick="window.bulkImportSaveAll && window.bulkImportSaveAll()">
+        <span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">save</span> Save valid rows
+      </button>
     </div>
   </div>
 </div>
@@ -2903,7 +3259,13 @@ window.SB = (function(){
         // Supabase + plain PostgREST both use supabase-js. For PostgREST without
         // anon key we still pass an empty string (header gets stripped server-side).
         const key = (BACKEND_TYPE === 'supabase') ? SUPABASE_ANON : (_cfg.authValue || SUPABASE_ANON);
-        const options = { auth: { persistSession: false, autoRefreshToken: false } };
+        // Auth session config:
+        //   persistSession=true    → session survives page reload (localStorage-backed)
+        //   autoRefreshToken=true  → JWT refreshes silently before expiry
+        //   detectSessionInUrl=true→ magic-link callbacks work (Supabase parses ?code=… on load)
+        // These were previously false, which caused the "signed in for 500ms then
+        // forgotten after location.reload()" bug (#234).
+        const options = { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'pcs_v3_auth' } };
         // For raw PostgREST, allow custom headers if the user configured them.
         if(BACKEND_TYPE === 'postgrest' && _cfg.authScheme === 'bearer' && _cfg.authValue){
           options.global = { headers: { 'Authorization': 'Bearer ' + _cfg.authValue } };
@@ -2929,6 +3291,23 @@ window.SB = (function(){
       _connected = true;
       updateStatusChip();
       console.log('[SB] connected to', PROJECT_LABEL, '(', BACKEND_TYPE, ')');
+      // Refresh current user from any existing session (localStorage-persisted
+      // by supabase-js). Also wire the auth state listener so downstream UI
+      // updates when the user signs in / out.
+      if(_client && _client.auth){
+        try {
+          await _refreshCurrentUser();
+          if(_currentUser) console.log('[SB] resumed session for', _currentUser.email);
+          _client.auth.onAuthStateChange(async (event, session) => {
+            _currentUser = session && session.user ? session.user : null;
+            // Refresh admin flag whenever auth state changes so the bypass
+            // logic sees the correct value after SIGNED_IN, TOKEN_REFRESHED etc.
+            await _refreshAdminFlag();
+            _authListeners.forEach(cb => { try { cb(_currentUser, event); } catch(_){} });
+            console.log('[SB] auth event:', event, _currentUser ? '· user=' + _currentUser.email + (_isAdmin ? ' (admin)' : '') : '· signed out');
+          });
+        } catch(err){ console.warn('[SB] auth init:', err); }
+      }
     } catch(err) {
       _lastError = err && err.message ? err.message : String(err);
       _connected = false;
@@ -3044,6 +3423,9 @@ window.SB = (function(){
       const drTotal = journals.reduce((s,j) => s + (j.isDebit ? +j.amountLE || 0 : 0), 0);
       const crTotal = journals.reduce((s,j) => s + (!j.isDebit ? +j.amountLE || 0 : 0), 0);
       const balanced = Math.abs(drTotal - crTotal) < 0.01;
+      // Stamp run_by from the current auth session so approval workflow
+      // (maker-checker) can enforce approver ≠ creator.
+      const _uidRun = (_currentUser && _currentUser.id) || null;
       const runInsert = {
         run_id:            runId,
         deal_id:           dealId,
@@ -3055,6 +3437,7 @@ window.SB = (function(){
         participation_pct: (ctx && ctx.participationPct) != null ? ctx.participationPct : 100,
         gl_posting_date:   (ctx && ctx.glPostingDate) || null,
         gl_posting_mode:   (ctx && ctx.glPostingMode) || 'AUTO',
+        run_by:            _uidRun,
         status:            'Draft',
         je_rows_count:     journals.length,
         total_drs:         +drTotal.toFixed(2),
@@ -3147,6 +3530,7 @@ window.SB = (function(){
           const prepEvt = Array.isArray(pSched)
             ? pSched.find(e => e && e._covenantSynthesised && e._covenantIdentity === c.covIdentity)
             : null;
+          const _uidBreach = (_currentUser && _currentUser.id) || null;
           const row = {
             covenant_id:             c.id,
             deal_id:                 dealId,
@@ -3155,6 +3539,7 @@ window.SB = (function(){
             threshold_at_breach:     c.threshold != null ? +c.threshold : null,
             direction_at_breach:     c.direction || null,
             consequence_applied:     Array.isArray(c.consequenceList) ? c.consequenceList : [],
+            created_by:              _uidBreach,
             // Phase C bugfix — persist step-up bps whenever the field is set,
             // not only when consequence includes 'marginStepUp'. Real-world
             // contracts pair SICR with rate uplifts, so the engine and the
@@ -3419,6 +3804,9 @@ window.SB = (function(){
       }
 
       // 1. UPSERT deals (unique by deal_code)
+      // Stamp created_by from the current auth session so RLS WITH CHECK
+      // enforcement passes and the row is attributable to the correct user.
+      const _uid = (_currentUser && _currentUser.id) || null;
       const dealPayload = {
         deal_code:         dealCode,
         preset_key:        B._presetKey || null,
@@ -3434,6 +3822,7 @@ window.SB = (function(){
         is_preset:         false,
         complexity:        B.complexity || null,
         tag:               B.tag || null,
+        created_by:        _uid,
         updated_at:        stamp
       };
       const { data: dealRow, error: dealErr } = await _client
@@ -3591,7 +3980,8 @@ window.SB = (function(){
                 interest_component_id: icId,
                 fixing_date:           f.date,
                 rate:                  +f.rate,
-                source:                f.source || null
+                source:                f.source || null,
+                created_by:            _uid
               }));
             if(rows.length){
               const { error: fxErr } = await _client
@@ -3739,7 +4129,8 @@ window.SB = (function(){
           // PIK (legacy columns — coexist with new pik_rate_override)
           pik_enabled:                  (ov.pikEnabled != null ? !!ov.pikEnabled : null),
           pik_rate:                     (ov.pikRate != null ? +ov.pikRate : null),
-          pik_frequency:                ov.pikCapitalizationFrequency || null
+          pik_frequency:                ov.pikCapitalizationFrequency || null,
+          created_by:                   _uid
         };
         const { error: ovErr } = await _client.from('treatment_overrides').insert(overrideRow);
         if(ovErr){ console.error('[SB] saveDeal: treatment_overrides:', ovErr); return { ok:false, reason: ovErr.message }; }
@@ -3764,7 +4155,8 @@ window.SB = (function(){
           post_mod_cv:      (m.postModCv != null ? +m.postModCv : null),
           gain_loss:        (m.gainLoss != null ? +m.gainLoss : null),
           eir_reset:        (m.modType === 'substantial' || m.type === 'substantial' || !!m.eirReset),
-          notes:            m.notes || null
+          notes:            m.notes || null,
+          created_by:       _uid
         }));
         const { error: meErr } = await _client.from('modification_events').insert(rows);
         if(meErr){ console.error('[SB] saveDeal: modification_events:', meErr); return { ok:false, reason: meErr.message }; }
@@ -3782,7 +4174,8 @@ window.SB = (function(){
           default_rate_pct:  (d.ratePct != null ? +d.ratePct : null),
           days_past_due:     (d.daysPastDue != null ? +d.daysPastDue : null),
           recovery_estimate: (d.recoveryEstimate != null ? +d.recoveryEstimate : null),
-          notes:             d.notes || null
+          notes:             d.notes || null,
+          created_by:        _uid
         }));
         const { error: deErr } = await _client.from('default_events').insert(rows);
         if(deErr){ console.error('[SB] saveDeal: default_events:', deErr); return { ok:false, reason: deErr.message }; }
@@ -3794,12 +4187,13 @@ window.SB = (function(){
       const ppBands = Array.isArray(B.prepaymentPenaltySchedule) ? B.prepaymentPenaltySchedule : [];
       if(ppBands.length){
         const rows = ppBands.map((b, i) => ({
-          deal_id:   dealId,
-          band_no:   i + 1,
-          from_date: b.from || null,
-          to_date:   b.to || null,
-          rate_pct:  +b.ratePct || 0,
-          note:      b.note || null
+          deal_id:    dealId,
+          band_no:    i + 1,
+          from_date:  b.from || null,
+          to_date:    b.to || null,
+          rate_pct:   +b.ratePct || 0,
+          note:       b.note || null,
+          created_by: _uid
         }));
         const { error: ppErr } = await _client.from('prepayment_penalty_schedule').insert(rows);
         if(ppErr){ console.error('[SB] saveDeal: prepayment_penalty_schedule:', ppErr); return { ok:false, reason: ppErr.message }; }
@@ -3821,7 +4215,8 @@ window.SB = (function(){
           equity_received_value: (e.equityReceivedValue != null ? +e.equityReceivedValue : null),
           allocation_json:       e.allocation || null,
           notes:                 e.notes || null,
-          status:                e.status || 'actual'
+          status:                e.status || 'actual',
+          created_by:            _uid
         }));
         const { error: lcErr } = await _client.from('loan_lifecycle_events').insert(rows);
         if(lcErr){ console.error('[SB] saveDeal: loan_lifecycle_events:', lcErr); return { ok:false, reason: lcErr.message }; }
@@ -3853,6 +4248,7 @@ window.SB = (function(){
           last_reported_date:       c.lastReportedDate || null,
           credit_agreement_section: c.creditAgreementSection || null,
           notes:                    c.notes || null,
+          created_by:               _uid,
           updated_at:               new Date().toISOString()
         }));
         const { error: cvErr } = await _client.from('covenants').insert(rows);
@@ -4241,6 +4637,8 @@ window.SB = (function(){
     try {
       // Idempotent re-runs — wipe any prior rows for this run first.
       await _client.from('cashflow_schedules').delete().eq('run_id', runUuid);
+      // Stamp created_by from current auth session for RLS enforcement
+      const _uidSch = (_currentUser && _currentUser.id) || null;
       // Map M.schedule[] → table columns; jsonb extras for rare fields.
       const rows = schedule.map(r => {
         const extras = {};
@@ -4283,7 +4681,8 @@ window.SB = (function(){
           loan_sale:              +r.loanSale         || 0,
           participation:          +r.participation    || 0,
           debt_equity_swap:       +r.debtEquitySwap   || 0,
-          extras_jsonb:           Object.keys(extras).length ? extras : null
+          extras_jsonb:           Object.keys(extras).length ? extras : null,
+          created_by:             _uidSch
         };
       });
       const batchSize = 500;
@@ -4302,8 +4701,213 @@ window.SB = (function(){
     }
   }
 
+  // ============================================================
+  // Approval workflow (#231) — Draft → Approved → Posted
+  // ============================================================
+  // Maker-checker: approver must be a different user than the run creator
+  // (accounting_runs.run_by). is_admin() bypasses this rule.
+  //
+  // getRun(runUuid) — fetch the row with all status fields for UI rendering
+  // approveRun(runUuid) — set status='Approved' + approved_by/at
+  // postRun(runUuid)    — set status='Posted' + posted_by/at (requires Approved)
+  // reopenRun(runUuid)  — revert Approved → Draft (only creator or admin)
+  async function getRun(runUuid){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!runUuid) return { ok:false, reason:'runUuid required' };
+    const { data, error } = await _client
+      .from('accounting_runs')
+      .select('id, run_id, deal_id, status, run_by, approved_by, approved_at, posted_by, posted_at, je_rows_count, framework_used, created_at')
+      .eq('id', runUuid).single();
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, run: data };
+  }
+  async function approveRun(runUuid){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!_currentUser) return { ok:false, reason:'You must be signed in to approve a run.' };
+    const runRes = await getRun(runUuid);
+    if(!runRes.ok) return runRes;
+    const run = runRes.run;
+    if(run.status !== 'Draft' && run.status !== 'Calculated'){
+      return { ok:false, reason:'Run is already ' + run.status + ' — cannot re-approve.' };
+    }
+    // Maker-checker: creator normally can't self-approve. Admins (is_admin=true)
+    // bypass this rule — useful for single-operator demo / dev environments.
+    // Server-side RLS is the ultimate enforcer; this is UX defence-in-depth.
+    if(run.run_by === _currentUser.id && !_isAdmin){
+      return { ok:false, reason:'Maker-checker: you cannot approve a run you created. Ask a colleague, or ask an admin to grant you admin bypass.' };
+    }
+    const _approveMemo = (run.run_by === _currentUser.id && _isAdmin) ? '[admin bypass]' : '';
+    if(_approveMemo) console.log('[SB] approveRun — admin bypass applied:', run.run_id);
+    const { data, error } = await _client
+      .from('accounting_runs')
+      .update({ status:'Approved', approved_by:_currentUser.id, approved_at: new Date().toISOString() })
+      .eq('id', runUuid).select().single();
+    if(error) return { ok:false, reason: error.message };
+    console.log('[SB] run approved:', run.run_id, 'by', _currentUser.email);
+    return { ok:true, run: data };
+  }
+  async function postRun(runUuid){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!_currentUser) return { ok:false, reason:'You must be signed in to post a run.' };
+    const runRes = await getRun(runUuid);
+    if(!runRes.ok) return runRes;
+    const run = runRes.run;
+    if(run.status !== 'Approved'){
+      return { ok:false, reason:'Run must be Approved before Post. Current status: ' + run.status };
+    }
+    const { data, error } = await _client
+      .from('accounting_runs')
+      .update({ status:'Posted', posted_by:_currentUser.id, posted_at: new Date().toISOString() })
+      .eq('id', runUuid).select().single();
+    if(error) return { ok:false, reason: error.message };
+    console.log('[SB] run posted:', run.run_id, 'by', _currentUser.email);
+    return { ok:true, run: data };
+  }
+  async function reopenRun(runUuid){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!_currentUser) return { ok:false, reason:'You must be signed in to reopen a run.' };
+    const runRes = await getRun(runUuid);
+    if(!runRes.ok) return runRes;
+    const run = runRes.run;
+    if(run.status !== 'Approved'){
+      return { ok:false, reason:'Only an Approved run can be reopened. Current: ' + run.status };
+    }
+    const { data, error } = await _client
+      .from('accounting_runs')
+      .update({ status:'Draft', approved_by:null, approved_at:null })
+      .eq('id', runUuid).select().single();
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, run: data };
+  }
+
+  // ============================================================
+  // Auth — Supabase auth wrapper (Phase 1 · #227-#230)
+  // ============================================================
+  // Uses supabase-js built-in auth. The client automatically attaches the
+  // JWT to all requests once a session is active, so all the existing
+  // saveDeal / fetchUserDeals / saveAccountingRun / etc. calls just work
+  // under the caller's identity — no per-method changes needed for reads.
+  //
+  // Writes still need to populate created_by explicitly (RLS WITH CHECK
+  // enforces it). We do that in each save path with SB.currentUser.id.
+  let _currentUser = null;
+  let _isAdmin = false;      // cached admin flag — populated by _refreshAdminFlag()
+  const _authListeners = new Set();
+  async function _refreshCurrentUser(){
+    if(!_client) return null;
+    try {
+      // Prefer getSession() over getUser() at boot time: it reads from local
+      // storage synchronously (no network round-trip) and is what supabase-js
+      // itself uses to rehydrate. Falls back to getUser() only if the session
+      // exists but is stale.
+      const sess = await _client.auth.getSession();
+      if(sess && sess.data && sess.data.session && sess.data.session.user){
+        _currentUser = sess.data.session.user;
+        await _refreshAdminFlag();
+        return _currentUser;
+      }
+      const { data, error } = await _client.auth.getUser();
+      if(error){ _currentUser = null; _isAdmin = false; return null; }
+      _currentUser = data && data.user ? data.user : null;
+      await _refreshAdminFlag();
+      return _currentUser;
+    } catch(err){ console.warn('[SB] _refreshCurrentUser:', err); _currentUser = null; _isAdmin = false; return null; }
+  }
+  // Read user_profiles.is_admin. Cheap read, called on sign-in / session resume.
+  async function _refreshAdminFlag(){
+    _isAdmin = false;
+    if(!_client || !_currentUser) return false;
+    try {
+      const { data, error } = await _client
+        .from('user_profiles')
+        .select('is_admin')
+        .eq('id', _currentUser.id)
+        .maybeSingle();
+      if(!error && data && data.is_admin === true){
+        _isAdmin = true;
+        console.log('[SB] admin session — maker-checker will be bypassed for approvals');
+      }
+    } catch(err){ console.warn('[SB] _refreshAdminFlag:', err); }
+    return _isAdmin;
+  }
+  async function auth_signIn(email, password){
+    if(!_client) throw new Error('SB not initialised');
+    const { data, error } = await _client.auth.signInWithPassword({ email, password });
+    if(error) return { ok:false, reason: error.message };
+    _currentUser = data.user || null;
+    await _refreshAdminFlag();
+    _authListeners.forEach(cb => { try { cb(_currentUser); } catch(_){} });
+    return { ok:true, user: _currentUser };
+  }
+  async function auth_signUp(email, password, options){
+    if(!_client) throw new Error('SB not initialised');
+    const { data, error } = await _client.auth.signUp({ email, password, options: options || {} });
+    if(error) return { ok:false, reason: error.message };
+    _currentUser = data.user || null;
+    _authListeners.forEach(cb => { try { cb(_currentUser); } catch(_){} });
+    return { ok:true, user: _currentUser, needsConfirmation: !data.session };
+  }
+  async function auth_signInWithMagicLink(email){
+    if(!_client) throw new Error('SB not initialised');
+    const { error } = await _client.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, message: 'Magic link sent — check your email.' };
+  }
+  // Password reset (#235). Two-step flow:
+  //   1. auth_resetPasswordForEmail(email) → user gets an email with a recovery link
+  //   2. Clicking the link brings them back to the app; supabase-js fires a
+  //      'PASSWORD_RECOVERY' auth event. Our UI listens for that and shows the
+  //      "Set new password" panel, which calls auth_updatePassword(newPw).
+  async function auth_resetPasswordForEmail(email){
+    if(!_client) throw new Error('SB not initialised');
+    const { error } = await _client.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.href.split('#')[0].split('?')[0]
+    });
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, message: 'Password reset link sent — check your email.' };
+  }
+  async function auth_updatePassword(newPassword){
+    if(!_client) throw new Error('SB not initialised');
+    if(!newPassword || newPassword.length < 8){ return { ok:false, reason:'Password must be at least 8 characters.' }; }
+    const { data, error } = await _client.auth.updateUser({ password: newPassword });
+    if(error) return { ok:false, reason: error.message };
+    _currentUser = data && data.user ? data.user : _currentUser;
+    return { ok:true, user: _currentUser };
+  }
+  async function auth_signOut(){
+    if(!_client) return { ok:true };
+    try { await _client.auth.signOut(); } catch(_){}
+    _currentUser = null;
+    _isAdmin = false;
+    _authListeners.forEach(cb => { try { cb(null); } catch(_){} });
+    return { ok:true };
+  }
+  function auth_onChange(callback){
+    if(typeof callback !== 'function') return () => {};
+    _authListeners.add(callback);
+    if(_client){
+      try {
+        _client.auth.onAuthStateChange((event, session) => {
+          _currentUser = session && session.user ? session.user : null;
+          try { callback(_currentUser, event); } catch(_){}
+        });
+      } catch(_){}
+    }
+    return () => _authListeners.delete(callback);
+  }
+  function auth_getUser(){ return _currentUser; }
+  function auth_isSignedIn(){ return !!_currentUser; }
+
   return {
     init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals, syncBreachLog,
+    // Approval workflow (#231)
+    getRun, approveRun, postRun, reopenRun,
+    // Auth
+    auth_signIn, auth_signUp, auth_signInWithMagicLink, auth_signOut, auth_onChange, auth_getUser, auth_isSignedIn,
+    auth_resetPasswordForEmail, auth_updatePassword,
+    get currentUser(){ return _currentUser; },
+    get isAdmin(){ return _isAdmin; },
+    _refreshCurrentUser, _refreshAdminFlag,
     getConfig, setConfig, resetConfig, getDefaults, getBackendTypes,
     get url(){ return SUPABASE_URL; }, get projectLabel(){ return PROJECT_LABEL; },
     get isOverride(){ return _cfg.isOverride; },
@@ -5894,7 +6498,7 @@ function formatMoney(n){
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function postJEsToInvestran(){
+async function postJEsToInvestran(){
   try {
   if(!M.acctJournals || !M.acctJournals.length){
     toast('Run accounting first — no JE rows to post');
@@ -5903,6 +6507,89 @@ function postJEsToInvestran(){
   const inst = currentInstrument();
   if(!inst){ toast('No active deal'); return; }
   console.log('[Investran] postJEsToInvestran start — journals:', M.acctJournals.length);
+
+  // ── Maker-checker preflight (#231/#235/#238) ────────────────────────
+  // Run must be Approved before it can be posted. Admins bypass — they
+  // get a single "Approve & Post" confirmation, then we auto-approve on
+  // their behalf and continue with the post. Skip preflight entirely if
+  // there's no DB backend (demo/offline).
+  if(window.SB && window.SB.connected){
+    if(!M._currentRunUuid){
+      await window.showAppDialog({
+        severity:'warning',
+        title:'Run not saved yet',
+        message:'This run has not been persisted to the database.',
+        detail:'Click Run Accounting first so the run is saved with a run ID. Then it can go through the Approve → Post workflow above Stage 2.'
+      });
+      return;
+    }
+    try {
+      const runRes = await window.SB.getRun(M._currentRunUuid);
+      const status = runRes && runRes.ok && runRes.run ? runRes.run.status : null;
+      if(status === 'Posted'){
+        await window.showAppDialog({
+          severity:'info',
+          title:'Already posted',
+          message:'This run is already in Posted state — the terminal step in the workflow.',
+          detail:'To post again, click Re-open to move it back to Draft (creator/admin only), or click Run Accounting to start a new run.'
+        });
+        return;
+      }
+      if(status === 'Cancelled'){
+        await window.showAppDialog({
+          severity:'error',
+          title:'Run was cancelled',
+          message:'This run was cancelled and cannot be posted. Start a new accounting run first.'
+        });
+        return;
+      }
+      if(status !== 'Approved'){
+        const isAdmin = !!(window.SB && window.SB.isAdmin);
+        if(isAdmin){
+          // Admin fast-path — one confirmation, then auto-approve + post
+          const ok = await window.showAppDialog({
+            severity:'question',
+            title:'Admin: Approve & Post?',
+            message:'This run is ' + (status || 'Draft') + '. As an admin you can approve it yourself and post in one step.',
+            detail:'Both actions will be audit-logged: approved_by = you (admin bypass), then posted_by = you.',
+            confirmLabel:'Approve & Post',
+            cancelLabel:'Cancel'
+          });
+          if(!ok) return;
+          const appr = await window.SB.approveRun(M._currentRunUuid);
+          if(!appr.ok){
+            await window.showAppDialog({
+              severity:'error',
+              title:'Auto-approve failed',
+              message:'Could not approve the run before posting.',
+              detail: appr.reason || 'Unknown error — check console.'
+            });
+            return;
+          }
+          if(typeof window.refreshApprovalUI === 'function') window.refreshApprovalUI();
+        } else {
+          await window.showAppDialog({
+            severity:'warning',
+            title:'Awaiting approval',
+            message:'This run is ' + (status || 'Draft') + '. It must be Approved by a different user before it can be posted to Investran.',
+            detail:'Ask a colleague — or someone with admin rights — to click the Approve button in the strip above Stage 2.'
+          });
+          return;
+        }
+      }
+    } catch(err){
+      console.warn('[maker-checker] preflight failed', err);
+      const proceed = await window.showAppDialog({
+        severity:'warning',
+        title:'Could not verify approval',
+        message:'A network error prevented us from checking the run\'s approval state.',
+        detail:'Posting without verification is not recommended. Proceed anyway?',
+        confirmLabel:'Post anyway',
+        cancelLabel:'Cancel'
+      });
+      if(!proceed) return;
+    }
+  }
 
   // ── 1. Pre-flight balance check — every jeIndex group must net to zero
   const jeGroups = {};
@@ -9401,6 +10088,10 @@ function runAccountingImpl(){
       if(res && res.ok){
         toast('Run persisted to Supabase · ' + res.runId, 4000);
         console.log('[V3] saved accounting run to Supabase:', res);
+        // Track current run for approval workflow
+        M._currentRunUuid = res.runUuid;
+        M._currentRunId   = res.runId;
+        if(typeof window.refreshApprovalUI === 'function') window.refreshApprovalUI();
         // V3 — also persist the daily cashflow schedule for ad-hoc SQL.
         if(Array.isArray(M.schedule) && M.schedule.length && res.runUuid && res.dealId){
           window.SB.saveSchedule(res.runUuid, res.dealId, M.schedule).then(schRes => {
@@ -9833,6 +10524,422 @@ window.closeActiveDealModal  = closeActiveDealModal;
 window.loadActiveDealByKey   = loadActiveDealByKey;
 window.refreshActiveDealChip = refreshActiveDealChip;
 
+// ═════════════════════════════════════════════════════════════════════
+// Bulk XLSX loan-book import (#233)
+// ═════════════════════════════════════════════════════════════════════
+// Flow:
+//   1. User clicks "Bulk Import" in the Active Deal modal
+//   2. Modal opens with a dropzone + "Download template" affordance
+//   3. User uploads a filled XLSX (Loans sheet, one row per loan)
+//   4. Parser reads every row, validates fields, coerces enums
+//   5. Preview grid shows OK / ERROR / WARN per row with reasons
+//   6. User clicks "Save valid rows" → each OK row is registered as a
+//      builder instrument then saved to Supabase via SB.saveDeal
+//   7. Success/failure tallied and shown; DB-saved deals get merged into
+//      PRESETS so they appear immediately in the Active Deal modal
+window._bulkImportRows = [];  // parsed + validated preview state
+
+// Column contract — matches the columns produced by downloadBulkImportTemplate()
+// and consumed by parseBulkImportWorkbook(). Kept as a single source of truth.
+const BULK_IMPORT_SCHEMA = {
+  required: ['deal','legalEntity','notional','framework','currency','startDate','maturityDate','marginBps','dayCount','couponFreq'],
+  optional: ['rfrIndex','fixedRate','amortMethod','arrangementFeeBps','commitmentFeeBps','purpose','team'],
+  enums: {
+    framework:  { values:['IFRS','USGAAP','AASB','ASPE'], aliases:{ 'IFRS 9':'IFRS','GAAP':'USGAAP','US GAAP':'USGAAP','ASC':'USGAAP','ASC 326':'USGAAP','AASB 9':'AASB','ASPE 3856':'ASPE','Canadian':'ASPE' } },
+    dayCount:   { values:['30/360','ACT/360','ACT/365','ACT/ACT'], aliases:{ '30E/360':'30/360','ACTUAL/360':'ACT/360','ACTUAL/365':'ACT/365','30 / 360':'30/360' } },
+    couponFreq: { values:['monthly','quarterly','semi','annual'], aliases:{ 'semi-annual':'semi','semiannual':'semi','half-yearly':'semi','yearly':'annual','biannual':'semi','1M':'monthly','3M':'quarterly','6M':'semi','12M':'annual','1':'annual','2':'semi','4':'quarterly','12':'monthly' } },
+    amortMethod:{ values:['bullet','straight','annuity','custom'], aliases:{ 'bulletmaturity':'bullet','equal':'straight','level':'annuity' } },
+    rfrIndex:   { values:['SOFR','SONIA','ESTR','TONAR','SARON','FIXED',''], aliases:{ 'ester':'ESTR','€STR':'ESTR','GBP-SONIA':'SONIA','USD-SOFR':'SOFR','FIX':'FIXED','fixed-rate':'FIXED' } }
+  }
+};
+
+// Coerce an incoming enum value to the canonical form, or return null if invalid.
+function _bulkNormaliseEnum(field, raw){
+  const spec = BULK_IMPORT_SCHEMA.enums[field];
+  if(!spec) return raw;
+  if(raw == null || raw === '') return spec.values.includes('') ? '' : null;
+  const s = String(raw).trim();
+  // Direct match
+  for(const v of spec.values){ if(v.toLowerCase() === s.toLowerCase()) return v; }
+  // Alias
+  for(const [alias, canonical] of Object.entries(spec.aliases || {})){
+    if(alias.toLowerCase() === s.toLowerCase()) return canonical;
+  }
+  return null;
+}
+
+// Excel date serial → ISO YYYY-MM-DD. Handles Date objects, strings, numbers.
+function _bulkNormaliseDate(raw){
+  if(!raw && raw !== 0) return null;
+  if(raw instanceof Date && !isNaN(raw)) return raw.toISOString().slice(0,10);
+  if(typeof raw === 'number' && raw > 20000 && raw < 80000){
+    // Excel serial (days since 1900-01-00). SheetJS returns numbers when cellDates=false.
+    const utcMs = (raw - 25569) * 86400 * 1000;
+    const d = new Date(utcMs);
+    if(!isNaN(d)) return d.toISOString().slice(0,10);
+  }
+  const s = String(raw).trim();
+  // Try native parse
+  const d1 = new Date(s);
+  if(!isNaN(d1)) return d1.toISOString().slice(0,10);
+  // Try DD/MM/YYYY or MM/DD/YYYY
+  const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if(m){
+    let [_, a, b, y] = m;
+    if(y.length === 2) y = (parseInt(y) < 50 ? '20' : '19') + y;
+    // Assume DD/MM/YYYY (most of our users are UK/AU); fall back to MM/DD if impossible.
+    const dd = parseInt(a), mm = parseInt(b);
+    const dISO = new Date(Date.UTC(parseInt(y), mm - 1, dd));
+    if(!isNaN(dISO) && dISO.getUTCMonth() + 1 === mm) return dISO.toISOString().slice(0,10);
+  }
+  return null;
+}
+
+// Validate a single parsed row. Returns { ok, errors[], warnings[], deal }.
+function _bulkValidateRow(row, rowIdx){
+  const errors = [];
+  const warnings = [];
+  const out = {};
+  // Required-field presence
+  for(const f of BULK_IMPORT_SCHEMA.required){
+    if(row[f] == null || row[f] === ''){ errors.push('missing ' + f); }
+  }
+  if(errors.length) return { ok:false, errors, warnings, deal:null, rowIdx };
+  // String fields — trim
+  out.deal        = String(row.deal).trim();
+  out.legalEntity = String(row.legalEntity).trim();
+  out.currency    = String(row.currency).trim().toUpperCase();
+  out.purpose     = row.purpose ? String(row.purpose).trim() : '';
+  out.team        = row.team    ? String(row.team).trim()    : '';
+  if(out.currency.length !== 3){ errors.push('currency must be 3-letter ISO (e.g. USD)'); }
+  // Enums
+  const fw = _bulkNormaliseEnum('framework', row.framework);
+  if(fw == null) errors.push('framework must be one of IFRS, USGAAP, AASB, ASPE');
+  else out.framework = fw;
+  const dc = _bulkNormaliseEnum('dayCount', row.dayCount);
+  if(dc == null) errors.push('dayCount must be one of 30/360, ACT/360, ACT/365, ACT/ACT');
+  else out.dayCount = dc;
+  const cf = _bulkNormaliseEnum('couponFreq', row.couponFreq);
+  if(cf == null) errors.push('couponFreq must be one of monthly, quarterly, semi, annual');
+  else out.couponFreq = cf;
+  if(row.rfrIndex != null && row.rfrIndex !== ''){
+    const idx = _bulkNormaliseEnum('rfrIndex', row.rfrIndex);
+    if(idx == null) errors.push('rfrIndex must be one of SOFR, SONIA, ESTR, TONAR, SARON, FIXED');
+    else out.rfrIndex = idx;
+  } else { out.rfrIndex = ''; }
+  if(row.amortMethod != null && row.amortMethod !== ''){
+    const am = _bulkNormaliseEnum('amortMethod', row.amortMethod);
+    if(am == null) errors.push('amortMethod must be one of bullet, straight, annuity, custom');
+    else out.amortMethod = am;
+  } else { out.amortMethod = 'bullet'; }
+  // Numerics
+  const notional = parseFloat(row.notional);
+  if(!isFinite(notional) || notional <= 0) errors.push('notional must be a positive number');
+  else out.notional = notional;
+  const marginBps = parseFloat(row.marginBps);
+  if(!isFinite(marginBps) || marginBps < 0) errors.push('marginBps must be ≥ 0');
+  else out.marginBps = marginBps;
+  if(row.fixedRate != null && row.fixedRate !== ''){
+    const fr = parseFloat(row.fixedRate);
+    if(!isFinite(fr) || fr < 0) errors.push('fixedRate must be ≥ 0');
+    else out.fixedRate = fr;
+  }
+  if(row.arrangementFeeBps != null && row.arrangementFeeBps !== ''){
+    const a = parseFloat(row.arrangementFeeBps);
+    if(isFinite(a)) out.arrangementFeeBps = a; else warnings.push('arrangementFeeBps not numeric — ignored');
+  }
+  if(row.commitmentFeeBps != null && row.commitmentFeeBps !== ''){
+    const c = parseFloat(row.commitmentFeeBps);
+    if(isFinite(c)) out.commitmentFeeBps = c; else warnings.push('commitmentFeeBps not numeric — ignored');
+  }
+  // Dates
+  const sd = _bulkNormaliseDate(row.startDate);
+  if(!sd) errors.push('startDate not parseable (use YYYY-MM-DD)');
+  else out.startDate = sd;
+  const md = _bulkNormaliseDate(row.maturityDate);
+  if(!md) errors.push('maturityDate not parseable (use YYYY-MM-DD)');
+  else out.maturityDate = md;
+  if(sd && md && sd >= md) errors.push('maturityDate must be after startDate');
+  // Fixed vs floating consistency
+  if(out.rfrIndex === 'FIXED' && (out.fixedRate == null || out.fixedRate <= 0)){
+    warnings.push('rfrIndex=FIXED but no fixedRate provided — will default to coupon = marginBps/100');
+  }
+  return { ok: errors.length === 0, errors, warnings, deal: out, rowIdx };
+}
+
+// Convert a validated row into the shape currentInstrument()/saveDeal() expect.
+function _bulkRowToInstrument(v){
+  const d = v.deal;
+  return {
+    id: 'IMPORT_' + d.deal.toUpperCase().replace(/[^A-Z0-9]/g,'_').slice(0,32) + '_' + Date.now().toString(36).slice(-4),
+    deal: d.deal,
+    legalEntity: d.legalEntity,
+    le: d.legalEntity,
+    label: d.deal,
+    currency: d.currency,
+    accountingFramework: d.framework,
+    framework: d.framework,
+    team: d.team || 'Imported',
+    purpose: d.purpose || '',
+    startDate: d.startDate,
+    maturityDate: d.maturityDate,
+    dayCountConvention: d.dayCount,
+    couponFrequency: d.couponFreq,
+    amortMethod: d.amortMethod,
+    rfrIndex: d.rfrIndex,
+    fixedRate: (d.rfrIndex === 'FIXED' ? (d.fixedRate != null ? d.fixedRate : d.marginBps / 100) : null),
+    tranches: [{
+      trancheId: 'T1',
+      notional: d.notional,
+      currency: d.currency,
+      startDate: d.startDate,
+      maturityDate: d.maturityDate,
+      marginBps: d.marginBps,
+      dayCount: d.dayCount,
+      couponFrequency: d.couponFreq,
+      amortMethod: d.amortMethod,
+      rfrIndex: d.rfrIndex,
+      fixedRate: (d.rfrIndex === 'FIXED' ? (d.fixedRate != null ? d.fixedRate : d.marginBps / 100) : null),
+      drawdowns: [{ date: d.startDate, amount: d.notional }],
+      repayments: (d.amortMethod === 'bullet') ? [{ date: d.maturityDate, amount: d.notional, kind:'maturity' }] : []
+    }],
+    fees: (function(){
+      const fees = [];
+      if(v.deal.arrangementFeeBps){ fees.push({ id:'FEE_ARR', type:'arrangement', mode:'bps', bps:v.deal.arrangementFeeBps, treatment:'EIR', paidDate:d.startDate }); }
+      if(v.deal.commitmentFeeBps){ fees.push({ id:'FEE_COM', type:'commitment', mode:'bps', bps:v.deal.commitmentFeeBps, treatment:'straight-line', frequency:d.couponFreq }); }
+      return fees;
+    })(),
+    _importedAt: new Date().toISOString(),
+    _importSource: 'bulk-xlsx'
+  };
+}
+
+// Public API — open/close.
+window.openBulkImportModal = function(){
+  const el = document.getElementById('bulk-import-modal');
+  if(!el) return;
+  document.getElementById('bulk-import-step-upload').style.display = '';
+  document.getElementById('bulk-import-step-preview').style.display = 'none';
+  document.getElementById('btn-bulk-import-save').style.display = 'none';
+  document.getElementById('btn-bulk-import-back').style.display = 'none';
+  document.getElementById('bulk-import-progress').textContent = 'Choose a file above to get started.';
+  document.getElementById('bulk-import-file-info').textContent = '';
+  document.getElementById('bulk-import-summary').textContent = '';
+  document.getElementById('bulk-import-tbody').innerHTML = '';
+  document.getElementById('bulk-import-file').value = '';
+  window._bulkImportRows = [];
+  el.style.display = 'flex';
+};
+window.closeBulkImportModal = function(){
+  const el = document.getElementById('bulk-import-modal');
+  if(el) el.style.display = 'none';
+};
+window.bulkImportBack = function(){
+  document.getElementById('bulk-import-step-upload').style.display = '';
+  document.getElementById('bulk-import-step-preview').style.display = 'none';
+  document.getElementById('btn-bulk-import-save').style.display = 'none';
+  document.getElementById('btn-bulk-import-back').style.display = 'none';
+  document.getElementById('bulk-import-file').value = '';
+  window._bulkImportRows = [];
+};
+
+// Download a filled-in Excel template with headers, 2 sample rows, and a
+// Reference sheet documenting enum values.
+window.downloadBulkImportTemplate = function(){
+  if(typeof XLSX === 'undefined'){ alert('XLSX library not loaded — refresh the page and try again.'); return; }
+  const cols = BULK_IMPORT_SCHEMA.required.concat(BULK_IMPORT_SCHEMA.optional);
+  const sample1 = { deal:'Acme Term Loan A', legalEntity:'Fund I LP', notional:25000000, framework:'IFRS', currency:'USD',
+    startDate:'2026-01-15', maturityDate:'2031-01-15', marginBps:475, dayCount:'ACT/360', couponFreq:'quarterly',
+    rfrIndex:'SOFR', fixedRate:'', amortMethod:'bullet', arrangementFeeBps:200, commitmentFeeBps:50,
+    purpose:'Growth capex', team:'Direct Lending' };
+  const sample2 = { deal:'Beta Revolver', legalEntity:'Fund II LP', notional:10000000, framework:'USGAAP', currency:'USD',
+    startDate:'2026-03-01', maturityDate:'2029-03-01', marginBps:350, dayCount:'ACT/365', couponFreq:'monthly',
+    rfrIndex:'SOFR', fixedRate:'', amortMethod:'straight', arrangementFeeBps:150, commitmentFeeBps:35,
+    purpose:'Working capital', team:'Direct Lending' };
+  const wb = XLSX.utils.book_new();
+  const wsLoans = XLSX.utils.json_to_sheet([sample1, sample2], { header: cols });
+  wsLoans['!cols'] = cols.map(c => ({ wch: Math.max(12, c.length + 3) }));
+  XLSX.utils.book_append_sheet(wb, wsLoans, 'Loans');
+  // Reference sheet — enum values for validation
+  const refRows = [
+    ['Field', 'Allowed values', 'Notes'],
+    ['framework',  BULK_IMPORT_SCHEMA.enums.framework.values.join(', '),  'Accounting framework driving the JEs. Aliases: IFRS 9→IFRS, ASC 326→USGAAP, AASB 9→AASB'],
+    ['dayCount',   BULK_IMPORT_SCHEMA.enums.dayCount.values.join(', '),   'Interest accrual basis'],
+    ['couponFreq', BULK_IMPORT_SCHEMA.enums.couponFreq.values.join(', '), 'How often the coupon pays. Aliases: semi-annual→semi, 1M→monthly, 3M→quarterly'],
+    ['amortMethod',BULK_IMPORT_SCHEMA.enums.amortMethod.values.join(', '),'Bullet=one balloon at maturity; straight=equal principal each period; annuity=level payment; custom=leave blank + edit later'],
+    ['rfrIndex',   BULK_IMPORT_SCHEMA.enums.rfrIndex.values.filter(v=>v).join(', '), 'Reference rate. FIXED means fixed-rate loan (populate fixedRate too).'],
+    [],
+    ['Required', BULK_IMPORT_SCHEMA.required.join(', ')],
+    ['Optional', BULK_IMPORT_SCHEMA.optional.join(', ')],
+    [],
+    ['Numeric conventions', 'marginBps and fee bps in basis points (475 = 4.75%). notional in currency units, no commas or symbols. fixedRate in percent (5.25 = 5.25%).'],
+    ['Date conventions', 'YYYY-MM-DD preferred. DD/MM/YYYY also accepted. Excel date cells are auto-detected.']
+  ];
+  const wsRef = XLSX.utils.aoa_to_sheet(refRows);
+  wsRef['!cols'] = [{ wch:16 }, { wch:56 }, { wch:60 }];
+  XLSX.utils.book_append_sheet(wb, wsRef, 'Reference');
+  XLSX.writeFile(wb, 'PCS_LoanBook_Import_Template.xlsx');
+};
+
+// Read the uploaded workbook, extract Loans sheet, run validation on each row.
+async function _bulkImportHandleFile(file){
+  const progress = document.getElementById('bulk-import-progress');
+  progress.textContent = 'Reading ' + file.name + ' …';
+  try {
+    const buf = await file.arrayBuffer();
+    const wb  = XLSX.read(buf, { type:'array', cellDates:true });
+    const sheetName = wb.SheetNames.find(n => n.toLowerCase() === 'loans') || wb.SheetNames[0];
+    if(!sheetName){ alert('Workbook has no sheets'); return; }
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval:null, raw:false });
+    if(!rows.length){ alert('Sheet "' + sheetName + '" is empty. Make sure row 1 has headers and rows 2+ have data.'); return; }
+    if(rows.length > 500){ if(!confirm('Sheet has ' + rows.length + ' rows — larger than the 500-row soft limit. Continue?')) return; }
+    // Validate each row
+    const results = rows.map((r, i) => _bulkValidateRow(r, i + 2));  // +2 = header + 1-indexed
+    window._bulkImportRows = results;
+    _bulkImportRenderPreview(file.name, results);
+  } catch(err){
+    console.error('[bulk-import] parse failed', err);
+    alert('Could not read the workbook: ' + (err && err.message ? err.message : err));
+    progress.textContent = 'Choose a file above to get started.';
+  }
+}
+
+// Render the preview grid.
+function _bulkImportRenderPreview(fileName, results){
+  document.getElementById('bulk-import-step-upload').style.display = 'none';
+  document.getElementById('bulk-import-step-preview').style.display = '';
+  const okCount   = results.filter(r => r.ok).length;
+  const errCount  = results.length - okCount;
+  const warnCount = results.filter(r => r.warnings.length > 0).length;
+  document.getElementById('bulk-import-file-info').textContent = fileName + ' · ' + results.length + ' row' + (results.length===1?'':'s');
+  const summary = document.getElementById('bulk-import-summary');
+  summary.innerHTML =
+    '<span style="color:#059669;">✓ ' + okCount + ' valid</span> · ' +
+    '<span style="color:#DC2626;">✕ ' + errCount + ' errors</span>' +
+    (warnCount ? ' · <span style="color:#D97706;">⚠ ' + warnCount + ' warnings</span>' : '');
+  const tbody = document.getElementById('bulk-import-tbody');
+  tbody.innerHTML = results.map((r, i) => {
+    const src = r.deal || {};
+    const status = r.ok
+      ? '<span style="color:#059669; font-weight:600;">✓ Ready' + (r.warnings.length ? ' <span title="' + r.warnings.join(' · ').replace(/"/g,'&quot;') + '" style="color:#D97706;">⚠</span>' : '') + '</span>'
+      : '<span style="color:#DC2626; font-weight:600;" title="' + r.errors.join(' · ').replace(/"/g,'&quot;') + '">✕ ' + r.errors.length + ' issue' + (r.errors.length===1?'':'s') + '</span>';
+    const bgErr = r.ok ? '' : ' style="background:#FEF2F2;"';
+    const notional = (src.notional != null) ? src.notional.toLocaleString() : '—';
+    return '<tr' + bgErr + '>' +
+      '<td style="padding:5px 8px; color:#6B7280;">' + r.rowIdx + '</td>' +
+      '<td style="padding:5px 8px;">' + (src.deal || '<em style="color:#9CA3AF;">–</em>') + '</td>' +
+      '<td style="padding:5px 8px;">' + (src.legalEntity || '<em style="color:#9CA3AF;">–</em>') + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + notional + '</td>' +
+      '<td style="padding:5px 8px;">' + (src.framework || '<em style="color:#9CA3AF;">–</em>') + '</td>' +
+      '<td style="padding:5px 8px;">' + (src.currency || '<em style="color:#9CA3AF;">–</em>') + '</td>' +
+      '<td style="padding:5px 8px; font-size:10.5px;">' + (src.startDate || '<em style="color:#9CA3AF;">–</em>') + '</td>' +
+      '<td style="padding:5px 8px; font-size:10.5px;">' + (src.maturityDate || '<em style="color:#9CA3AF;">–</em>') + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + (src.marginBps != null ? src.marginBps : '—') + '</td>' +
+      '<td style="padding:5px 8px;">' + status + '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('bulk-import-progress').innerHTML =
+    okCount ? 'Ready to save <b>' + okCount + '</b> valid row' + (okCount===1?'':'s') + ' to the database.'
+            : '<span style="color:#DC2626;">No valid rows — fix the errors above and re-upload.</span>';
+  document.getElementById('btn-bulk-import-back').style.display = '';
+  const saveBtn = document.getElementById('btn-bulk-import-save');
+  saveBtn.style.display = okCount ? '' : 'none';
+  saveBtn.disabled = false;
+}
+
+// Save every OK row. Runs sequentially so failures don't cascade.
+window.bulkImportSaveAll = async function(){
+  const results = window._bulkImportRows || [];
+  const okRows  = results.filter(r => r.ok);
+  if(!okRows.length){ toast('No valid rows to save'); return; }
+  if(!window.SB || !window.SB.connected){ alert('Database not connected — check the ⚙ Settings modal.'); return; }
+  if(window.SB.currentUser == null){ if(!confirm('You are not signed in. Rows will be saved without an owner. Continue?')) return; }
+  const saveBtn = document.getElementById('btn-bulk-import-save');
+  saveBtn.disabled = true;
+  const progress = document.getElementById('bulk-import-progress');
+  let saved = 0, failed = 0;
+  const failures = [];
+  for(let i = 0; i < okRows.length; i++){
+    const r = okRows[i];
+    progress.textContent = 'Saving ' + (i+1) + ' of ' + okRows.length + ' — ' + r.deal.deal + ' …';
+    try {
+      const inst = _bulkRowToInstrument(r);
+      // Register into the local session so any downstream helpers can see it,
+      // then persist to the DB.
+      if(typeof window.registerBuilderInstrument === 'function'){
+        window.registerBuilderInstrument(inst);
+      }
+      const res = await window.SB.saveDeal(inst);
+      if(res && res.ok){
+        saved++;
+        // Reflect success in the grid
+        const cellIdx = results.indexOf(r);
+        const tr = document.querySelectorAll('#bulk-import-tbody tr')[cellIdx];
+        if(tr){ tr.style.background = '#ECFDF5'; tr.cells[9].innerHTML = '<span style="color:#059669; font-weight:600;">✓ Saved</span>'; }
+      } else {
+        failed++;
+        failures.push(r.deal.deal + ': ' + (res && res.reason ? res.reason : 'unknown'));
+        const cellIdx = results.indexOf(r);
+        const tr = document.querySelectorAll('#bulk-import-tbody tr')[cellIdx];
+        if(tr){ tr.style.background = '#FEF2F2'; tr.cells[9].innerHTML = '<span style="color:#DC2626; font-weight:600;" title="' + (res && res.reason ? String(res.reason).replace(/"/g,'&quot;') : '') + '">✕ Failed</span>'; }
+      }
+    } catch(err){
+      failed++;
+      failures.push(r.deal.deal + ': ' + (err && err.message ? err.message : String(err)));
+      const cellIdx = results.indexOf(r);
+      const tr = document.querySelectorAll('#bulk-import-tbody tr')[cellIdx];
+      if(tr){ tr.style.background = '#FEF2F2'; tr.cells[9].innerHTML = '<span style="color:#DC2626; font-weight:600;">✕ Error</span>'; }
+    }
+  }
+  progress.innerHTML = 'Done. <b style="color:#059669;">' + saved + ' saved</b>' +
+    (failed ? ' · <b style="color:#DC2626;">' + failed + ' failed</b>' : '') +
+    ' — refresh the Active Deal picker to see them.';
+  saveBtn.textContent = 'Save valid rows';
+  saveBtn.disabled = false;
+  // Merge into PRESETS so they show up immediately without a page refresh
+  if(saved > 0 && typeof window.SB.fetchUserDeals === 'function'){
+    try {
+      const fresh = await window.SB.fetchUserDeals();
+      if(Array.isArray(fresh) && Array.isArray(window.PRESETS)){
+        for(const p of fresh){
+          const already = window.PRESETS.findIndex(x => x.id === p.id || x.key === p.key);
+          if(already >= 0) window.PRESETS[already] = p;
+          else window.PRESETS.push(p);
+        }
+      }
+    } catch(err){ console.warn('[bulk-import] PRESETS refresh failed', err); }
+  }
+  if(failed){
+    console.warn('[bulk-import] failures:', failures);
+  }
+};
+
+// Wire the file input + drag-and-drop
+document.addEventListener('DOMContentLoaded', function(){
+  const fileInput = document.getElementById('bulk-import-file');
+  const dropzone  = document.getElementById('bulk-import-dropzone');
+  if(!fileInput || !dropzone) return;
+  fileInput.addEventListener('change', function(e){
+    const f = e.target.files && e.target.files[0];
+    if(f) _bulkImportHandleFile(f);
+  });
+  ;['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropzone.style.borderColor = '#4F46E5';
+    dropzone.style.background = 'linear-gradient(135deg,#E0E7FF 0%,#DBEAFE 100%)';
+  }));
+  ;['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropzone.style.borderColor = '#C7D2FE';
+    dropzone.style.background = 'linear-gradient(135deg,#F0F9FF 0%,#EEF2FF 100%)';
+  }));
+  dropzone.addEventListener('drop', e => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) _bulkImportHandleFile(f);
+  });
+});
+
 // ── Three header button handlers exposed on window so the inline onclick
 // attributes wired in the HTML can call them safely. They tolerate being
 // called before openActiveDealModal / openISINModal are defined (early click
@@ -10028,6 +11135,81 @@ function stampAcctRun(inst, status){
   M.acctRunHistory.unshift({ ...M.acctRunMeta });
   if(M.acctRunHistory.length > 50) M.acctRunHistory.length = 50;
 }
+
+// ═══ Evidence Pack PDF export (#232) ═══
+// Uses the browser's native print dialog with a print-only stylesheet that
+// hides every non-evidence chrome element. Works cross-platform, uses each
+// user's own PDF settings + printer, no library dependencies.
+//
+// Flow:
+//   1. Snapshot which details were open (so we can restore later)
+//   2. Expand every details element in the evidence pack
+//   3. Populate the print-only cover page with deal/run metadata
+//   4. Add body.printing-evidence class → the @media print CSS kicks in
+//   5. Call window.print()
+//   6. After the print dialog closes, restore state
+window.exportEvidencePackPdf = async function(){
+  const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+  if(!inst){ toast('No active deal — nothing to export'); return; }
+  if(!Array.isArray(M.acctJournals) || M.acctJournals.length === 0){
+    if(!confirm('No accounting run yet — the Evidence Pack will be mostly empty. Continue anyway?')) return;
+  }
+  const details = Array.from(document.querySelectorAll('#evidence-pack details'));
+  const priorOpenState = details.map(d => d.open);
+  details.forEach(d => d.open = true);
+
+  // Populate the cover page
+  const cover = document.getElementById('evidence-pack-print-cover');
+  if(cover){
+    const runMeta = M && M._currentRunId ? M._currentRunId : '(no persisted run)';
+    const framework = (inst.accountingFramework || inst.framework || 'IFRS').toUpperCase();
+    const now = new Date();
+    const dateStr = now.toLocaleDateString(undefined, { year:'numeric', month:'long', day:'numeric' });
+    const timeStr = now.toLocaleTimeString();
+    const user = (window.SB && window.SB.currentUser && window.SB.currentUser.email) || 'anonymous';
+    const jeCount = (M && M.acctJournals) ? M.acctJournals.length : 0;
+    const summary = M && M.summary ? M.summary : {};
+    const ccy = inst.currency || 'GBP';
+    const fmt = (v) => (typeof v === 'number') ? (ccy + ' ' + v.toLocaleString(undefined, {maximumFractionDigits:2})) : '—';
+    cover.innerHTML =
+      '<div style="text-align:center; padding:80px 0 20px;">' +
+        '<div style="font-size:12px; color:#6B7280; letter-spacing:2px; text-transform:uppercase; margin-bottom:10px;">Accounting Evidence Pack</div>' +
+        '<div style="font-size:32px; font-weight:800; color:#1F2937; letter-spacing:-0.5px;">' + (inst.deal || inst.id) + '</div>' +
+        '<div style="font-size:14px; color:#4B5563; margin-top:6px;">' + (inst.legalEntity || inst.le || '') + ' · ' + framework + ' · ' + ccy + '</div>' +
+      '</div>' +
+      '<hr style="border:none; border-top:1px solid #D1D5DB; margin:20px 0;"/>' +
+      '<div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; font-size:12px; margin-top:24px;">' +
+        '<div><b>Deal ID</b><br>' + (inst.id || '—') + '</div>' +
+        '<div><b>Run ID</b><br>' + runMeta + '</div>' +
+        '<div><b>Framework</b><br>' + framework + '</div>' +
+        '<div><b>Currency</b><br>' + ccy + '</div>' +
+        '<div><b>Journal entries</b><br>' + jeCount + '</div>' +
+        '<div><b>Total cash accrual</b><br>' + fmt(summary.totalCashAccrual) + '</div>' +
+        '<div><b>Total ECL change</b><br>' + fmt(summary.totalECLChange) + '</div>' +
+        '<div><b>Total fees</b><br>' + fmt(summary.totalFees) + '</div>' +
+      '</div>' +
+      '<hr style="border:none; border-top:1px solid #D1D5DB; margin:30px 0 20px;"/>' +
+      '<div style="font-size:11px; color:#6B7280;">' +
+        '<b>Exported</b> ' + dateStr + ' at ' + timeStr + '<br>' +
+        '<b>By</b> ' + user + '<br>' +
+        '<b>From</b> PCS Loan Module V3 backed by Supabase' +
+      '</div>' +
+      '<div style="font-size:10px; color:#9CA3AF; margin-top:30px; padding-top:14px; border-top:1px dashed #D1D5DB;">' +
+        'This evidence pack shows every calculation the engine performed for this run, cited to the accounting framework in force at the time. Each section is reconstructable from the run persisted in accounting_runs.id = ' + (M && M._currentRunUuid ? M._currentRunUuid : '(unknown)') + '.' +
+      '</div>';
+  }
+
+  // Kick off print. The @media print CSS handles the rest.
+  document.body.classList.add('printing-evidence');
+  const restore = () => {
+    document.body.classList.remove('printing-evidence');
+    details.forEach((d, i) => d.open = priorOpenState[i]);
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+  // Small delay so the DOM/layout has time to apply the class before the print dialog opens
+  setTimeout(() => window.print(), 100);
+};
 
 function renderEvidencePack(inst, summary){
   renderMonthEndPanel(inst);
@@ -12012,6 +13194,69 @@ function setupSessionModalCloseHandlers(){
 }
 
 // ============================================================
+// App dialog — modern replacement for alert() / confirm()
+// ============================================================
+// Usage:
+//   showAppDialog({ severity:'error', title:'Failed', message:'…' })
+//   const ok = await showAppDialog({ severity:'warning', title:'Sure?',
+//                                    message:'…', confirmLabel:'Delete',
+//                                    cancelLabel:'Cancel' });
+// severity → error | warning | info | success | question (drives icon+colour)
+// If cancelLabel is omitted, only the OK button is shown.
+window.showAppDialog = function(opts){
+  return new Promise(resolve => {
+    const el = document.getElementById('app-dialog');
+    if(!el){ alert(opts && opts.message || ''); resolve(false); return; }
+    const iconWrap = document.getElementById('app-dialog-icon-wrap');
+    const icon    = document.getElementById('app-dialog-icon');
+    const title   = document.getElementById('app-dialog-title');
+    const body    = document.getElementById('app-dialog-body');
+    const detail  = document.getElementById('app-dialog-detail');
+    const okBtn   = document.getElementById('app-dialog-ok');
+    const cxlBtn  = document.getElementById('app-dialog-cancel');
+    const backdrop= document.getElementById('app-dialog-bd');
+    const severity = opts.severity || 'info';
+    const styles = {
+      error:    { bg:'#FEE2E2', fg:'#B91C1C', icon:'error',        btnBg:'#DC2626', btnBd:'#DC2626' },
+      warning:  { bg:'#FEF3C7', fg:'#B45309', icon:'warning_amber', btnBg:'#D97706', btnBd:'#D97706' },
+      info:     { bg:'#DBEAFE', fg:'#1D4ED8', icon:'info',         btnBg:'#4F46E5', btnBd:'#4F46E5' },
+      success:  { bg:'#D1FAE5', fg:'#047857', icon:'check_circle', btnBg:'#059669', btnBd:'#059669' },
+      question: { bg:'#E0E7FF', fg:'#4338CA', icon:'help',         btnBg:'#4F46E5', btnBd:'#4F46E5' }
+    }[severity] || { bg:'#DBEAFE', fg:'#1D4ED8', icon:'info', btnBg:'#4F46E5', btnBd:'#4F46E5' };
+    iconWrap.style.background = styles.bg;
+    icon.style.color = styles.fg;
+    icon.textContent = styles.icon;
+    title.textContent = opts.title || 'Notice';
+    body.textContent  = opts.message || '';
+    if(opts.detail){ detail.textContent = opts.detail; detail.style.display = ''; }
+    else { detail.style.display = 'none'; }
+    okBtn.textContent = opts.confirmLabel || 'OK';
+    okBtn.style.background = styles.btnBg;
+    okBtn.style.borderColor = styles.btnBd;
+    const showCancel = !!opts.cancelLabel;
+    cxlBtn.style.display = showCancel ? '' : 'none';
+    if(showCancel) cxlBtn.textContent = opts.cancelLabel;
+    let closed = false;
+    const close = (result) => {
+      if(closed) return; closed = true;
+      el.style.display = 'none';
+      backdrop.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    };
+    const onBackdrop = () => close(false);
+    const onKey = (e) => { if(e.key === 'Escape') close(false); if(e.key === 'Enter') close(true); };
+    okBtn.onclick  = () => close(true);
+    cxlBtn.onclick = () => close(false);
+    backdrop.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+    el.style.display = 'flex';
+    // Focus primary button so Enter/Space works and screen readers announce it
+    setTimeout(() => okBtn.focus(), 60);
+  });
+};
+
+// ============================================================
 // JSON modal helpers
 // ============================================================
 function openJsonModal(opts){
@@ -12085,6 +13330,433 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   }
   populateInstrumentPicker();
+
+  // ═══ Approval workflow UI (#231) ══════════════════════════════
+  // Refreshes the approval strip based on M._currentRunUuid + backend state.
+  window.refreshApprovalUI = async function(){
+    const strip = document.getElementById('approval-strip');
+    if(!strip) return;
+    if(!M || !M._currentRunUuid || !window.SB || !window.SB.connected){
+      strip.style.display = 'none';
+      return;
+    }
+    const res = await window.SB.getRun(M._currentRunUuid);
+    if(!res.ok || !res.run){
+      strip.style.display = 'none';
+      return;
+    }
+    const run = res.run;
+    strip.style.display = '';
+    document.getElementById('approval-run-id').textContent = run.run_id + ' · ' + (run.je_rows_count || 0) + ' JEs · ' + (run.framework_used || 'IFRS');
+    // Paint the three pills based on status
+    const draft = document.getElementById('approval-pill-draft');
+    const appr  = document.getElementById('approval-pill-approved');
+    const post  = document.getElementById('approval-pill-posted');
+    const status = run.status || 'Draft';
+    const isDraft = (status === 'Draft' || status === 'Calculated');
+    const isApproved = status === 'Approved';
+    const isPosted   = status === 'Posted';
+    const isCancelled = status === 'Cancelled';
+    draft.dataset.state = isDraft ? 'active' : 'done';
+    appr.dataset.state  = isApproved ? 'active' : (isPosted ? 'done' : 'pending');
+    post.dataset.state  = isPosted   ? 'done' : 'pending';
+    if(isCancelled){ draft.dataset.state = 'rejected'; }
+    // Button visibility + guards
+    const me = window.SB.currentUser;
+    const approveBtn = document.getElementById('btn-approval-approve');
+    const postBtn    = document.getElementById('btn-approval-post');
+    const reopenBtn  = document.getElementById('btn-approval-reopen');
+    const isCreator  = me && run.run_by === me.id;
+    const isAdmin    = !!(window.SB && window.SB.isAdmin);
+    // Approve — visible while Draft/Calculated; disabled if creator (unless admin bypass)
+    approveBtn.style.display = isDraft ? '' : 'none';
+    approveBtn.disabled = !me || (isCreator && !isAdmin);
+    approveBtn.title = !me ? 'Sign in to approve'
+                     : (isCreator && !isAdmin) ? 'Maker-checker: you cannot approve your own run'
+                     : (isCreator && isAdmin) ? 'Admin bypass: approving your own run (audit-logged)'
+                     : 'Approve this run';
+    approveBtn.style.opacity = approveBtn.disabled ? '0.5' : '1';
+    if(isCreator && isAdmin){
+      approveBtn.innerHTML = '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">verified_user</span> Approve (admin)';
+    }
+    // Post — only visible when Approved; anyone can post
+    postBtn.style.display = isApproved ? '' : 'none';
+    postBtn.disabled = !me;
+    postBtn.title = !me ? 'Sign in to post' : 'Post to Investran DIU';
+    // Re-open — only visible when Approved (before Post); only creator/admin
+    reopenBtn.style.display = isApproved && isCreator ? '' : 'none';
+    // Audit trail
+    const audit = document.getElementById('approval-audit');
+    const parts = [];
+    if(run.approved_at) parts.push('✓ Approved ' + new Date(run.approved_at).toLocaleString());
+    if(run.posted_at)   parts.push('▶ Posted '  + new Date(run.posted_at).toLocaleString());
+    if(parts.length){ audit.textContent = parts.join(' · '); audit.style.display = ''; }
+    else { audit.style.display = 'none'; }
+    // Also guard the Post JE button — can only fire after Approved
+    const postJeBtn = document.getElementById('btn-post-je-investran');
+    if(postJeBtn){
+      postJeBtn.disabled = !isApproved && !isPosted;
+      postJeBtn.title = isApproved || isPosted
+        ? 'Post the journal-entry batch via Investran Data Import Utility (DIU) API'
+        : 'Run must be Approved before posting to Investran';
+      postJeBtn.style.opacity = postJeBtn.disabled ? '0.4' : '1';
+    }
+  };
+  window.handleApproveRun = async function(){
+    if(!M || !M._currentRunUuid){ toast('No run to approve — click Run Accounting first'); return; }
+    const isAdmin = !!(window.SB && window.SB.isAdmin);
+    const ok = await window.showAppDialog({
+      severity:'question',
+      title: isAdmin ? 'Approve this run (admin bypass)?' : 'Approve this run?',
+      message: isAdmin
+        ? 'You\'re approving as admin. Normally maker-checker prevents self-approval, but your admin role allows it.'
+        : 'Confirm approval. Maker-checker prevents self-approval, so this can only succeed if you\'re not the creator.',
+      detail: isAdmin ? 'The action will be audit-logged with approved_by = your user id.' : undefined,
+      confirmLabel:'Approve',
+      cancelLabel:'Cancel'
+    });
+    if(!ok) return;
+    const res = await window.SB.approveRun(M._currentRunUuid);
+    if(res.ok){
+      toast('Run approved · ready to post', 3500);
+      window.refreshApprovalUI();
+    } else {
+      await window.showAppDialog({
+        severity:'error', title:'Approve failed',
+        message: res.reason || 'Unknown error.',
+        detail: res.reason && res.reason.includes('Maker-checker')
+          ? 'Ask a colleague to approve, or an admin can grant you admin rights.'
+          : undefined
+      });
+    }
+  };
+  window.handlePostRun = async function(){
+    if(!M || !M._currentRunUuid){ toast('No run to post'); return; }
+    const ok = await window.showAppDialog({
+      severity:'question',
+      title:'Mark run as Posted?',
+      message:'Posted is the terminal state. The run of record will be locked.',
+      detail:'You can still Re-open it back to Draft afterwards, but only until it\'s been synced downstream.',
+      confirmLabel:'Mark Posted',
+      cancelLabel:'Cancel'
+    });
+    if(!ok) return;
+    const res = await window.SB.postRun(M._currentRunUuid);
+    if(res.ok){
+      toast('Run marked Posted · run of record locked', 3500);
+      window.refreshApprovalUI();
+    } else {
+      await window.showAppDialog({ severity:'error', title:'Post failed', message: res.reason || 'Unknown error.' });
+    }
+  };
+  window.handleReopenRun = async function(){
+    if(!M || !M._currentRunUuid) return;
+    const ok = await window.showAppDialog({
+      severity:'warning',
+      title:'Re-open approved run?',
+      message:'This moves the run back to Draft. All approvals will be cleared.',
+      detail:'The next approval step will need to be redone. Any downstream posts referring to this run will need to be reversed manually.',
+      confirmLabel:'Re-open',
+      cancelLabel:'Cancel'
+    });
+    if(!ok) return;
+    const res = await window.SB.reopenRun(M._currentRunUuid);
+    if(res.ok){
+      toast('Run re-opened as Draft', 3000);
+      window.refreshApprovalUI();
+    } else {
+      await window.showAppDialog({ severity:'error', title:'Re-open failed', message: res.reason || 'Unknown error.' });
+    }
+  };
+
+  // ═══ Auth wiring — sign-in modal + identity chip ═══════════
+  // Multiple sign-in modes: password (default), signup, magic link.
+  (function(){
+    let currentMode = 'signin';
+    // 'reset' → send-reset-email form; 'newpw' → set-new-password form (shown after clicking recovery link)
+    const modes = ['signin','signup','magic','reset','newpw'];
+    const refreshChip = (user) => {
+      const chip = document.getElementById('auth-identity-chip');
+      const text = document.getElementById('auth-identity-chip-text');
+      if(!chip || !text) return;
+      if(user){
+        const admin = !!(window.SB && window.SB.isAdmin);
+        text.textContent = (admin ? '👑 ' : '') + (user.email || 'signed in');
+        chip.style.background = admin ? '#FEF3C7' : '#ECFDF5';
+        chip.style.color = admin ? '#78350F' : '#065F46';
+        chip.style.borderColor = admin ? '#FCD34D' : '#A7F3D0';
+        chip.querySelector('.material-icons-outlined').textContent = admin ? 'verified_user' : 'account_circle';
+        chip.title = admin
+          ? 'Signed in as admin — maker-checker bypass enabled · click to manage'
+          : 'Signed in · click to manage';
+      } else {
+        text.textContent = 'Sign in';
+        chip.style.background = '#F1F5F9';
+        chip.style.color = '#475569';
+        chip.style.borderColor = '#E2E8F0';
+        chip.querySelector('.material-icons-outlined').textContent = 'login';
+        chip.title = 'Not signed in · click to sign in';
+      }
+    };
+    // Initial paint after SB.init settles
+    setTimeout(() => {
+      if(window.SB && window.SB.currentUser) refreshChip(window.SB.currentUser);
+    }, 300);
+    // Re-paint on auth state change
+    if(window.SB && window.SB.auth_onChange){
+      window.SB.auth_onChange(refreshChip);
+    }
+    const setMode = (mode) => {
+      if(!modes.includes(mode)) mode = 'signin';
+      currentMode = mode;
+      const buttons = document.querySelectorAll('.auth-mode-btn');
+      buttons.forEach(b => {
+        // The tab bar only shows signin/signup/magic. reset & newpw are transient
+        // states triggered by the Forgot link / recovery URL respectively.
+        const tabsMap = { reset:'signin', newpw:'signin' };
+        const displayMode = tabsMap[mode] || mode;
+        const active = b.dataset.authMode === displayMode;
+        b.style.background = active ? 'white' : 'transparent';
+        b.style.color = active ? '#21295C' : '#64748B';
+        b.style.fontWeight = active ? '600' : '500';
+      });
+      // Show exactly one form
+      document.getElementById('auth-form-passwd').style.display = (mode === 'signin' || mode === 'signup') ? '' : 'none';
+      document.getElementById('auth-form-magic').style.display  = (mode === 'magic') ? '' : 'none';
+      document.getElementById('auth-form-reset').style.display  = (mode === 'reset') ? '' : 'none';
+      document.getElementById('auth-form-newpw').style.display  = (mode === 'newpw') ? '' : 'none';
+      document.getElementById('auth-submit-label').textContent  = mode === 'signup' ? 'Create account' : 'Sign in';
+      // Forgot-password link only makes sense in signin mode
+      const forgotRow = document.getElementById('auth-forgot-link-row');
+      if(forgotRow) forgotRow.style.display = mode === 'signin' ? '' : 'none';
+      // Tab bar hidden during newpw (user needs to finish the flow)
+      const tabBar = document.querySelector('#auth-signed-out-view > div[style*="F1F5F9"]');
+      if(tabBar) tabBar.style.display = mode === 'newpw' ? 'none' : '';
+      const pwd = document.getElementById('auth-password');
+      if(pwd) pwd.autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
+    };
+    // Expose so other blocks (recovery event handler, form links) can drive the modal
+    window.setAuthMode = setMode;
+    document.querySelectorAll('.auth-mode-btn').forEach(btn => {
+      btn.onclick = () => setMode(btn.dataset.authMode);
+    });
+    // Public: open modal
+    window.openAuthModal = function(){
+      const modal = document.getElementById('auth-modal');
+      if(!modal) return;
+      const signedIn = !!(window.SB && window.SB.currentUser);
+      document.getElementById('auth-signed-in-view').style.display = signedIn ? '' : 'none';
+      document.getElementById('auth-signed-out-view').style.display = signedIn ? 'none' : '';
+      if(signedIn){
+        document.getElementById('auth-signed-in-email').textContent = window.SB.currentUser.email || '—';
+        document.getElementById('auth-modal-title').textContent = 'Account';
+      } else {
+        document.getElementById('auth-modal-title').textContent = 'Sign in to PCS Loan Module';
+        setMode('signin');
+        document.getElementById('auth-error').style.display = 'none';
+        document.getElementById('auth-magic-result').style.display = 'none';
+        setTimeout(() => document.getElementById('auth-email')?.focus(), 100);
+      }
+      modal.style.display = 'flex';
+    };
+    window.closeAuthModal = function(){
+      const modal = document.getElementById('auth-modal');
+      if(modal) modal.style.display = 'none';
+    };
+    window.handleAuthSubmit = async function(){
+      const emailEl = document.getElementById('auth-email');
+      const passwdEl = document.getElementById('auth-password');
+      const errEl = document.getElementById('auth-error');
+      const btn = document.getElementById('auth-submit-btn');
+      const email = (emailEl.value || '').trim();
+      const password = passwdEl.value || '';
+      errEl.style.display = 'none';
+      if(!email || !password){
+        errEl.textContent = 'Please enter both email and password.';
+        errEl.style.display = '';
+        return;
+      }
+      if(!window.SB || !window.SB.connected){
+        errEl.textContent = 'Not connected to Supabase — check the DB Settings.';
+        errEl.style.display = '';
+        return;
+      }
+      btn.disabled = true;
+      const originalLabel = document.getElementById('auth-submit-label').textContent;
+      document.getElementById('auth-submit-label').textContent = 'Please wait…';
+      try {
+        const res = currentMode === 'signup'
+          ? await window.SB.auth_signUp(email, password)
+          : await window.SB.auth_signIn(email, password);
+        if(!res.ok){
+          errEl.textContent = res.reason || 'Auth failed.';
+          errEl.style.display = '';
+        } else if(res.needsConfirmation){
+          errEl.textContent = 'Check your email to confirm your account. Then sign in.';
+          errEl.style.background = '#EFF6FF';
+          errEl.style.borderColor = '#93C5FD';
+          errEl.style.color = '#1E40AF';
+          errEl.style.display = '';
+          setMode('signin');
+        } else {
+          window.closeAuthModal();
+          if(typeof toast === 'function') toast('Signed in as ' + email, 3000);
+          // Refresh identity chip immediately (auth_onChange listener will also fire)
+          refreshChip(window.SB.currentUser);
+          // Reload user's deals in-place — no page refresh needed with persistSession=true.
+          // fetchUserDeals now returns rows scoped to the signed-in user via RLS.
+          if(window.SB.fetchUserDeals){
+            window.SB.fetchUserDeals().then(fresh => {
+              if(Array.isArray(fresh) && Array.isArray(window.PRESETS)){
+                for(const p of fresh){
+                  const i = window.PRESETS.findIndex(x => x.id === p.id || x.key === p.key);
+                  if(i >= 0) window.PRESETS[i] = p; else window.PRESETS.push(p);
+                }
+                if(typeof toast === 'function') setTimeout(() => toast(fresh.length + ' deal' + (fresh.length===1?'':'s') + ' loaded from your account', 3000), 1500);
+              }
+            }).catch(err => console.warn('[auth] fetchUserDeals after sign-in failed', err));
+          }
+        }
+      } catch(err) {
+        errEl.textContent = (err && err.message) || String(err);
+        errEl.style.display = '';
+      } finally {
+        btn.disabled = false;
+        document.getElementById('auth-submit-label').textContent = originalLabel;
+      }
+    };
+    window.handleMagicLinkSubmit = async function(){
+      const emailEl = document.getElementById('auth-magic-email');
+      const resultEl = document.getElementById('auth-magic-result');
+      const email = (emailEl.value || '').trim();
+      resultEl.style.display = 'none';
+      if(!email){
+        resultEl.textContent = 'Enter your email first.';
+        resultEl.style.background = '#FEF2F2'; resultEl.style.color = '#7F1D1D'; resultEl.style.borderColor = '#FCA5A5';
+        resultEl.style.display = '';
+        return;
+      }
+      if(!window.SB || !window.SB.auth_signInWithMagicLink){
+        resultEl.textContent = 'Auth not available.';
+        resultEl.style.display = '';
+        return;
+      }
+      const res = await window.SB.auth_signInWithMagicLink(email);
+      if(res.ok){
+        resultEl.textContent = res.message || 'Magic link sent.';
+        resultEl.style.background = '#ECFDF5'; resultEl.style.color = '#065F46'; resultEl.style.borderColor = '#6EE7B7';
+      } else {
+        resultEl.textContent = res.reason || 'Failed to send magic link.';
+        resultEl.style.background = '#FEF2F2'; resultEl.style.color = '#7F1D1D'; resultEl.style.borderColor = '#FCA5A5';
+      }
+      resultEl.style.display = '';
+    };
+    // Forgot password → jump to the reset panel, prefill with what the user typed
+    window.handleForgotPassword = function(){
+      const emailEl = document.getElementById('auth-email');
+      const prefill = (emailEl && emailEl.value || '').trim();
+      const resetEmail = document.getElementById('auth-reset-email');
+      if(resetEmail && prefill) resetEmail.value = prefill;
+      const resultEl = document.getElementById('auth-reset-result');
+      if(resultEl) resultEl.style.display = 'none';
+      setMode('reset');
+      setTimeout(() => resetEmail && resetEmail.focus(), 100);
+    };
+    // Send reset email
+    window.handleSendResetEmail = async function(){
+      const emailEl  = document.getElementById('auth-reset-email');
+      const resultEl = document.getElementById('auth-reset-result');
+      const email = (emailEl.value || '').trim();
+      resultEl.style.display = 'none';
+      if(!email){
+        resultEl.textContent = 'Enter your email first.';
+        resultEl.style.background = '#FEF2F2'; resultEl.style.color = '#7F1D1D'; resultEl.style.borderColor = '#FCA5A5';
+        resultEl.style.display = ''; return;
+      }
+      if(!window.SB || !window.SB.auth_resetPasswordForEmail){
+        resultEl.textContent = 'Password reset not available — check DB connection.';
+        resultEl.style.background = '#FEF2F2'; resultEl.style.color = '#7F1D1D'; resultEl.style.borderColor = '#FCA5A5';
+        resultEl.style.display = ''; return;
+      }
+      const res = await window.SB.auth_resetPasswordForEmail(email);
+      if(res.ok){
+        // We deliberately DON'T disclose whether the email exists (mild security-through-obscurity);
+        // showing a generic success even if there's no account prevents user enumeration.
+        resultEl.innerHTML = '<b>Check your email.</b> If an account exists for ' + email.replace(/[<>"]/g,'') + ', you\'ll receive a password reset link within a minute or two.';
+        resultEl.style.background = '#ECFDF5'; resultEl.style.color = '#065F46'; resultEl.style.borderColor = '#6EE7B7';
+      } else {
+        resultEl.textContent = res.reason || 'Could not send reset email.';
+        resultEl.style.background = '#FEF2F2'; resultEl.style.color = '#7F1D1D'; resultEl.style.borderColor = '#FCA5A5';
+      }
+      resultEl.style.display = '';
+    };
+    // Save the new password after clicking the recovery link
+    window.handleSetNewPassword = async function(){
+      const pw1El   = document.getElementById('auth-newpw');
+      const pw2El   = document.getElementById('auth-newpw-confirm');
+      const errEl   = document.getElementById('auth-newpw-error');
+      const pw1 = pw1El.value || '';
+      const pw2 = pw2El.value || '';
+      errEl.style.display = 'none';
+      if(pw1.length < 8){
+        errEl.textContent = 'Password must be at least 8 characters.';
+        errEl.style.display = ''; return;
+      }
+      if(pw1 !== pw2){
+        errEl.textContent = 'Passwords don\'t match.';
+        errEl.style.display = ''; return;
+      }
+      if(!window.SB || !window.SB.auth_updatePassword){
+        errEl.textContent = 'Password update not available.';
+        errEl.style.display = ''; return;
+      }
+      const res = await window.SB.auth_updatePassword(pw1);
+      if(res.ok){
+        window.closeAuthModal();
+        refreshChip(window.SB.currentUser);
+        if(typeof toast === 'function') toast('Password updated · you are signed in', 3500);
+        // Clear the fields for next time
+        pw1El.value = ''; pw2El.value = '';
+      } else {
+        errEl.textContent = res.reason || 'Could not update password.';
+        errEl.style.display = '';
+      }
+    };
+    // When the user clicks the recovery link in their email, Supabase-js emits a
+    // PASSWORD_RECOVERY event. Open the modal, switch to the newpw panel.
+    if(window.SB && window.SB.auth_onChange){
+      window.SB.auth_onChange((user, event) => {
+        if(event === 'PASSWORD_RECOVERY'){
+          window.openAuthModal();
+          setMode('newpw');
+          setTimeout(() => document.getElementById('auth-newpw')?.focus(), 100);
+        }
+      });
+    }
+
+    window.handleSignOut = async function(){
+      const ok = await window.showAppDialog({
+        severity:'question',
+        title:'Sign out?',
+        message:'You\'ll need to sign in again to access your deals.',
+        confirmLabel:'Sign out',
+        cancelLabel:'Stay signed in'
+      });
+      if(!ok) return;
+      if(window.SB && window.SB.auth_signOut) await window.SB.auth_signOut();
+      window.closeAuthModal();
+      refreshChip(null);
+      if(typeof toast === 'function') toast('Signed out', 3000);
+      // No page reload — auth_onChange listener will re-render dependent UI in place.
+    };
+    // Enter key submits current form
+    document.getElementById('auth-password')?.addEventListener('keydown', e => {
+      if(e.key === 'Enter') window.handleAuthSubmit();
+    });
+    document.getElementById('auth-magic-email')?.addEventListener('keydown', e => {
+      if(e.key === 'Enter') window.handleMagicLinkSubmit();
+    });
+  })();
 
   // ═══ Stage 2 sub-tab switcher ═══════════════════════════════
   // Splits Stage 2 into 3 focused views: Run & JEs / Treatment / Evidence.
