@@ -3257,5 +3257,190 @@ function generateDIUFromReference(instr, referenceData){
   return applyInvestranGLMapping(entries);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// splitInterestJEsByCouponPeriod — post-processor for generateDIU output
+// ═══════════════════════════════════════════════════════════════════════════
+// The base generateDIU emits one aggregated interest JE pair (Interest
+// Receivable + Income - Daily Accrued Interest) and one aggregated
+// settlement pair (Interest Cash Receipt + Interest Receivable Clear) for
+// the WHOLE window at `summary.periodEnd`. That's not how the real world
+// works — quarterly floaters post interest every 3 months, not once at
+// maturity.
+//
+// This helper transforms an already-generated JE array in place:
+//   1. Detects aggregated interest rows (by transaction_type + effective_date)
+//   2. Derives coupon payment dates from inst's coupon frequency
+//   3. Sums dailyCash from the daily schedule per period
+//   4. Removes the aggregated interest pairs
+//   5. Emits per-period Interest Receivable / Income pairs on each period-end
+//   6. Emits per-period Cash Receipt / Receivable Clear pairs on each period-end
+//
+// Non-interest JEs (drawdown, prepayment, ECL, fees, etc.) pass through
+// untouched.
+//
+// Returns the new journals array. Caller should replace the original.
+function splitInterestJEsByCouponPeriod(journals, inst, schedule){
+  if(!Array.isArray(journals) || !journals.length) return journals;
+  if(!Array.isArray(schedule) || !schedule.length) return journals;
+
+  // 1. Derive coupon period length in months.
+  //    Priority: inst.couponFrequency > tranche's interestComponents[0].terms[0].tenor > default 3M
+  const freqToMonths = { monthly:1, quarterly:3, 'semi-annual':6, semi:6, semiannual:6, annual:12, yearly:12 };
+  const tenorToMonths = (t) => {
+    if(!t) return null;
+    const m = String(t).toUpperCase().match(/^(\d+)([MY])$/);
+    if(!m) return null;
+    return m[2] === 'Y' ? +m[1] * 12 : +m[1];
+  };
+  let periodMonths =
+    freqToMonths[(inst.couponFrequency || '').toLowerCase()] ||
+    tenorToMonths(inst.tranches && inst.tranches[0] && inst.tranches[0].interestComponents &&
+                  inst.tranches[0].interestComponents[0] && inst.tranches[0].interestComponents[0].terms &&
+                  inst.tranches[0].interestComponents[0].terms[0] && inst.tranches[0].interestComponents[0].terms[0].tenor) ||
+    tenorToMonths(inst.rfr && inst.rfr.tenor) ||
+    3;   // quarterly default
+  // Bullet/at-maturity flag — skip splitting entirely
+  if(String(inst.couponFrequency || '').toLowerCase() === 'at-maturity' ||
+     String(inst.couponFrequency || '').toLowerCase() === 'bullet') return journals;
+
+  // 2. Derive coupon payment dates from settle → maturity stepped by periodMonths.
+  //    Payment on last day of each period. E.g. settle 2026-01-15, quarterly →
+  //    2026-04-15, 2026-07-15, 2026-10-15, 2027-01-15, ... up to maturity.
+  const settleISO   = inst.settlementDate || schedule[0].date;
+  const maturityISO = inst.maturityDate || schedule[schedule.length - 1].date;
+  if(!settleISO || !maturityISO) return journals;
+  const paymentDates = [];
+  const start = new Date(settleISO + 'T00:00:00Z');
+  const mat   = new Date(maturityISO + 'T00:00:00Z');
+  let cursor = new Date(start);
+  cursor.setUTCMonth(cursor.getUTCMonth() + periodMonths);
+  while(cursor <= mat){
+    paymentDates.push(cursor.toISOString().slice(0,10));
+    cursor = new Date(cursor);
+    cursor.setUTCMonth(cursor.getUTCMonth() + periodMonths);
+  }
+  // Ensure the final period ends at maturity (in case settle+N*period doesn't line up)
+  const lastMaturityISO = mat.toISOString().slice(0,10);
+  if(!paymentDates.length || paymentDates[paymentDates.length - 1] !== lastMaturityISO){
+    paymentDates.push(lastMaturityISO);
+  }
+  // ALSO insert paydown / prepayment / mandatory-prepayment dates as period
+  // boundaries. When a loan closes early (e.g. covenant-triggered mandatory
+  // prepayment mid-quarter), the accrued interest since the last coupon MUST
+  // be settled on the close date, not silently rolled into a coupon that
+  // will never happen. Without this, matches the deriveNotices logic which
+  // dumps notices on the same events.
+  const eventDatesSet = new Set(paymentDates);
+  for(const r of schedule){
+    if(!r.date) continue;
+    const closeEvent = (+r.paydown || 0) > 0.01 ||
+                       (+r.prepayment || 0) > 0.01;
+    if(closeEvent && r.date > settleISO && r.date <= maturityISO){
+      eventDatesSet.add(r.date);
+    }
+  }
+  const allBoundaries = Array.from(eventDatesSet).sort();
+  // If we only got 1 period (shorter than one coupon period), don't split — the
+  // aggregated JE is already the right shape.
+  if(allBoundaries.length <= 1) return journals;
+  // Overwrite paymentDates with the merged, sorted list (coupon + event dates)
+  paymentDates.length = 0;
+  paymentDates.push.apply(paymentDates, allBoundaries);
+
+  // 3. Sum daily interest per period (from schedule row.dailyCash).
+  //    A row belongs to the period whose payment_date is the smallest one >= row.date.
+  const periodTotals = paymentDates.map(d => ({ end: d, sum: 0 }));
+  for(const r of schedule){
+    if(!r.date || !r.dailyCash) continue;
+    const rd = r.date;
+    let bucket = periodTotals.find(p => rd <= p.end);
+    if(!bucket) bucket = periodTotals[periodTotals.length - 1];   // trailing dust
+    bucket.sum += (+r.dailyCash || 0);
+  }
+  // Skip periods that had zero accrual (e.g. loan not yet drawn)
+  const activePeriods = periodTotals.filter(p => p.sum > 0.005);
+  if(!activePeriods.length) return journals;
+
+  // 4. Identify & remove the aggregated interest rows to be replaced.
+  //    Heuristic: aggregate means <=2 rows per interest type (one DR + one CR).
+  //    If we already have many rows per type, they're already per-period and
+  //    we shouldn't touch them. Match by transaction type — date might not
+  //    equal maturity (engine uses summary.periodEnd which can differ).
+  const AGG_INTEREST_TYPES = new Set([
+    'Interest Receivable',
+    'Income - Daily Accrued Interest',
+    'Interest Cash Receipt',
+    'Interest Receivable Clear'
+  ]);
+  const intCounts = {};
+  for(const j of journals){
+    if(AGG_INTEREST_TYPES.has(j.transactionType)){
+      intCounts[j.transactionType] = (intCounts[j.transactionType] || 0) + 1;
+    }
+  }
+  const looksAggregate = Object.values(intCounts).every(c => c <= 2);
+  if(!looksAggregate) return journals;  // already per-period
+  const kept = [];
+  const removedTemplate = { accrual: null, cash: null };
+  for(const j of journals){
+    if(AGG_INTEREST_TYPES.has(j.transactionType)){
+      if(j.transactionType === 'Interest Receivable' && !removedTemplate.accrual) removedTemplate.accrual = j;
+      if(j.transactionType === 'Interest Cash Receipt' && !removedTemplate.cash)  removedTemplate.cash = j;
+      continue;   // drop it
+    }
+    kept.push(j);
+  }
+  if(!removedTemplate.accrual && !removedTemplate.cash) return journals;
+
+  // 5. Emit per-period pairs. Reuse the template's shape (legalEntity, deal,
+  //    account codes, etc.) — just override amount + effectiveDate + memo.
+  const newRows = [];
+  let jeIndex = Math.max(0, ...kept.map(r => +r.jeIndex || 0)) + 1;
+  const clone = (tmpl, overrides) => Object.assign({}, tmpl, overrides);
+  for(const p of activePeriods){
+    const memo = 'Interest accrual · period ending ' + p.end;
+    if(removedTemplate.accrual){
+      // Accrual pair: DR Interest Receivable / CR Income - Daily Accrued Interest
+      newRows.push(clone(removedTemplate.accrual, {
+        jeIndex, txIndex: 2,
+        glDate: p.end, effectiveDate: p.end,
+        transactionType: 'Interest Receivable',
+        originalAmount: p.sum, amountLE: p.sum, amountLocal: p.sum,
+        isDebit: true, transactionComments: memo
+      }));
+      newRows.push(clone(removedTemplate.accrual, {
+        jeIndex, txIndex: 1,
+        glDate: p.end, effectiveDate: p.end,
+        transactionType: 'Income - Daily Accrued Interest',
+        account: '23000',
+        originalAmount: p.sum, amountLE: p.sum, amountLocal: p.sum,
+        isDebit: false, transactionComments: memo
+      }));
+      jeIndex++;
+    }
+    if(removedTemplate.cash){
+      // Settlement pair: DR Interest Cash Receipt / CR Interest Receivable Clear
+      newRows.push(clone(removedTemplate.cash, {
+        jeIndex, txIndex: 2,
+        glDate: p.end, effectiveDate: p.end,
+        transactionType: 'Interest Cash Receipt',
+        originalAmount: p.sum, amountLE: p.sum, amountLocal: p.sum,
+        isDebit: true, transactionComments: 'Interest cash settlement · period ending ' + p.end
+      }));
+      newRows.push(clone(removedTemplate.cash, {
+        jeIndex, txIndex: 1,
+        glDate: p.end, effectiveDate: p.end,
+        transactionType: 'Interest Receivable Clear',
+        account: '23000',
+        originalAmount: p.sum, amountLE: p.sum, amountLocal: p.sum,
+        isDebit: false, transactionComments: 'Interest cash settlement · period ending ' + p.end
+      }));
+      jeIndex++;
+    }
+  }
+  return kept.concat(newRows);
+}
+
+if(typeof window !== 'undefined') window.splitInterestJEsByCouponPeriod = splitInterestJEsByCouponPeriod;
 
 

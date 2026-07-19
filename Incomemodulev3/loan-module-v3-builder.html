@@ -6,6 +6,8 @@
 <title>PCS Loan Module · V3 (Supabase Backend)</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons|Material+Icons+Outlined" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono&display=swap" rel="stylesheet"/>
 <style>
@@ -463,6 +465,23 @@
       </div>
     </div>
     <div class="ml-auto flex items-center gap-2 flex-wrap">
+      <!-- Portfolio analytics — cross-loan yield/duration/DV01 dashboard -->
+      <button onclick="window.openPortfolioModal && window.openPortfolioModal()"
+              class="chip"
+              style="font-size:11px; cursor:pointer; background:linear-gradient(135deg,#F0F9FF 0%,#EEF2FF 100%); color:#3730A3; border:1px solid #C7D2FE; padding:3px 9px; display:inline-flex; align-items:center; gap:5px;"
+              title="Portfolio analytics — cross-loan yield, duration, WAL, DV01, concentration">
+        <span class="material-icons-outlined" style="font-size:13px;">insights</span>
+        Portfolio
+      </button>
+      <!-- Loan Notices Inbox — Tier 1 #3. Badge shows count of notices due in next 7 days. -->
+      <button id="notices-header-btn" onclick="window.openNoticesModal && window.openNoticesModal()"
+              class="chip"
+              style="font-size:11px; cursor:pointer; background:linear-gradient(135deg,#FFF7ED 0%,#FEF3C7 100%); color:#92400E; border:1px solid #FCD34D; padding:3px 9px; display:inline-flex; align-items:center; gap:5px;"
+              title="Loan agent notices — drawdown, interest, principal, rate reset, fees, waivers, defaults">
+        <span class="material-icons-outlined" style="font-size:13px;">mark_email_unread</span>
+        Notices
+        <span id="notices-badge" style="display:none; background:#DC2626; color:white; padding:0 5px; border-radius:9px; font-size:10px; font-weight:700; min-width:15px; text-align:center;">0</span>
+      </button>
       <!-- User identity chip — shows sign-in state. Click to open sign-in / out. -->
       <button id="auth-identity-chip"
               onclick="window.openAuthModal && window.openAuthModal()"
@@ -3025,6 +3044,483 @@
 <!-- ─── Active Deal picker modal — opens from the header "Load Active Deal"
      button. Renders every preset as a card with framework chip, team,
      complexity (★), tag, and a Load button. Replaces the inline dropdown. ─── -->
+<!-- ═══ Portfolio Analytics modal (Tier 1 #1) ═══
+     Cross-loan yield/duration/WAL/DV01/concentration dashboard.
+     Reads every DB-saved deal the user can see, runs each through the
+     engine to derive a schedule, then feeds LMA.deriveLoanMetrics(). -->
+<div id="portfolio-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closePortfolioModal && window.closePortfolioModal()"></div>
+  <div class="json-modal-pn" style="width:min(1280px,97vw); max-height:94vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#4F46E5">insights</span>
+          Portfolio Analytics
+        </div>
+        <div class="text-[11px] text-gray-500">Cross-loan yield, duration, WAL, DV01 and concentration for every deal you can access.</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <label style="font-size:11px; color:#4B5563;">Benchmark
+          <input id="portfolio-benchmark" type="number" step="0.05" value="4.50" style="width:70px; padding:3px 6px; border:1px solid #d1d5db; border-radius:4px; font-size:11px; margin-left:4px;"/>%
+        </label>
+        <button onclick="window.refreshPortfolio && window.refreshPortfolio()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]" title="Recompute portfolio metrics">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Refresh
+        </button>
+        <button onclick="window.exportPortfolioCsv && window.exportPortfolioCsv()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]" title="Download analytics as CSV">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> CSV
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closePortfolioModal && window.closePortfolioModal()" title="Close">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" id="portfolio-body" style="padding:14px 18px; font-size:12px;">
+      <div id="portfolio-loading" style="text-align:center; padding:40px; color:#6B7280;">
+        <div style="font-size:28px; margin-bottom:8px;">⏳</div>
+        Loading deals and running analytics…
+      </div>
+      <div id="portfolio-content" style="display:none;">
+        <!-- KPI cards row -->
+        <div id="portfolio-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:14px;"></div>
+        <!-- Concentration + maturity ladder side-by-side -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+          <div>
+            <div style="font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:6px;">Concentration</div>
+            <div id="portfolio-concentration"></div>
+          </div>
+          <div>
+            <div style="font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:6px;">Maturity Ladder</div>
+            <div id="portfolio-maturity"></div>
+          </div>
+        </div>
+        <!-- Per-loan table -->
+        <div style="font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:6px;">Per-Loan Metrics</div>
+        <div style="max-height:44vh; overflow:auto; border:1px solid #E5E7EB; border-radius:6px;">
+          <table id="portfolio-table" style="width:100%; border-collapse:collapse; font-size:11px;">
+            <thead style="position:sticky; top:0; background:#F3F4F6; z-index:1;">
+              <tr>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Deal</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">FW</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">CCY</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;">Notional</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;" title="Current all-in coupon">Coupon %</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;" title="Spread over benchmark, bps">Spread bps</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;" title="Yield to Maturity">YTM %</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;" title="Yield to Call">YTC %</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;" title="Yield to Worst">YTW %</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;" title="Weighted Avg Life (years)">WAL</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;" title="Modified Duration">Mod Dur</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;" title="Dollar Value of 1bp move">DV01</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Maturity</th>
+              </tr>
+            </thead>
+            <tbody id="portfolio-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="portfolio-error" style="display:none; padding:20px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D;"></div>
+    </div>
+    <div class="json-modal-f">
+      <span id="portfolio-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
+      <button class="mat-btn outline" onclick="window.closePortfolioModal && window.closePortfolioModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Loan Agent Notices Inbox (Tier 1 #3) ═══ -->
+<div id="notices-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeNoticesModal && window.closeNoticesModal()"></div>
+  <div class="json-modal-pn" style="width:min(1280px,97vw); max-height:94vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#D97706">mark_email_unread</span>
+          Loan Agent Notices
+        </div>
+        <div class="text-[11px] text-gray-500">Drawdown, interest, principal, rate reset, fee, and manual notices for every loan you can access.</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="notices-filter-deal" onchange="window.refreshNotices && window.refreshNotices()"
+                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by loan">
+          <option value="">All deals</option>
+        </select>
+        <select id="notices-filter-type" onchange="window.refreshNotices && window.refreshNotices()"
+                class="border border-gray-300 rounded px-2 py-1 text-[11px]">
+          <option value="">All types</option>
+          <option value="drawdown">Drawdown</option>
+          <option value="interest">Interest</option>
+          <option value="repayment">Repayment</option>
+          <option value="prepayment">Prepayment</option>
+          <option value="rate_reset">Rate reset</option>
+          <option value="fee">Fee</option>
+          <option value="waiver">Waiver</option>
+          <option value="amendment">Amendment</option>
+          <option value="default">Default</option>
+          <option value="other">Other</option>
+        </select>
+        <select id="notices-filter-status" onchange="window.refreshNotices && window.refreshNotices()"
+                class="border border-gray-300 rounded px-2 py-1 text-[11px]">
+          <option value="active" selected>Active (pending / sent / ack)</option>
+          <option value="pending">Pending</option>
+          <option value="sent">Sent</option>
+          <option value="acknowledged">Acknowledged</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="">All statuses</option>
+        </select>
+        <select id="notices-filter-horizon" onchange="window.refreshNotices && window.refreshNotices()"
+                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Time window">
+          <option value="30" selected>Next 30 days</option>
+          <option value="7">Next 7 days</option>
+          <option value="90">Next 90 days</option>
+          <option value="365">Next year</option>
+          <option value="all">All time</option>
+        </select>
+        <button onclick="window.deriveAllNotices && window.deriveAllNotices()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]" title="Regenerate notices from engine schedules for every deal">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Derive
+        </button>
+        <button onclick="window.exportNoticesCsv && window.exportNoticesCsv()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]" title="Download filtered notices as CSV">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> CSV
+        </button>
+        <button onclick="window.openManualNoticeForm && window.openManualNoticeForm()"
+                class="mat-btn !py-1 !px-2 text-[11px]"
+                style="background:#D97706; color:white; border-color:#D97706;" title="Add a manual notice (waiver, amendment, default, other)">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">add</span> Manual
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeNoticesModal && window.closeNoticesModal()" title="Close">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" id="notices-body" style="padding:14px 18px; font-size:12px;">
+      <div id="notices-loading" style="text-align:center; padding:40px; color:#6B7280;">
+        <div style="font-size:28px; margin-bottom:8px;">⏳</div>
+        Loading notices…
+      </div>
+      <div id="notices-content" style="display:none;">
+        <!-- KPI summary strip -->
+        <div id="notices-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:8px; margin-bottom:14px;"></div>
+        <!-- Notices table -->
+        <div style="max-height:64vh; overflow:auto; border:1px solid #E5E7EB; border-radius:6px;">
+          <table id="notices-table" style="width:100%; border-collapse:collapse; font-size:11px;">
+            <thead style="position:sticky; top:0; background:#F3F4F6; z-index:1;">
+              <tr>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Effective</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Deal</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Type</th>
+                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;">Amount</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Reference</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Status</th>
+                <th style="padding:6px 8px; text-align:center; border-bottom:1px solid #E5E7EB;" title="Reconciliation with journal entries">Rec</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="notices-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="notices-empty" style="display:none; text-align:center; padding:40px; color:#6B7280;">
+        <div style="font-size:28px; margin-bottom:8px;">📭</div>
+        <div style="font-weight:600; margin-bottom:4px;">No notices match your filters</div>
+        <div style="font-size:11px;">Try broadening the date horizon, or click <b>Derive</b> to generate notices from your loan schedules.</div>
+      </div>
+      <div id="notices-error" style="display:none; padding:16px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D;"></div>
+    </div>
+    <div class="json-modal-f">
+      <span id="notices-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
+      <button class="mat-btn outline" onclick="window.closeNoticesModal && window.closeNoticesModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Notice detail modal — opened when a row in the inbox is clicked. Shows
+     full breakdown, timeline of status transitions, related deal + run. -->
+<div id="notice-detail-modal" class="json-modal" style="display:none; z-index:10001;">
+  <div class="json-modal-bd" onclick="window.closeNoticeDetail && window.closeNoticeDetail()"></div>
+  <div class="json-modal-pn" style="width:min(680px,94vw); max-height:92vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span id="nd-icon" class="material-icons-outlined text-[16px]" style="color:#D97706">mark_email_read</span>
+          <span id="nd-title">Notice detail</span>
+        </div>
+        <div id="nd-subtitle" class="text-[11px] text-gray-500"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="window.previewNoticePdf && window.previewNoticePdf()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]"
+                title="Preview this notice as a formal PDF (download from within the preview)">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">picture_as_pdf</span> Preview PDF
+        </button>
+        <button onclick="window.openRecipientsForNotice && window.openRecipientsForNotice()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]"
+                title="Manage recipients for this deal">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">contacts</span> Recipients
+        </button>
+        <button id="nd-delete" onclick="window.deleteCurrentNotice && window.deleteCurrentNotice()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]"
+                style="color:#DC2626; border-color:#FCA5A5;" title="Delete this notice">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">delete</span> Delete
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeNoticeDetail && window.closeNoticeDetail()">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" style="padding:16px 20px; font-size:12px;" id="nd-body">
+      <!-- Rendered dynamically -->
+    </div>
+    <div class="json-modal-f">
+      <span id="nd-footer-audit" class="text-[10.5px] text-gray-500 mr-auto"></span>
+      <button class="mat-btn outline" onclick="window.closeNoticeDetail && window.closeNoticeDetail()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manual notice form (nested modal) -->
+<div id="manual-notice-modal" class="json-modal" style="display:none; z-index:10001;">
+  <div class="json-modal-bd" onclick="window.closeManualNoticeForm && window.closeManualNoticeForm()"></div>
+  <div class="json-modal-pn" style="width:min(560px,94vw); max-height:90vh;">
+    <div class="json-modal-h">
+      <div class="font-semibold text-[14px] flex items-center gap-2">
+        <span class="material-icons-outlined text-[16px]" style="color:#D97706">edit_note</span>
+        Add Manual Notice
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeManualNoticeForm && window.closeManualNoticeForm()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:18px; font-size:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <label style="grid-column:1 / -1;">
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Deal</div>
+          <select id="mn-deal" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;"></select>
+        </label>
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Type</div>
+          <select id="mn-type" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;">
+            <option value="waiver">Waiver</option>
+            <option value="amendment">Amendment</option>
+            <option value="default">Default</option>
+            <option value="drawdown">Drawdown</option>
+            <option value="repayment">Repayment</option>
+            <option value="prepayment">Prepayment</option>
+            <option value="rate_reset">Rate reset</option>
+            <option value="fee">Fee</option>
+            <option value="interest">Interest</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Effective date</div>
+          <input id="mn-date" type="date" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;"/>
+        </label>
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Amount (optional)</div>
+          <input id="mn-amount" type="number" step="0.01" placeholder="e.g. 250000" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;"/>
+        </label>
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Reference</div>
+          <input id="mn-ref" type="text" placeholder="e.g. WVR-2026-001" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;"/>
+        </label>
+        <label style="grid-column:1 / -1;">
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Notes</div>
+          <textarea id="mn-notes" rows="3" placeholder="Free-text context: reason for waiver, amendment details, default rationale, etc." style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; resize:vertical;"></textarea>
+        </label>
+      </div>
+      <div id="mn-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; font-size:11.5px; color:#7F1D1D;"></div>
+    </div>
+    <div class="json-modal-f">
+      <button class="mat-btn outline" onclick="window.closeManualNoticeForm && window.closeManualNoticeForm()">Cancel</button>
+      <button onclick="window.submitManualNotice && window.submitManualNotice()"
+              class="mat-btn" style="background:#D97706; color:white; border-color:#D97706;">
+        <span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">save</span> Save notice
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Reconciliation Detail modal (Tier 1 #3 Phase 2) ═══
+     Opens when a Rec badge is clicked. Shows the notice amount, the matched
+     JE rows with all their line-item detail, the difference, and the verdict. -->
+<div id="recon-detail-modal" class="json-modal" style="display:none; z-index:10001;">
+  <div class="json-modal-bd" onclick="window.closeReconDetail && window.closeReconDetail()"></div>
+  <div class="json-modal-pn" style="width:min(920px,96vw); max-height:92vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span id="rd-icon" class="material-icons-outlined text-[18px]" style="color:#059669">rule</span>
+          Reconciliation Detail
+        </div>
+        <div id="rd-subtitle" class="text-[11px] text-gray-500"></div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeReconDetail && window.closeReconDetail()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:14px 20px; font-size:12px;" id="rd-body">
+      <!-- Rendered dynamically -->
+    </div>
+    <div class="json-modal-f">
+      <span id="rd-footer-status" class="text-[11px] mr-auto"></span>
+      <button class="mat-btn outline" onclick="window.closeReconDetail && window.closeReconDetail()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PDF preview modal (Tier 1 #3 Phase 2) ═══
+     Embeds the generated notice PDF via iframe (blob URL) so the user can
+     see exactly what will be downloaded / emailed. Actions: Download, Close. -->
+<div id="pdf-preview-modal" class="json-modal" style="display:none; z-index:10001;">
+  <div class="json-modal-bd" onclick="window.closePdfPreview && window.closePdfPreview()"></div>
+  <div class="json-modal-pn" style="width:min(920px,96vw); height:min(92vh, 1100px); max-height:92vh; display:flex; flex-direction:column;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#DC2626">picture_as_pdf</span>
+          Notice PDF Preview
+        </div>
+        <div id="pdf-preview-sub" class="text-[11px] text-gray-500"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="window.downloadCurrentPdfBlob && window.downloadCurrentPdfBlob()"
+                class="mat-btn !py-1 !px-2 text-[11px]"
+                style="background:#DC2626; color:white; border-color:#DC2626;"
+                title="Download this PDF to your computer">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> Download
+        </button>
+        <button onclick="window.printCurrentPdf && window.printCurrentPdf()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]"
+                title="Open the browser print dialog for this PDF">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">print</span> Print
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closePdfPreview && window.closePdfPreview()">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" style="padding:0; flex:1; overflow:hidden; background:#374151;">
+      <iframe id="pdf-preview-frame" style="width:100%; height:100%; border:none; display:block; background:#374151;" title="Notice PDF preview"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Recipients management modal (Tier 1 #3 Phase 2) ═══ -->
+<div id="recipients-modal" class="json-modal" style="display:none; z-index:10002;">
+  <div class="json-modal-bd" onclick="window.closeRecipientsModal && window.closeRecipientsModal()"></div>
+  <div class="json-modal-pn" style="width:min(760px,94vw); max-height:92vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[16px]" style="color:#4F46E5">contacts</span>
+          Recipients
+        </div>
+        <div id="rc-subtitle" class="text-[11px] text-gray-500"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="window.openRecipientForm && window.openRecipientForm()"
+                class="mat-btn !py-1 !px-2 text-[11px]"
+                style="background:#4F46E5; color:white; border-color:#4F46E5;">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">person_add</span> Add contact
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeRecipientsModal && window.closeRecipientsModal()">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" style="padding:14px 18px; font-size:12px;" id="rc-body">
+      <div id="rc-empty" style="display:none; padding:30px 20px; text-align:center; color:#6B7280;">
+        <div style="font-size:26px; margin-bottom:6px;">📇</div>
+        <div style="font-weight:600; margin-bottom:4px;">No contacts for this deal yet</div>
+        <div style="font-size:11px;">Add lender contacts, agent bank operations, and legal counsel so notices go to the right people.</div>
+      </div>
+      <table id="rc-table" style="width:100%; border-collapse:collapse; font-size:11.5px;">
+        <thead style="background:#F3F4F6;">
+          <tr>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Name</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Email</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Role</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Org</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;"></th>
+          </tr>
+        </thead>
+        <tbody id="rc-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Recipient add/edit form (nested inside recipients modal) -->
+<div id="recipient-form-modal" class="json-modal" style="display:none; z-index:10003;">
+  <div class="json-modal-bd" onclick="window.closeRecipientForm && window.closeRecipientForm()"></div>
+  <div class="json-modal-pn" style="width:min(500px,94vw); max-height:88vh;">
+    <div class="json-modal-h">
+      <div class="font-semibold text-[14px] flex items-center gap-2">
+        <span class="material-icons-outlined text-[16px]" style="color:#4F46E5">person_add</span>
+        <span id="rf-title">Add contact</span>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeRecipientForm && window.closeRecipientForm()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:18px; font-size:12px;">
+      <input type="hidden" id="rf-id"/>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Name *</div>
+          <input id="rf-name" type="text" placeholder="Jane Smith" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;"/>
+        </label>
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Email *</div>
+          <input id="rf-email" type="email" placeholder="jane.smith@lender.com" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;"/>
+        </label>
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Role</div>
+          <select id="rf-role" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;">
+            <option value="lender">Lender</option>
+            <option value="agent_bank">Agent bank</option>
+            <option value="admin_agent">Administrative agent</option>
+            <option value="loan_officer">Loan officer</option>
+            <option value="borrower">Borrower</option>
+            <option value="trustee">Trustee</option>
+            <option value="legal_counsel">Legal counsel</option>
+            <option value="operations">Operations</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Organization</div>
+          <input id="rf-org" type="text" placeholder="Acme Capital Partners" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;"/>
+        </label>
+        <label>
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Phone</div>
+          <input id="rf-phone" type="tel" placeholder="+1 415 555 0100" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px;"/>
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; padding-top:20px;">
+          <input id="rf-primary" type="checkbox"/>
+          <span style="font-size:11.5px; color:#4B5563;">Primary contact for this deal</span>
+        </label>
+        <label style="grid-column:1 / -1;">
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:3px;">Notes</div>
+          <textarea id="rf-notes" rows="2" placeholder="e.g. Prefers PDF only, cc: ops@lender.com" style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; resize:vertical;"></textarea>
+        </label>
+      </div>
+      <div id="rf-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; font-size:11.5px; color:#7F1D1D;"></div>
+    </div>
+    <div class="json-modal-f">
+      <button class="mat-btn outline" onclick="window.closeRecipientForm && window.closeRecipientForm()">Cancel</button>
+      <button onclick="window.submitRecipientForm && window.submitRecipientForm()"
+              class="mat-btn primary" style="background:#4F46E5; color:white; border-color:#4F46E5;">
+        <span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">save</span> Save contact
+      </button>
+    </div>
+  </div>
+</div>
+
 <div id="active-deal-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" data-close-active-deal="1"></div>
   <div class="json-modal-pn" style="width:min(1080px,96vw); max-height:90vh;">
@@ -3139,6 +3635,7 @@
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
 <script src="loan-module-engine.js"></script>
 <script src="loan-module-instruments.js"></script>
+<script src="loan-module-analytics.js"></script>
 <script src="demo-assistant-kb.js"></script>
 <script src="demo-assistant-system-prompt.js"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
@@ -3492,6 +3989,27 @@ window.SB = (function(){
       _stats.runsSaved++;
       updateStatusChip();
       console.log('[SB] saved accounting run', runId, '·', rows.length, 'JE rows');
+      // Auto-purge prior stale runs for the same deal so a re-run doesn't
+      // leave orphaned Draft/Calculated JEs behind (they'd contaminate
+      // reconciliation, Evidence Pack, dashboards). Preserves Approved and
+      // Posted runs — audit trail is sacred. Excludes the run we just wrote.
+      // Fire-and-forget: log-only on error, never fail the outer save.
+      try {
+        const { data: purged, error: purgeErr } = await _client
+          .from('accounting_runs')
+          .delete()
+          .eq('deal_id', dealId)
+          .in('status', ['Draft','Calculated','Cancelled','Error'])
+          .neq('id', runRow.id)
+          .select('id');
+        if(purgeErr){
+          console.warn('[SB] auto-purge stale runs failed (non-fatal):', purgeErr.message);
+        } else if(purged && purged.length){
+          console.log('[SB] auto-purged ' + purged.length + ' stale run(s) for deal (CASCADE removed their JEs)');
+        }
+      } catch(purgeThrew){
+        console.warn('[SB] auto-purge threw (non-fatal):', purgeThrew);
+      }
       return { ok:true, runId: runRow.run_id, runUuid: runRow.id, jeCount: rows.length, drTotal, crTotal, dealId };
     } catch(err) {
       console.error('[SB] saveAccountingRun failed:', err);
@@ -3515,6 +4033,190 @@ window.SB = (function(){
   //   covList  — array of enriched covenants (M.schedule.covenants)
   //   pSched   — inst.principalSchedule (for prepayment event lookup)
   // ------------------------------------------------------------
+  // ═══════════════════════════════════════════════════════════════════
+  // Loan Notices (Tier 1 #3) — CRUD + status transitions
+  // ═══════════════════════════════════════════════════════════════════
+  // Notices represent formal agent-bank ↔ lender communications for a loan.
+  // Auto-derived from the engine's schedule (drawdown/interest/paydown events)
+  // and augmented with manual entries (waivers, defaults, amendments).
+  // Status lifecycle: pending → sent → acknowledged → completed (or cancelled).
+
+  // Fetch notices for a set of deal IDs (or all if empty). Returns notices
+  // sorted by effective_date ascending. RLS filters by ownership.
+  async function fetchNotices(dealIds){
+    if(!_client || !_connected) return [];
+    try {
+      let q = _client.from('loan_notices').select('*').order('effective_date', { ascending: true });
+      if(Array.isArray(dealIds) && dealIds.length) q = q.in('deal_id', dealIds);
+      const { data, error } = await q;
+      if(error){ console.error('[SB] fetchNotices:', error); return []; }
+      return data || [];
+    } catch(err){ console.error('[SB] fetchNotices threw:', err); return []; }
+  }
+
+  // Upsert an auto-derived notice. The unique index on (deal_id, notice_type,
+  // effective_date, tranche_id, amount) prevents duplicates when the schedule
+  // is re-derived on refresh.
+  async function upsertNotice(notice){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!notice || !notice.deal_id || !notice.notice_type || !notice.effective_date){
+      return { ok:false, reason:'deal_id, notice_type, effective_date required' };
+    }
+    try {
+      const row = Object.assign({
+        notice_date: notice.notice_date || notice.effective_date,
+        status: 'pending',
+        is_auto_derived: true,
+        created_by: _currentUser ? _currentUser.id : null
+      }, notice);
+      const { data, error } = await _client
+        .from('loan_notices')
+        .upsert(row, { onConflict: 'deal_id,notice_type,effective_date,tranche_id,amount', ignoreDuplicates: false })
+        .select().single();
+      if(error){ console.error('[SB] upsertNotice:', error); return { ok:false, reason: error.message }; }
+      return { ok:true, notice: data };
+    } catch(err){ console.error('[SB] upsertNotice threw:', err); return { ok:false, reason: String(err) }; }
+  }
+
+  // Bulk insert of auto-derived notices — used by the notice-derivation loop
+  // when Portfolio or Notices modal is opened. Ignores duplicates (already-
+  // derived notices from previous runs).
+  async function bulkInsertNotices(notices){
+    if(!_client || !_connected) return { ok:false, reason:'not connected', inserted:0 };
+    if(!Array.isArray(notices) || !notices.length) return { ok:true, inserted:0 };
+    // Insert in batches of 200 to avoid oversized requests
+    const uid = _currentUser ? _currentUser.id : null;
+    const enriched = notices.map(n => Object.assign({
+      status: 'pending', is_auto_derived: true, created_by: uid,
+      notice_date: n.notice_date || n.effective_date
+    }, n));
+    let inserted = 0, failed = 0;
+    for(let i = 0; i < enriched.length; i += 200){
+      const slice = enriched.slice(i, i + 200);
+      const { data, error } = await _client
+        .from('loan_notices')
+        .upsert(slice, { onConflict: 'deal_id,notice_type,effective_date,tranche_id,amount', ignoreDuplicates: true })
+        .select('id');
+      if(error){
+        console.error('[SB] bulkInsertNotices batch', i, ':', error);
+        failed += slice.length;
+      } else {
+        inserted += (data || []).length;
+      }
+    }
+    return { ok: failed === 0, inserted, failed };
+  }
+
+  // Transition a notice's status. Records the timestamp + user for the audit trail.
+  async function updateNoticeStatus(noticeId, newStatus){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!noticeId) return { ok:false, reason:'noticeId required' };
+    const valid = ['pending','sent','acknowledged','completed','cancelled'];
+    if(!valid.includes(newStatus)) return { ok:false, reason:'invalid status ' + newStatus };
+    const uid = _currentUser ? _currentUser.id : null;
+    const nowIso = new Date().toISOString();
+    const patch = { status: newStatus };
+    if(newStatus === 'sent')         { patch.sent_at = nowIso; patch.sent_by = uid; }
+    if(newStatus === 'acknowledged') { patch.acknowledged_at = nowIso; patch.acknowledged_by = uid; }
+    if(newStatus === 'completed')    { patch.completed_at = nowIso; patch.completed_by = uid; }
+    const { data, error } = await _client
+      .from('loan_notices').update(patch).eq('id', noticeId).select().single();
+    if(error){ console.error('[SB] updateNoticeStatus:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, notice: data };
+  }
+
+  async function deleteNotice(noticeId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('loan_notices').delete().eq('id', noticeId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  // Wipe auto-derived notices for a specific deal — used before Re-derive so
+  // cadence/period changes take effect. Manual notices are preserved.
+  async function wipeAutoDerivedNoticesForDeal(dealId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!dealId) return { ok:false, reason:'dealId required' };
+    const { data, error } = await _client
+      .from('loan_notices')
+      .delete()
+      .eq('deal_id', dealId)
+      .eq('is_auto_derived', true)
+      .select('id');
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, deleted: (data || []).length };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Deal recipients (Tier 1 #3 Phase 2)
+  // ═══════════════════════════════════════════════════════════════════
+  async function fetchRecipients(dealId){
+    if(!_client || !_connected) return [];
+    if(!dealId) return [];
+    const { data, error } = await _client.from('deal_recipients')
+      .select('*').eq('deal_id', dealId).order('is_primary', { ascending: false }).order('name', { ascending: true });
+    if(error){ console.error('[SB] fetchRecipients:', error); return []; }
+    return data || [];
+  }
+  async function upsertRecipient(rec){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!rec || !rec.deal_id || !rec.name || !rec.email){
+      return { ok:false, reason:'deal_id, name, email required' };
+    }
+    const row = Object.assign({
+      role: 'lender', is_primary: false,
+      created_by: _currentUser ? _currentUser.id : null
+    }, rec);
+    const { data, error } = await _client.from('deal_recipients')
+      .upsert(row, { onConflict: 'id', ignoreDuplicates: false })
+      .select().single();
+    if(error){ console.error('[SB] upsertRecipient:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, recipient: data };
+  }
+  async function deleteRecipient(recipientId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('deal_recipients').delete().eq('id', recipientId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Journal entries fetch (for notice-to-JE reconciliation)
+  // ═══════════════════════════════════════════════════════════════════
+  // Fetch journal_entries within a date range for a specific deal. Used by
+  // the reconciliation engine to match notice amounts vs actual accounting.
+  async function fetchJournalEntriesForDeal(dealId, startDate, endDate){
+    if(!_client || !_connected || !dealId) return [];
+    try {
+      // Reconciliation always uses the MOST RECENT run overall — regardless of
+      // status. Reason: the whole point of reconciliation is "does my ledger
+      // agree with my notices RIGHT NOW". A stale Posted run may be older than
+      // a fresh Draft with engine improvements (per-period splitter, bug fixes,
+      // etc.) — the newer run is more accurate.
+      //
+      // If you want to lock a specific run as the "book of record", re-run
+      // accounting and take it through the Approval → Post workflow. That
+      // becomes the latest AND highest-status, so it wins on both axes.
+      const { data: runs, error: runErr } = await _client
+        .from('accounting_runs')
+        .select('id, run_at, status')
+        .eq('deal_id', dealId)
+        .order('run_at', { ascending: false })
+        .limit(1);
+      if(runErr){ console.error('[SB] fetchJournalEntriesForDeal (runs):', runErr); return []; }
+      if(!runs || !runs.length) return [];
+      const chosen = runs[0];
+      let jeQ = _client.from('journal_entries')
+        .select('id, run_id, effective_date, gl_date, transaction_type, account_code, is_debit, amount_le, amount_original, transaction_comments')
+        .eq('run_id', chosen.id);
+      if(startDate) jeQ = jeQ.gte('effective_date', startDate);
+      if(endDate)   jeQ = jeQ.lte('effective_date', endDate);
+      const { data: jes, error: jeErr } = await jeQ;
+      if(jeErr){ console.error('[SB] fetchJournalEntriesForDeal (jes):', jeErr); return []; }
+      return jes || [];
+    } catch(err){ console.error('[SB] fetchJournalEntriesForDeal threw:', err); return []; }
+  }
+
   async function syncBreachLog(dealId, covList, pSched){
     if(!_client || !_connected) return { ok:false, reason:'not connected' };
     if(!dealId || !Array.isArray(covList) || !covList.length){
@@ -4914,6 +5616,11 @@ window.SB = (function(){
 
   return {
     init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals, syncBreachLog,
+    // Loan agent notices (Tier 1 #3)
+    fetchNotices, upsertNotice, bulkInsertNotices, updateNoticeStatus, deleteNotice, wipeAutoDerivedNoticesForDeal,
+    // Notice Phase 2 — recipients + reconciliation
+    fetchRecipients, upsertRecipient, deleteRecipient,
+    fetchJournalEntriesForDeal,
     // Approval workflow (#231)
     getRun, approveRun, postRun, reopenRun,
     // Auth
@@ -7654,6 +8361,28 @@ function handleBuilderSaveDBClick(){
       });
       console.log('[V3] Deal saved:', res);
       if(window.B && window.B.deal && res.dealCode){ window.B.deal.dealId = res.dealCode; }
+      // Notices auto-derivation (Tier 1 #3) — refresh PRESETS then derive
+      // notices for just this deal so the inbox stays in sync without a manual
+      // Derive. Fire-and-forget so save completion isn't blocked by notice work.
+      if(res.dealId && typeof window.deriveNoticesForDeal === 'function'){
+        (async () => {
+          try {
+            if(window.SB && window.SB.fetchUserDeals){
+              const saved = await window.SB.fetchUserDeals();
+              if(Array.isArray(saved) && Array.isArray(window.PRESETS)){
+                for(let i = window.PRESETS.length - 1; i >= 0; i--){
+                  if(window.PRESETS[i] && window.PRESETS[i].source === 'db') window.PRESETS.splice(i, 1);
+                }
+                if(saved.length) window.PRESETS.unshift.apply(window.PRESETS, saved);
+              }
+            }
+            const dRes = await window.deriveNoticesForDeal(res.dealId);
+            if(dRes && dRes.ok){
+              console.log('[V3] Notices auto-derived for saved deal — ' + (dRes.derived || 0) + ' derived, ' + (dRes.inserted || 0) + ' new');
+            }
+          } catch(err){ console.warn('[V3] Notice auto-derive after save failed', err); }
+        })();
+      }
       // V3 — Stamp B._presetKey so AutoSave engages from this point on without
       // requiring a page reload (autosave only fires when the deal is in the DB,
       // identified by the 'db-' prefix on the preset key).
@@ -9966,6 +10695,25 @@ function runAccountingImpl(){
   // effectiveDate). Filled value applies the same close date to every row.
   const glPostDate = $('opt-gl-date')?.value || null;
   M.acctJournals = generateDIU(inst, M.summary, { glDate: glPostDate });
+  // Post-process: split the aggregated interest JE pair (which the base
+  // engine emits once at maturity) into per-coupon-period pairs. This gives
+  // Notices Rec column something to match against, and matches real-world
+  // agent-bank behavior where interest posts every quarter (or per the deal's
+  // coupon frequency). Non-interest JEs pass through untouched.
+  if(typeof splitInterestJEsByCouponPeriod === 'function' && Array.isArray(M.schedule)){
+    try {
+      const before = M.acctJournals.length;
+      const beforeInterest = M.acctJournals.filter(j => /Interest Receivable|Interest Cash Receipt|Income - Daily Accrued Interest|Interest Receivable Clear/.test(j.transactionType || '')).length;
+      M.acctJournals = splitInterestJEsByCouponPeriod(M.acctJournals, inst, M.schedule);
+      const after = M.acctJournals.length;
+      const afterInterest = M.acctJournals.filter(j => /Interest Receivable|Interest Cash Receipt|Income - Daily Accrued Interest|Interest Receivable Clear/.test(j.transactionType || '')).length;
+      console.log('[engine] splitInterestJEsByCouponPeriod: JEs ' + before + '→' + after + ' · interest rows ' + beforeInterest + '→' + afterInterest + ' · couponFreq=' + (inst.couponFrequency || 'n/a') + ' · tenor=' + ((inst.tranches && inst.tranches[0] && inst.tranches[0].interestComponents && inst.tranches[0].interestComponents[0] && inst.tranches[0].interestComponents[0].terms && inst.tranches[0].interestComponents[0].terms[0] && inst.tranches[0].interestComponents[0].terms[0].tenor) || 'n/a'));
+    } catch(err){
+      console.warn('[engine] splitInterestJEsByCouponPeriod threw (kept aggregated JEs):', err);
+    }
+  } else {
+    console.log('[engine] splitInterestJEsByCouponPeriod skipped — fn=' + (typeof splitInterestJEsByCouponPeriod) + ' schedule=' + (Array.isArray(M.schedule) ? M.schedule.length + ' rows' : 'missing'));
+  }
   // ─── Participation auto-scale ───
   // Accounting JEs MUST reflect the lender's actual share of the syndicate.
   // If the Builder is showing Total Syndication amounts (B._builderScale = 1.0)
@@ -10759,6 +11507,1554 @@ window.bulkImportBack = function(){
 
 // Download a filled-in Excel template with headers, 2 sample rows, and a
 // Reference sheet documenting enum values.
+// ═════════════════════════════════════════════════════════════════════
+// Portfolio Analytics UI (Tier 1 #1)
+// ═════════════════════════════════════════════════════════════════════
+// Cross-loan yield/duration/DV01/concentration report.
+// Sources data from window.PRESETS (which includes DB-saved deals merged
+// by fetchUserDeals) + local INSTRUMENTS. For each loan we run the
+// engine to build a schedule, then feed it to LMA.deriveLoanMetrics.
+window._portfolioLoans = [];  // { inst, metrics }
+
+window.openPortfolioModal = function(){
+  const el = document.getElementById('portfolio-modal');
+  if(!el){ console.error('[portfolio] modal element not found'); return; }
+  el.style.display = 'flex';
+  window.refreshPortfolio();
+};
+window.closePortfolioModal = function(){
+  const el = document.getElementById('portfolio-modal');
+  if(el) el.style.display = 'none';
+};
+
+// Convert a Builder Definition (produced by p.build()) into a flat Instrument
+// (the shape buildSchedule expects). We do this by temporarily swapping the
+// global B object with the preset's definition, running builderToInstrument(),
+// and restoring B afterwards. This reuses the exact same converter used when
+// a user manually loads a deal via the Builder — battle-tested, single source
+// of truth. Safe: always restores B in a finally block.
+function _portfolioBuilderDefToInst(def){
+  if(!def) return null;
+  // Already flat? (shouldn't happen for DB deals, but supports legacy presets)
+  if(def.settlementDate && def.maturityDate && def.notional != null) return def;
+  if(typeof window.builderToInstrument !== 'function' || !window.B) return null;
+  // window.B is a CONST inside the Builder IIFE. Both window.B and the
+  // closure's local B point to the SAME object, so we can't reassign
+  // window.B (the closure won't see it) — we MUST mutate its properties.
+  // Snapshot each field, overwrite, run converter, restore.
+  const B = window.B;
+  const snapshot = {
+    deal: B.deal, facility: B.facility, tranches: B.tranches, fees: B.fees,
+    aasbExtras: B.aasbExtras, treatmentOverrides: B.treatmentOverrides,
+    modificationEvents: B.modificationEvents, defaultEvents: B.defaultEvents,
+    prepaymentPenaltySchedule: B.prepaymentPenaltySchedule,
+    covenants: B.covenants, lifecycleEvents: B.lifecycleEvents,
+    _participationPct: B._participationPct, _builderScale: B._builderScale, _viewMode: B._viewMode
+  };
+  try {
+    // Overwrite properties in place — builderToInstrument reads B.deal, B.tranches, etc.
+    B.deal      = def.deal || {};
+    B.facility  = def.facility || {};
+    B.tranches  = Array.isArray(def.tranches)  ? def.tranches  : [];
+    B.fees      = Array.isArray(def.fees)      ? def.fees      : [];
+    B.aasbExtras = def.aasbExtras || {};
+    B.treatmentOverrides       = def.treatmentOverrides || {};
+    B.modificationEvents       = Array.isArray(def.modificationEvents) ? def.modificationEvents : [];
+    B.defaultEvents            = Array.isArray(def.defaultEvents)      ? def.defaultEvents      : [];
+    B.prepaymentPenaltySchedule = Array.isArray(def.prepaymentPenaltySchedule) ? def.prepaymentPenaltySchedule : [];
+    B.covenants                = Array.isArray(def.covenants)          ? def.covenants          : [];
+    B.lifecycleEvents          = Array.isArray(def.lifecycleEvents)    ? def.lifecycleEvents    : [];
+    // Optional participation metadata
+    if(def._participationPct != null) B._participationPct = def._participationPct;
+    if(def._builderScale     != null) B._builderScale     = def._builderScale;
+    if(def._viewMode         != null) B._viewMode         = def._viewMode;
+    return window.builderToInstrument();
+  } catch(err){
+    console.warn('[portfolio] builderToInstrument threw for', def.deal && def.deal.name, err);
+    return null;
+  } finally {
+    // Restore every field so we don't corrupt the currently-loaded deal
+    for(const k of Object.keys(snapshot)) B[k] = snapshot[k];
+  }
+}
+
+// Build a schedule for a Builder-Def preset. Wraps the def→inst conversion
+// AND the engine call. Returns [] on any failure.
+function _portfolioBuildSchedule(def){
+  try {
+    if(typeof buildSchedule !== 'function') return [];
+    const inst = _portfolioBuilderDefToInst(def);
+    if(!inst) return [];
+    return buildSchedule(inst) || [];
+  } catch(err){
+    console.warn('[portfolio] buildSchedule failed for', def && (def.deal && def.deal.name || def.id), err);
+    return [];
+  }
+}
+
+window.refreshPortfolio = async function(){
+  const loading = document.getElementById('portfolio-loading');
+  const content = document.getElementById('portfolio-content');
+  const errBox  = document.getElementById('portfolio-error');
+  loading.style.display = ''; content.style.display = 'none'; errBox.style.display = 'none';
+  const benchmark = parseFloat((document.getElementById('portfolio-benchmark') || {}).value) || 4.50;
+  // Small delay so the loading indicator paints
+  await new Promise(r => setTimeout(r, 50));
+  try {
+    if(typeof LMA === 'undefined'){ throw new Error('Analytics library (LMA) not loaded'); }
+    // Source of loans: window.PRESETS (built via fetchUserDeals + local presets)
+    const presets = Array.isArray(window.PRESETS) ? window.PRESETS : [];
+    if(!presets.length){
+      loading.style.display = 'none';
+      errBox.style.display = '';
+      errBox.innerHTML = '<b>No deals to analyze.</b> Load or save at least one deal first (Load Active Deal → pick one → Save to DB).';
+      return;
+    }
+    // Build instruments + schedules + metrics
+    const loans = [];
+    let debugDumped = false, scheduleFailCount = 0;
+    for(const p of presets){
+      // p.build() returns the Builder Definition (nested {deal, facility, tranches,...})
+      let def;
+      try { def = (typeof p.build === 'function') ? p.build() : (p.instrument || p); }
+      catch(err){ console.warn('[portfolio] preset build failed for', p.key, err); continue; }
+      if(!def) continue;
+      // Convert Builder Def → flat Instrument via the shared converter, then run engine
+      const inst = _portfolioBuilderDefToInst(def) || def;   // fall back for legacy flat shape
+      const schedule = _portfolioBuildSchedule(def);
+      // Post-mortem: expose the first loan's inst + schedule on window for
+      // debugging via console (window._portfolioDebug). Not printed — the
+      // per-loan dump was noisy and is now proven working.
+      if(!debugDumped){
+        window._portfolioDebug = { firstPreset: p, firstDef: def, firstInst: inst, firstSchedule: schedule };
+        debugDumped = true;
+      }
+      if(!schedule || !schedule.length) scheduleFailCount++;
+      const metrics = LMA.deriveLoanMetrics(inst, schedule, { benchmarkRate: benchmark });
+      loans.push({ inst, metrics, presetKey: p.key || p.id });
+    }
+    // Compact one-line summary so we can spot regressions immediately.
+    if(scheduleFailCount > 0){
+      console.warn('[portfolio] ' + scheduleFailCount + '/' + presets.length + ' loans returned empty schedules');
+    } else {
+      console.log('[portfolio] all ' + presets.length + ' loans built schedules · ' + loans.filter(l => l.metrics && l.metrics.ytm != null).length + ' with computed YTM');
+    }
+    window._portfolioLoans = loans;
+    const portfolio = LMA.aggregatePortfolio(loans, { benchmarkRate: benchmark });
+    _portfolioRender(loans, portfolio);
+    loading.style.display = 'none';
+    content.style.display = '';
+  } catch(err){
+    console.error('[portfolio] refresh failed', err);
+    loading.style.display = 'none';
+    errBox.style.display = '';
+    errBox.innerHTML = '<b>Analytics failed:</b> ' + (err && err.message ? err.message : String(err));
+  }
+};
+
+function _portfolioRender(loans, agg){
+  // Diagnostic banner — surface how many loans produced valid metrics.
+  // "Valid" means we could compute a YTM (implies schedule build succeeded and
+  // future cashflows were extractable). If a lot failed, tell the user to
+  // click each deal in Load Active Deal → Run Accounting to prime the engine.
+  const withYtm = loans.filter(l => l.metrics && l.metrics.ytm != null).length;
+  const withoutYtm = loans.length - withYtm;
+  const diagWrap = document.getElementById('portfolio-diag') || (function(){
+    const d = document.createElement('div');
+    d.id = 'portfolio-diag';
+    d.style.cssText = 'margin-bottom:12px;';
+    const kpis = document.getElementById('portfolio-kpis');
+    kpis.parentNode.insertBefore(d, kpis);
+    return d;
+  })();
+  if(withoutYtm > 0){
+    const failRate = Math.round(withoutYtm / loans.length * 100);
+    const sample = loans.filter(l => l.metrics && l.metrics.error).slice(0,3).map(l => {
+      const dn = l.inst.deal || l.inst.label || l.presetKey || l.inst.id;
+      return dn + ' (' + l.metrics.error + ')';
+    }).join(', ');
+    diagWrap.innerHTML =
+      '<div style="padding:10px 14px; background:' + (failRate > 50 ? '#FEF3C7' : '#F0F9FF') + '; border:1px solid ' + (failRate > 50 ? '#FCD34D' : '#BFDBFE') + '; border-radius:8px; font-size:11.5px; color:#374151;">' +
+        '<b>' + withYtm + '/' + loans.length + ' loans with computed metrics.</b>' +
+        (withoutYtm > 0 ? ' ' + withoutYtm + ' had no future cashflows — most likely because the loan matured, or its principal schedule isn\'t populated. Sample: ' + sample : '') +
+      '</div>';
+  } else {
+    diagWrap.innerHTML = '';
+  }
+  // KPI cards
+  const fmtMoney = (n) => n == null ? '—' : n.toLocaleString(undefined, { maximumFractionDigits:0 });
+  const fmtPct   = (n) => n == null ? '—' : (n.toFixed(2) + '%');
+  const fmtYrs   = (n) => n == null ? '—' : (n.toFixed(2) + 'y');
+  // Compose "Loans" sub-label so matured/unknown deals are visible up-front
+  const activeCount = agg.activeCount != null ? agg.activeCount : agg.count;
+  const maturedCount = agg.maturedCount || 0;
+  const loansSub = maturedCount > 0
+    ? (activeCount + ' active · ' + maturedCount + ' matured')
+    : 'in portfolio';
+  const notionalSub = agg.activeNotional != null && agg.activeNotional !== agg.totalNotional
+    ? 'active: ' + fmtMoney(agg.activeNotional)
+    : 'across all deals';
+  const kpis = [
+    { label: 'Loans',            value: agg.count,                                  sub: loansSub },
+    { label: 'Total Notional',   value: fmtMoney(agg.totalNotional),                sub: notionalSub },
+    { label: 'Wt-Avg YTM',       value: fmtPct(agg.weightedAvg.ytm),                sub: 'active loans only' },
+    { label: 'Wt-Avg WAL',       value: fmtYrs(agg.weightedAvg.wal),                sub: 'to principal return' },
+    { label: 'Wt-Avg Mod Dur',   value: fmtYrs(agg.weightedAvg.modifiedDuration),   sub: 'spread sensitivity' },
+    { label: 'Portfolio DV01',   value: fmtMoney(agg.totalDV01),                    sub: 'per 1bp rate move' }
+  ];
+  document.getElementById('portfolio-kpis').innerHTML = kpis.map(k =>
+    '<div style="padding:10px 12px; background:linear-gradient(135deg,#F8FAFC 0%,#F1F5F9 100%); border:1px solid #E2E8F0; border-radius:8px;">' +
+      '<div style="font-size:10px; letter-spacing:0.5px; text-transform:uppercase; color:#64748B; font-weight:600;">' + k.label + '</div>' +
+      '<div style="font-size:18px; font-weight:700; color:#1F2937; margin-top:2px;">' + k.value + '</div>' +
+      '<div style="font-size:10px; color:#94A3B8; margin-top:2px;">' + k.sub + '</div>' +
+    '</div>'
+  ).join('');
+  // Concentration — framework / currency / team
+  const concEl = document.getElementById('portfolio-concentration');
+  const barsHtml = (slice) => (slice || []).map(s => {
+    const pct = s.pct || 0;
+    return '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">' +
+      '<div style="width:70px; font-size:11px; color:#374151;">' + s.label + '</div>' +
+      '<div style="flex:1; height:14px; background:#F1F5F9; border-radius:3px; overflow:hidden; position:relative;">' +
+        '<div style="width:' + Math.max(2, pct) + '%; height:100%; background:linear-gradient(90deg,#4F46E5 0%,#6366F1 100%);"></div>' +
+      '</div>' +
+      '<div style="width:80px; font-size:10.5px; color:#6B7280; text-align:right; font-variant-numeric:tabular-nums;">' + pct.toFixed(1) + '% · ' + (s.amount||0).toLocaleString(undefined,{maximumFractionDigits:0}) + '</div>' +
+    '</div>';
+  }).join('');
+  concEl.innerHTML =
+    '<div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#94A3B8; margin:6px 0 4px;">Framework</div>' +
+    barsHtml(agg.concentration.byFramework) +
+    '<div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#94A3B8; margin:8px 0 4px;">Currency</div>' +
+    barsHtml(agg.concentration.byCurrency) +
+    '<div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#94A3B8; margin:8px 0 4px;">Team</div>' +
+    barsHtml(agg.concentration.byTeam);
+  // Maturity ladder as horizontal bar chart. Only show non-zero buckets.
+  // Colour: Matured & N/A get grey (stale/unknown); active buckets green.
+  const matEl = document.getElementById('portfolio-maturity');
+  const nonEmpty = (agg.maturityLadder || []).filter(b => b.amount > 0);
+  const maxBucket = Math.max(1, ...nonEmpty.map(b => b.amount));
+  matEl.innerHTML = nonEmpty.length ? nonEmpty.map(b => {
+    const pctBar = maxBucket > 0 ? (b.amount / maxBucket * 100) : 0;
+    const isSpecial = b.bucket === 'Matured' || b.bucket === 'N/A';
+    const grad = isSpecial
+      ? 'linear-gradient(90deg,#9CA3AF 0%,#6B7280 100%)'   // grey
+      : 'linear-gradient(90deg,#10B981 0%,#059669 100%)';   // green
+    const lblColor = isSpecial ? '#6B7280' : '#374151';
+    return '<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">' +
+      '<div style="width:65px; font-size:11px; color:' + lblColor + '; font-weight:500;">' + b.bucket + '</div>' +
+      '<div style="flex:1; height:16px; background:#F1F5F9; border-radius:3px; overflow:hidden;">' +
+        '<div style="width:' + Math.max(2, pctBar) + '%; height:100%; background:' + grad + ';"></div>' +
+      '</div>' +
+      '<div style="width:130px; font-size:10.5px; color:#6B7280; text-align:right; font-variant-numeric:tabular-nums;">' + b.amount.toLocaleString(undefined,{maximumFractionDigits:0}) + ' · ' + b.pct + '%</div>' +
+    '</div>';
+  }).join('') : '<div style="font-size:11px; color:#9CA3AF; padding:8px;">No maturity data</div>';
+  // Per-loan table
+  const tbody = document.getElementById('portfolio-tbody');
+  tbody.innerHTML = loans.map(l => {
+    const m = l.metrics || {};
+    const dealName = l.inst.deal || l.inst.label || l.presetKey || l.inst.id;
+    const err = m.error;
+    return '<tr style="border-bottom:1px solid #F1F5F9;">' +
+      '<td style="padding:5px 8px; font-weight:500;">' + dealName + '</td>' +
+      '<td style="padding:5px 8px; color:#4B5563;">' + (m.framework || '—') + '</td>' +
+      '<td style="padding:5px 8px; color:#4B5563;">' + (m.currency || '—') + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtMoney(m.notional) + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtPct(m.coupon) + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + (m.spreadOverBenchmark != null ? m.spreadOverBenchmark.toFixed(0) : '—') + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums; color:' + (err ? '#DC2626' : '#059669') + ';">' + (err ? '—' : fmtPct(m.ytm)) + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtPct(m.ytc) + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600;">' + fmtPct(m.ytw) + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + (m.wal != null ? fmtYrs(m.wal) : '—') + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + (m.modifiedDuration != null ? fmtYrs(m.modifiedDuration) : '—') + '</td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + (m.dv01 != null ? fmtMoney(m.dv01) : '—') + '</td>' +
+      '<td style="padding:5px 8px; font-size:10.5px; color:#6B7280;">' + (m.maturity || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('portfolio-summary').textContent =
+    loans.length + ' loans · $' + fmtMoney(agg.totalNotional) + ' notional · YTM ' + fmtPct(agg.weightedAvg.ytm) + ' · WAL ' + fmtYrs(agg.weightedAvg.wal);
+}
+
+window.exportPortfolioCsv = function(){
+  const loans = window._portfolioLoans || [];
+  if(!loans.length){ toast('Nothing to export — open the Portfolio modal first'); return; }
+  const headers = ['Deal','Framework','Currency','Notional','Coupon%','SpreadBps','YTM%','YTC%','YTW%','WAL','ModDur','DV01','Maturity','Team'];
+  const rows = loans.map(l => {
+    const m = l.metrics || {};
+    return [
+      l.inst.deal || l.inst.label || l.presetKey || '',
+      m.framework || '', m.currency || '',
+      m.notional != null ? m.notional : '',
+      m.coupon != null ? m.coupon : '',
+      m.spreadOverBenchmark != null ? m.spreadOverBenchmark : '',
+      m.ytm != null ? m.ytm : '', m.ytc != null ? m.ytc : '', m.ytw != null ? m.ytw : '',
+      m.wal != null ? m.wal : '', m.modifiedDuration != null ? m.modifiedDuration : '',
+      m.dv01 != null ? m.dv01 : '', m.maturity || '', m.team || ''
+    ];
+  });
+  const csv = [headers, ...rows].map(r => r.map(c => {
+    const s = String(c == null ? '' : c);
+    return /[,"\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  }).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'portfolio_analytics_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+// ═════════════════════════════════════════════════════════════════════
+// Loan Agent Notices Inbox (Tier 1 #3)
+// ═════════════════════════════════════════════════════════════════════
+// Two modes: (a) fetchNotices from DB when SB is connected — real notice
+// records the user has generated; (b) fallback: derive notices on-the-fly
+// from each preset's engine schedule (no persistence, in-memory only).
+//
+// The Derive button explicitly runs the schedule walker and upserts every
+// notice into loan_notices — this is what makes the inbox useful after a
+// user has saved new deals.
+window._noticesCache = [];       // last fetched result, for filter re-render
+
+window.openNoticesModal = function(){
+  const el = document.getElementById('notices-modal');
+  if(!el) return;
+  el.style.display = 'flex';
+  window.refreshNotices();
+};
+window.closeNoticesModal = function(){
+  const el = document.getElementById('notices-modal');
+  if(el) el.style.display = 'none';
+};
+
+// Fetch + render. Filters happen client-side on the cache.
+window.refreshNotices = async function(){
+  const loading = document.getElementById('notices-loading');
+  const content = document.getElementById('notices-content');
+  const empty   = document.getElementById('notices-empty');
+  const errBox  = document.getElementById('notices-error');
+  loading.style.display = ''; content.style.display = 'none'; empty.style.display = 'none'; errBox.style.display = 'none';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    if(!window.SB || !window.SB.connected){ throw new Error('Not connected to database'); }
+    // Fetch all notices for deals the user can see. RLS handles authorization.
+    const notices = await window.SB.fetchNotices();
+    window._noticesCache = notices;
+    _renderNotices();
+    _refreshNoticeBadge();
+    // Trigger reconciliation in the background. When it finishes, re-render
+    // so the Rec column populates without blocking the first paint.
+    if(notices.length){
+      window.reconcileNotices().then(() => _renderNotices()).catch(err => console.warn('[notices] reconcile failed', err));
+    }
+  } catch(err){
+    console.error('[notices] refresh failed', err);
+    loading.style.display = 'none';
+    errBox.style.display = '';
+    errBox.innerHTML = '<b>Notices failed:</b> ' + (err && err.message ? err.message : String(err));
+  }
+};
+
+// Populate the per-deal filter dropdown with every DB deal we've seen. Called
+// on modal open + after Derive so the list stays fresh.
+function _populateNoticesDealFilter(){
+  const sel = document.getElementById('notices-filter-deal');
+  if(!sel) return;
+  const currentValue = sel.value;
+  // Collect { uuid → label } from PRESETS
+  const options = [];
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(!uuid || p.source !== 'db') continue;
+    options.push({ uuid, label: p.label || p.dealCode || uuid });
+  }
+  options.sort((a,b) => a.label.localeCompare(b.label));
+  sel.innerHTML = '<option value="">All deals</option>' + options.map(o =>
+    '<option value="' + o.uuid + '">' + o.label + '</option>'
+  ).join('');
+  if(currentValue) sel.value = currentValue;
+}
+
+// Apply filters and render the table. Called by refresh + filter dropdowns.
+function _renderNotices(){
+  const loading = document.getElementById('notices-loading');
+  const content = document.getElementById('notices-content');
+  const empty   = document.getElementById('notices-empty');
+  loading.style.display = 'none';
+  _populateNoticesDealFilter();
+  const dealFilter   = (document.getElementById('notices-filter-deal')   || {}).value || '';
+  const typeFilter   = (document.getElementById('notices-filter-type')   || {}).value || '';
+  const statusFilter = (document.getElementById('notices-filter-status') || {}).value || 'active';
+  const horizonRaw   = (document.getElementById('notices-filter-horizon')|| {}).value || '30';
+  const horizonDays  = horizonRaw === 'all' ? null : parseInt(horizonRaw, 10);
+  const today = new Date().toISOString().slice(0,10);
+  const cutoff = horizonDays == null ? null : (function(){
+    const d = new Date(); d.setDate(d.getDate() + horizonDays);
+    return d.toISOString().slice(0,10);
+  })();
+  // Build a deal-code lookup so the table shows readable names instead of UUIDs
+  const dealNameById = {};
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(uuid) dealNameById[uuid] = p.label || (p.dealCode || uuid);
+  }
+  const filtered = (window._noticesCache || []).filter(n => {
+    if(dealFilter && n.deal_id !== dealFilter) return false;
+    if(typeFilter && n.notice_type !== typeFilter) return false;
+    if(statusFilter === 'active' && !['pending','sent','acknowledged'].includes(n.status)) return false;
+    else if(statusFilter && statusFilter !== 'active' && n.status !== statusFilter) return false;
+    if(cutoff && n.effective_date > cutoff) return false;
+    // No lower bound — show past-due notices too (they're still relevant)
+    return true;
+  });
+  // KPI strip
+  const kpiCounts = { pending:0, sent:0, acknowledged:0, completed:0, overdue:0 };
+  for(const n of window._noticesCache || []){
+    if(n.status === 'pending')      kpiCounts.pending++;
+    if(n.status === 'sent')         kpiCounts.sent++;
+    if(n.status === 'acknowledged') kpiCounts.acknowledged++;
+    if(n.status === 'completed')    kpiCounts.completed++;
+    if(['pending','sent','acknowledged'].includes(n.status) && n.effective_date < today) kpiCounts.overdue++;
+  }
+  const kpiBoxes = [
+    { label:'Pending',       value:kpiCounts.pending,      color:'#EAB308' },
+    { label:'Sent',          value:kpiCounts.sent,         color:'#3B82F6' },
+    { label:'Acknowledged',  value:kpiCounts.acknowledged, color:'#8B5CF6' },
+    { label:'Completed',     value:kpiCounts.completed,    color:'#10B981' },
+    { label:'Overdue',       value:kpiCounts.overdue,      color:'#DC2626' }
+  ];
+  document.getElementById('notices-kpis').innerHTML = kpiBoxes.map(k =>
+    '<div style="padding:8px 12px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; border-left:3px solid ' + k.color + ';">' +
+      '<div style="font-size:10px; letter-spacing:0.5px; text-transform:uppercase; color:#64748B; font-weight:600;">' + k.label + '</div>' +
+      '<div style="font-size:20px; font-weight:700; color:' + (k.value > 0 ? k.color : '#94A3B8') + '; margin-top:2px;">' + k.value + '</div>' +
+    '</div>'
+  ).join('');
+  if(!filtered.length){
+    content.style.display = 'none';
+    empty.style.display = '';
+    // If the DB is truly empty, prompt user to Derive. Otherwise remind them to relax filters.
+    const totalCount = (window._noticesCache || []).length;
+    empty.innerHTML = totalCount === 0
+      ? '<div style="font-size:28px; margin-bottom:8px;">📭</div>' +
+        '<div style="font-weight:600; margin-bottom:4px;">No notices yet</div>' +
+        '<div style="font-size:11px; margin-bottom:12px;">Click <b>Derive</b> at the top to auto-generate notices from your saved loans\' schedules, or <b>Manual</b> to record a waiver / amendment / default.</div>' +
+        '<button onclick="window.deriveAllNotices && window.deriveAllNotices()" class="mat-btn" style="background:#4F46E5; color:white; border-color:#4F46E5; padding:6px 14px;">' +
+          '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">refresh</span> Derive now' +
+        '</button>'
+      : '<div style="font-size:28px; margin-bottom:8px;">🔍</div>' +
+        '<div style="font-weight:600; margin-bottom:4px;">No notices match your filters</div>' +
+        '<div style="font-size:11px;">' + totalCount + ' notice' + (totalCount===1?'':'s') + ' total · try broadening the date horizon, deal, type, or status.</div>';
+    document.getElementById('notices-summary').textContent = totalCount + ' notices total · 0 match filters';
+    return;
+  }
+  content.style.display = '';
+  empty.style.display = 'none';
+  // Notice-type badges
+  const typeLabel = {
+    drawdown:{ label:'Drawdown',  color:'#0EA5E9' },
+    interest:{ label:'Interest',  color:'#8B5CF6' },
+    repayment:{ label:'Repayment', color:'#10B981' },
+    prepayment:{ label:'Prepay',  color:'#059669' },
+    rate_reset:{ label:'Rate Reset', color:'#F59E0B' },
+    fee:{ label:'Fee',            color:'#6366F1' },
+    waiver:{ label:'Waiver',      color:'#D97706' },
+    amendment:{ label:'Amendment', color:'#DC2626' },
+    default:{ label:'Default',    color:'#B91C1C' },
+    other:{ label:'Other',        color:'#6B7280' }
+  };
+  const statusColor = {
+    pending:'#EAB308', sent:'#3B82F6', acknowledged:'#8B5CF6', completed:'#10B981', cancelled:'#94A3B8'
+  };
+  const fmtMoney = (n) => n == null ? '—' : (+n).toLocaleString(undefined, { maximumFractionDigits:0 });
+  document.getElementById('notices-tbody').innerHTML = filtered.map(n => {
+    const t = typeLabel[n.notice_type] || { label:n.notice_type, color:'#6B7280' };
+    const overdue = ['pending','sent','acknowledged'].includes(n.status) && n.effective_date < today;
+    // Row is clickable → opens notice detail modal. Actions stop propagation so the
+    // action buttons don't trigger the detail open.
+    return '<tr onclick="window.openNoticeDetail && window.openNoticeDetail(\'' + n.id + '\')" style="border-bottom:1px solid #F1F5F9; cursor:pointer;' + (overdue ? ' background:#FEF2F2;' : '') + '" onmouseover="this.style.background=\'' + (overdue ? '#FEE2E2' : '#F8FAFC') + '\'" onmouseout="this.style.background=\'' + (overdue ? '#FEF2F2' : 'white') + '\'">' +
+      '<td style="padding:5px 8px; font-family:ui-monospace,monospace;">' + n.effective_date + (overdue ? ' <span style="color:#DC2626; font-weight:700;">⚠</span>' : '') + '</td>' +
+      '<td style="padding:5px 8px;">' + (dealNameById[n.deal_id] || (n.deal_id ? n.deal_id.slice(0,8) : '—')) + '</td>' +
+      '<td style="padding:5px 8px;"><span style="background:' + t.color + '22; color:' + t.color + '; padding:2px 7px; border-radius:8px; font-size:10px; font-weight:700;">' + t.label + '</span></td>' +
+      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + (n.amount != null ? (n.currency ? n.currency + ' ' : '') + fmtMoney(n.amount) : '—') + '</td>' +
+      '<td style="padding:5px 8px; font-family:ui-monospace,monospace; font-size:10px; color:#6B7280;">' + (n.reference || '—') + '</td>' +
+      '<td style="padding:5px 8px;"><span style="color:' + (statusColor[n.status] || '#6B7280') + '; font-weight:600; text-transform:capitalize;">' + n.status + '</span></td>' +
+      '<td style="padding:5px 8px; text-align:center;">' + _renderReconBadge(n) + '</td>' +
+      '<td style="padding:5px 8px;" onclick="event.stopPropagation();">' + _renderNoticeActions(n) + '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('notices-summary').textContent =
+    window._noticesCache.length + ' total · ' + filtered.length + ' shown' +
+    (kpiCounts.overdue > 0 ? ' · ⚠ ' + kpiCounts.overdue + ' overdue' : '');
+}
+
+// Reconciliation badge — reads from window._noticeReconMap populated by
+// window.reconcileNotices(). Green ✓ = matched, amber ~ = partial, red ✕
+// = mismatch, ? = unmatched, — = n/a. Clickable → opens reconciliation
+// detail modal (except n/a which has nothing to show).
+function _renderReconBadge(n){
+  const rec = (window._noticeReconMap || {})[n.id];
+  if(!rec || rec.status === 'n/a') return '<span style="color:#CBD5E1;" title="Not applicable — no cash movement expected">—</span>';
+  // Common click wrapper — stopPropagation so it doesn't bubble to the row's
+  // detail-modal handler.
+  const clickHandler = 'event.stopPropagation(); window.openReconDetail(\'' + n.id + '\')';
+  const style = 'cursor:pointer; padding:0 4px; border-radius:3px;';
+  const hover = 'onmouseover="this.style.background=\'#F1F5F9\'" onmouseout="this.style.background=\'transparent\'"';
+  if(rec.status === 'matched'){
+    return '<span onclick="' + clickHandler + '" ' + hover + ' style="' + style + ' color:#059669; font-weight:700;" title="Click for reconciliation detail — matched to ' + rec.jeCount + ' JEs (' + (rec.jeSum||0).toLocaleString(undefined,{maximumFractionDigits:2}) + ')">✓</span>';
+  }
+  if(rec.status === 'partial'){
+    const pct = (rec.diffPct * 100).toFixed(1);
+    return '<span onclick="' + clickHandler + '" ' + hover + ' style="' + style + ' color:#D97706; font-weight:700;" title="Click for detail — ' + pct + '% difference">~</span>';
+  }
+  if(rec.status === 'mismatch'){
+    const pct = (rec.diffPct * 100).toFixed(1);
+    return '<span onclick="' + clickHandler + '" ' + hover + ' style="' + style + ' color:#DC2626; font-weight:700;" title="Click for detail — ' + pct + '% mismatch">✕</span>';
+  }
+  if(rec.status === 'type-mismatch'){
+    return '<span onclick="' + clickHandler + '" ' + hover + ' style="' + style + ' color:#DC2626; font-weight:700;" title="Click for detail — other JEs in this window but of a different transaction type">≠</span>';
+  }
+  if(rec.status === 'unmatched'){
+    return '<span onclick="' + clickHandler + '" ' + hover + ' style="' + style + ' color:#94A3B8;" title="Click for detail — no matching JE">?</span>';
+  }
+  return '—';
+}
+
+// Reconciliation detail modal — drill-down when Rec badge is clicked
+window.openReconDetail = function(noticeId){
+  const n = (window._noticesCache || []).find(x => x.id === noticeId);
+  const rec = (window._noticeReconMap || {})[noticeId];
+  if(!n || !rec){ toast('No reconciliation data for this notice'); return; }
+  const modal = document.getElementById('recon-detail-modal');
+  if(!modal) return;
+  // Build deal-name lookup
+  const dealNameById = {};
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(uuid) dealNameById[uuid] = p.label || p.dealCode || uuid;
+  }
+  // Status meta
+  const statusMeta = {
+    matched:        { icon:'check_circle',  color:'#059669', label:'Matched',        verdict:'Notice amount agrees with posted journal entries within 1%.' },
+    partial:        { icon:'warning_amber', color:'#D97706', label:'Partial',        verdict:'Notice and journal entries are close but differ by more than 1%. Investigate.' },
+    mismatch:       { icon:'error',         color:'#DC2626', label:'Mismatch',       verdict:'Notice and journal entries differ by more than 10%. Likely a posting error, missing JE, or notice-side issue.' },
+    'type-mismatch':{ icon:'compare_arrows', color:'#DC2626', label:'Type mismatch', verdict:'Journal entries exist in this window but none match the notice type. For example: an interest notice with no interest JE, but a Loan Repayment JE sitting in the same period. The engine may not be emitting per-period accrual JEs for this deal — many deals only emit a single aggregated interest JE at maturity.' },
+    unmatched:      { icon:'help_center',   color:'#94A3B8', label:'Unmatched',      verdict:'No journal entries found for this notice\'s period. Either accounting hasn\'t been run for this deal, or the JE dates don\'t align.' }
+  };
+  const meta = statusMeta[rec.status] || statusMeta.unmatched;
+  document.getElementById('rd-icon').textContent = meta.icon;
+  document.getElementById('rd-icon').style.color = meta.color;
+  document.getElementById('rd-subtitle').textContent =
+    n.notice_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()) +
+    ' notice on ' + (dealNameById[n.deal_id] || n.deal_id) +
+    ' · ref ' + (n.reference || '—');
+
+  const fmtMoney = (v) => v == null ? '—' : (+v).toLocaleString(undefined, { maximumFractionDigits:2 });
+  const noticeAmt = +rec.noticeAmt || 0;
+  const jeSum     = +rec.jeSum || 0;
+  const diff      = noticeAmt - jeSum;
+  const diffPct   = ((rec.diffPct || 0) * 100).toFixed(3);
+  const currency  = n.currency || '';
+
+  // Verdict summary card
+  const verdictHtml =
+    '<div style="padding:14px; background:' + meta.color + '11; border-left:4px solid ' + meta.color + '; border-radius:6px; margin-bottom:14px;">' +
+      '<div style="font-size:11px; letter-spacing:0.5px; text-transform:uppercase; font-weight:700; color:' + meta.color + ';">' + meta.label + '</div>' +
+      '<div style="font-size:12px; color:#374151; margin-top:4px; line-height:1.5;">' + meta.verdict + '</div>' +
+    '</div>';
+
+  // Amount comparison grid
+  const gridHtml =
+    '<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:14px;">' +
+      '<div style="padding:10px 12px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px;">' +
+        '<div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#64748B; font-weight:600;">Notice Amount</div>' +
+        '<div style="font-size:18px; font-weight:700; color:#0F172A; margin-top:2px; font-variant-numeric:tabular-nums;">' + (currency ? currency + ' ' : '') + fmtMoney(noticeAmt) + '</div>' +
+      '</div>' +
+      '<div style="padding:10px 12px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px;">' +
+        '<div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#64748B; font-weight:600;">Posted JE Debits</div>' +
+        '<div style="font-size:18px; font-weight:700; color:#0F172A; margin-top:2px; font-variant-numeric:tabular-nums;">' + (currency ? currency + ' ' : '') + fmtMoney(jeSum) + '</div>' +
+        '<div style="font-size:10px; color:#94A3B8; margin-top:2px;">' + (rec.jeCount || 0) + ' JE row' + (rec.jeCount === 1 ? '' : 's') + ' matched</div>' +
+      '</div>' +
+      '<div style="padding:10px 12px; background:' + (Math.abs(diff) < 0.01 ? '#ECFDF5' : Math.abs(diff)/Math.max(noticeAmt,1) > 0.10 ? '#FEF2F2' : '#FEF3C7') + '; border:1px solid ' + (Math.abs(diff) < 0.01 ? '#A7F3D0' : Math.abs(diff)/Math.max(noticeAmt,1) > 0.10 ? '#FCA5A5' : '#FDE68A') + '; border-radius:6px;">' +
+        '<div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#64748B; font-weight:600;">Difference</div>' +
+        '<div style="font-size:18px; font-weight:700; color:' + meta.color + '; margin-top:2px; font-variant-numeric:tabular-nums;">' + (diff >= 0 ? '+' : '') + (currency ? currency + ' ' : '') + fmtMoney(diff) + '</div>' +
+        '<div style="font-size:10px; color:#94A3B8; margin-top:2px;">' + diffPct + '% vs larger of two</div>' +
+      '</div>' +
+    '</div>';
+
+  // Reconciliation window
+  const windowHtml =
+    '<div style="padding:8px 12px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px; margin-bottom:14px; font-size:11px; color:#64748B;">' +
+      '<b>Reconciliation window:</b> ' + rec.periodStart + ' → ' + rec.periodEnd +
+      (rec.totalJesOnDate ? ' · <b>' + rec.totalJesOnDate + '</b> total JE row' + (rec.totalJesOnDate === 1 ? '' : 's') + ' in window' : '') +
+    '</div>';
+
+  // Matched JE list
+  let jesHtml = '';
+  const jes = rec.matchedJes || [];
+  if(jes.length){
+    jesHtml =
+      '<div style="font-size:11px; letter-spacing:0.5px; text-transform:uppercase; font-weight:700; color:#4B5563; margin-bottom:6px;">Matched Journal Entries</div>' +
+      '<div style="max-height:44vh; overflow:auto; border:1px solid #E5E7EB; border-radius:6px;">' +
+        '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+          '<thead style="position:sticky; top:0; background:#F3F4F6; z-index:1;">' +
+            '<tr>' +
+              '<th style="padding:5px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Date</th>' +
+              '<th style="padding:5px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Transaction</th>' +
+              '<th style="padding:5px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Account</th>' +
+              '<th style="padding:5px 8px; text-align:right; border-bottom:1px solid #E5E7EB;">Amount</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>' +
+            jes.map(je => '<tr style="border-bottom:1px solid #F1F5F9;">' +
+              '<td style="padding:4px 8px; font-family:ui-monospace,monospace; font-size:10.5px;">' + (je.effective_date || '—') + '</td>' +
+              '<td style="padding:4px 8px;">' + (je.transaction_type || '—') + '</td>' +
+              '<td style="padding:4px 8px; font-family:ui-monospace,monospace; font-size:10.5px;">' + (je.account_code || '—') + '</td>' +
+              '<td style="padding:4px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtMoney(Math.abs(+je.amount_le || 0)) + '</td>' +
+            '</tr>').join('') +
+          '</tbody>' +
+        '</table>' +
+      '</div>' +
+      (jes.length >= 100 ? '<div style="font-size:10.5px; color:#94A3B8; margin-top:6px;">Showing first 100 of ' + rec.jeCount + ' matched rows.</div>' : '');
+  } else if(rec.status === 'type-mismatch' && (rec.otherJesInWindow || []).length){
+    // No type-matching JE, but other debits exist in the window. Show them so the
+    // user can see what IS posted and confirm this is a real gap (e.g. no
+    // per-period interest JE, but a bullet interest at maturity).
+    const others = rec.otherJesInWindow || [];
+    jesHtml =
+      '<div style="font-size:11px; letter-spacing:0.5px; text-transform:uppercase; font-weight:700; color:#DC2626; margin-bottom:6px;">Other JEs in this window (wrong type)</div>' +
+      '<div style="padding:8px 12px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; margin-bottom:8px; font-size:11px; color:#7F1D1D;">' +
+        'These journal entries exist in the notice\'s reconciliation window, but their transaction_type doesn\'t match a <b>' + n.notice_type + '</b> notice. Common cause: the engine only emits an aggregated interest JE at maturity, so per-period interest notices have no matching JE.' +
+      '</div>' +
+      '<div style="max-height:36vh; overflow:auto; border:1px solid #E5E7EB; border-radius:6px;">' +
+        '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+          '<thead style="position:sticky; top:0; background:#F3F4F6;">' +
+            '<tr>' +
+              '<th style="padding:5px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Date</th>' +
+              '<th style="padding:5px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Transaction Type</th>' +
+              '<th style="padding:5px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Account</th>' +
+              '<th style="padding:5px 8px; text-align:right; border-bottom:1px solid #E5E7EB;">Amount</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>' +
+            others.map(je => '<tr style="border-bottom:1px solid #F1F5F9;">' +
+              '<td style="padding:4px 8px; font-family:ui-monospace,monospace; font-size:10.5px;">' + (je.effective_date || '—') + '</td>' +
+              '<td style="padding:4px 8px;">' + (je.transaction_type || '—') + '</td>' +
+              '<td style="padding:4px 8px; font-family:ui-monospace,monospace; font-size:10.5px;">' + (je.account_code || '—') + '</td>' +
+              '<td style="padding:4px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtMoney(Math.abs(+je.amount_le || 0)) + '</td>' +
+            '</tr>').join('') +
+          '</tbody>' +
+        '</table>' +
+      '</div>';
+  } else if(rec.status === 'unmatched'){
+    jesHtml =
+      '<div style="padding:20px; text-align:center; background:#F8FAFC; border:1px dashed #CBD5E1; border-radius:6px; color:#64748B; font-size:12px;">' +
+        '<div style="font-size:22px; margin-bottom:6px;">📭</div>' +
+        'No JE rows found in the reconciliation window (' + rec.periodStart + ' → ' + rec.periodEnd + '). Either accounting hasn\'t been run for this deal since the last purge, or the JE effective_date doesn\'t align with the notice period.' +
+      '</div>';
+  }
+
+  document.getElementById('rd-body').innerHTML = verdictHtml + gridHtml + windowHtml + jesHtml;
+  document.getElementById('rd-footer-status').innerHTML =
+    '<span style="color:' + meta.color + '; font-weight:600;">' + meta.label + '</span> · notice ' + n.id.slice(0,8) + '…';
+
+  modal.style.display = 'flex';
+};
+window.closeReconDetail = function(){
+  const modal = document.getElementById('recon-detail-modal');
+  if(modal) modal.style.display = 'none';
+};
+
+function _renderNoticeActions(n){
+  const nextByStatus = {
+    pending:      { label:'Mark sent',        next:'sent' },
+    sent:         { label:'Acknowledge',      next:'acknowledged' },
+    acknowledged: { label:'Complete',         next:'completed' }
+  };
+  const next = nextByStatus[n.status];
+  if(!next) return '<span style="color:#94A3B8; font-size:10px;">—</span>';
+  return '<button onclick="window.transitionNotice(\'' + n.id + '\',\'' + next.next + '\')" ' +
+         'style="padding:2px 8px; background:white; border:1px solid #D1D5DB; border-radius:4px; font-size:10px; cursor:pointer; color:#374151;">' +
+         next.label + '</button>' +
+         ' <button onclick="window.transitionNotice(\'' + n.id + '\',\'cancelled\')" ' +
+         'style="padding:2px 6px; background:white; border:1px solid #FCA5A5; border-radius:4px; font-size:10px; cursor:pointer; color:#DC2626;" title="Cancel this notice">×</button>';
+}
+
+// ─── Notice detail modal — full row inspection ──────────────
+window._currentNoticeId = null;
+
+window.openNoticeDetail = function(noticeId){
+  const n = (window._noticesCache || []).find(x => x.id === noticeId);
+  if(!n){ toast('Notice not found in cache — try Refresh'); return; }
+  window._currentNoticeId = noticeId;
+  const modal = document.getElementById('notice-detail-modal');
+  if(!modal) return;
+  // Build the deal-name lookup once
+  const dealNameById = {};
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(uuid) dealNameById[uuid] = p.label || p.dealCode || uuid;
+  }
+  const typeMeta = {
+    drawdown:{ icon:'account_balance', color:'#0EA5E9' },
+    interest:{ icon:'payments',        color:'#8B5CF6' },
+    repayment:{ icon:'undo',           color:'#10B981' },
+    prepayment:{ icon:'fast_rewind',   color:'#059669' },
+    rate_reset:{ icon:'trending_up',   color:'#F59E0B' },
+    fee:{ icon:'receipt_long',         color:'#6366F1' },
+    waiver:{ icon:'gavel',             color:'#D97706' },
+    amendment:{ icon:'edit_document',  color:'#DC2626' },
+    default:{ icon:'warning',          color:'#B91C1C' },
+    other:{ icon:'mail',               color:'#6B7280' }
+  };
+  const meta = typeMeta[n.notice_type] || typeMeta.other;
+  document.getElementById('nd-icon').textContent = meta.icon;
+  document.getElementById('nd-icon').style.color = meta.color;
+  document.getElementById('nd-title').textContent = (meta.icon ? '' : '') + n.notice_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()) + ' — ' + (n.reference || 'no ref');
+  document.getElementById('nd-subtitle').textContent =
+    (dealNameById[n.deal_id] || n.deal_id) + ' · effective ' + n.effective_date;
+
+  // Body — key/value grid + timeline + breakdown JSON
+  const fmt = (v) => v == null ? '<i style="color:#94A3B8;">not set</i>' : v;
+  const fmtMoneyLg = (n) => n == null ? '—' : n.toLocaleString(undefined, { maximumFractionDigits:2 });
+  const fmtDT = (iso) => iso ? new Date(iso).toLocaleString() : '<i style="color:#94A3B8;">—</i>';
+  const rows = [
+    ['Type',         n.notice_type],
+    ['Reference',    n.reference || '—'],
+    ['Deal',         dealNameById[n.deal_id] || n.deal_id],
+    ['Tranche',      n.tranche_id || 'Deal-level'],
+    ['Notice date',  n.notice_date],
+    ['Effective date', n.effective_date],
+    ['Amount',       n.amount != null ? (n.currency ? n.currency + ' ' : '') + fmtMoneyLg(n.amount) : '—'],
+    ['Rate',         n.rate != null ? (n.rate * 100).toFixed(4) + '%' : '—'],
+    ['Status',       '<span style="text-transform:capitalize; font-weight:600;">' + n.status + '</span>'],
+    ['Source',       n.is_auto_derived ? 'Auto-derived from engine' : 'Manual entry']
+  ];
+  const kvHtml = '<table style="width:100%; font-size:12px; border-collapse:collapse;">' +
+    rows.map(([k,v]) => '<tr><td style="padding:4px 8px; color:#6B7280; width:130px; white-space:nowrap;">' + k + '</td><td style="padding:4px 8px;">' + fmt(v) + '</td></tr>').join('') +
+    '</table>';
+  // Timeline: created → sent → acknowledged → completed
+  const timelineRows = [
+    ['Created',     n.created_at],
+    ['Sent',        n.sent_at],
+    ['Acknowledged', n.acknowledged_at],
+    ['Completed',   n.completed_at]
+  ].filter(([_,t]) => t);
+  const timelineHtml = timelineRows.length
+    ? '<div style="margin-top:14px; padding-top:12px; border-top:1px solid #E5E7EB;">' +
+        '<div style="font-size:10px; letter-spacing:0.6px; text-transform:uppercase; font-weight:700; color:#4B5563; margin-bottom:6px;">Audit trail</div>' +
+        timelineRows.map(([label, iso]) => '<div style="display:flex; gap:10px; font-size:11px; margin-bottom:3px;"><span style="width:110px; color:#6B7280;">' + label + '</span><span>' + fmtDT(iso) + '</span></div>').join('') +
+      '</div>'
+    : '';
+  // Breakdown JSON
+  const breakdownHtml = (n.breakdown && Object.keys(n.breakdown).length)
+    ? '<div style="margin-top:14px; padding-top:12px; border-top:1px solid #E5E7EB;">' +
+        '<div style="font-size:10px; letter-spacing:0.6px; text-transform:uppercase; font-weight:700; color:#4B5563; margin-bottom:6px;">Breakdown</div>' +
+        '<pre style="margin:0; padding:10px; background:#F8FAFC; border:1px solid #E5E7EB; border-radius:6px; font-size:11px; overflow:auto; max-height:180px;">' +
+        JSON.stringify(n.breakdown, null, 2).replace(/</g,'&lt;') + '</pre>' +
+      '</div>'
+    : '';
+  const notesHtml = n.notes
+    ? '<div style="margin-top:14px; padding-top:12px; border-top:1px solid #E5E7EB;">' +
+        '<div style="font-size:10px; letter-spacing:0.6px; text-transform:uppercase; font-weight:700; color:#4B5563; margin-bottom:6px;">Notes</div>' +
+        '<div style="font-size:12px; color:#374151; white-space:pre-line;">' + n.notes.replace(/</g,'&lt;') + '</div>' +
+      '</div>'
+    : '';
+  // Quick-action buttons matching the row actions
+  const nextByStatus = {
+    pending:      { label:'Mark sent',   next:'sent' },
+    sent:         { label:'Acknowledge', next:'acknowledged' },
+    acknowledged: { label:'Complete',    next:'completed' }
+  };
+  const next = nextByStatus[n.status];
+  const actionsHtml = next
+    ? '<div style="margin-top:14px; padding-top:12px; border-top:1px solid #E5E7EB; display:flex; gap:8px;">' +
+        '<button onclick="window.transitionNotice(\'' + n.id + '\',\'' + next.next + '\'); window.closeNoticeDetail();" ' +
+          'class="mat-btn primary" style="background:#4F46E5; color:white; border-color:#4F46E5;">' +
+          '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">check</span> ' + next.label + '</button>' +
+        '<button onclick="window.transitionNotice(\'' + n.id + '\',\'cancelled\'); window.closeNoticeDetail();" ' +
+          'class="mat-btn outline" style="color:#DC2626; border-color:#FCA5A5;">Cancel notice</button>' +
+      '</div>'
+    : '';
+  document.getElementById('nd-body').innerHTML = kvHtml + notesHtml + timelineHtml + breakdownHtml + actionsHtml;
+  document.getElementById('nd-footer-audit').textContent = 'id: ' + n.id;
+  modal.style.display = 'flex';
+};
+
+window.closeNoticeDetail = function(){
+  const modal = document.getElementById('notice-detail-modal');
+  if(modal) modal.style.display = 'none';
+  window._currentNoticeId = null;
+};
+
+// Delete the currently-open notice — confirmation via app dialog
+window.deleteCurrentNotice = async function(){
+  if(!window._currentNoticeId) return;
+  const ok = window.showAppDialog
+    ? await window.showAppDialog({
+        severity:'warning', title:'Delete this notice?',
+        message:'This permanently removes the notice from the database.',
+        detail:'For auto-derived notices, clicking Derive again will re-create the same notice. For manual notices, this is irreversible.',
+        confirmLabel:'Delete', cancelLabel:'Cancel'
+      })
+    : confirm('Delete this notice permanently?');
+  if(!ok) return;
+  const res = await window.SB.deleteNotice(window._currentNoticeId);
+  if(!res.ok){
+    if(window.showAppDialog){ await window.showAppDialog({ severity:'error', title:'Delete failed', message: res.reason || 'Unknown error' }); }
+    else { alert('Delete failed: ' + (res.reason || 'unknown')); }
+    return;
+  }
+  // Remove from cache
+  window._noticesCache = (window._noticesCache || []).filter(x => x.id !== window._currentNoticeId);
+  window.closeNoticeDetail();
+  toast('Notice deleted', 2500);
+  _renderNotices();
+  _refreshNoticeBadge();
+};
+
+// ─── Notice PDF generation (Phase 2) ───────────────────────
+// Client-side PDF via jsPDF UMD. Produces a formal notice document with
+// header, deal info, notice body, key details table, breakdown, signature
+// block. Returns the jsPDF doc + filename — callers decide whether to
+// download (save()), preview (blob URL), or print.
+window._currentPdfBlob = null;
+window._currentPdfFilename = null;
+
+// Build the jsPDF document + return {doc, filename}. Pure factory.
+function _buildNoticePdf(noticeId){
+  const n = (window._noticesCache || []).find(x => x.id === noticeId);
+  if(!n){ toast('No notice selected'); return null; }
+  if(typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF){
+    if(window.showAppDialog) window.showAppDialog({ severity:'error', title:'PDF library not loaded', message:'The jsPDF library failed to load. Check your network + refresh.' });
+    return null;
+  }
+  const { jsPDF } = window.jspdf;
+  // Build deal name lookup
+  const dealNameById = {};
+  const dealMetaById = {};
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(uuid){
+      dealNameById[uuid] = p.label || p.dealCode || uuid;
+      try { dealMetaById[uuid] = (typeof p.build === 'function') ? p.build() : null; } catch(_){}
+    }
+  }
+  const dealName = dealNameById[n.deal_id] || n.deal_id;
+  const meta = dealMetaById[n.deal_id];
+  const dealCode = meta && meta.deal && meta.deal.dealId || '';
+  const counterparty = meta && meta.deal && meta.deal.counterparty || '';
+  const currency = n.currency || (meta && meta.deal && meta.deal.currency) || '';
+  const framework = meta && meta.deal && meta.deal.framework || '';
+
+  const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+  const marginL = 60, marginR = 60, pageW = 612, pageH = 792;
+  let y = 60;
+
+  const typeLabelMap = {
+    drawdown:'Drawdown Notice', interest:'Interest Payment Notice', repayment:'Repayment Notice',
+    prepayment:'Prepayment Notice', rate_reset:'Interest Rate Reset Notice',
+    fee:'Fee Notice', waiver:'Waiver Notice', amendment:'Amendment Notice',
+    default:'Notice of Default', other:'Notice'
+  };
+  const noticeLabel = typeLabelMap[n.notice_type] || 'Notice';
+
+  // Header — "sender" banner
+  doc.setFillColor(15, 23, 42);
+  doc.rect(0, 0, pageW, 40, 'F');
+  doc.setTextColor(255);
+  doc.setFontSize(9);
+  doc.setFont('helvetica','bold');
+  doc.text('PCS LOAN MODULE · AGENT BANK NOTICE', marginL, 25);
+  doc.setFont('helvetica','normal');
+  doc.text('Reference: ' + (n.reference || 'N/A'), pageW - marginR - doc.getTextWidth('Reference: ' + (n.reference || 'N/A')), 25);
+  y = 70;
+
+  // Title
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(20);
+  doc.setFont('helvetica','bold');
+  doc.text(noticeLabel, marginL, y);
+  y += 22;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(107, 114, 128);
+  doc.text('Issued ' + new Date(n.notice_date).toLocaleDateString() + '  ·  Effective ' + new Date(n.effective_date).toLocaleDateString(),
+    marginL, y);
+  y += 30;
+
+  // Deal / recipient block
+  doc.setDrawColor(226, 232, 240);
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(marginL, y, pageW - marginL - marginR, 90, 5, 5, 'FD');
+  doc.setFontSize(9);
+  doc.setTextColor(107, 114, 128);
+  doc.setFont('helvetica','bold');
+  doc.text('LOAN', marginL + 12, y + 18);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(11);
+  doc.text(dealName, marginL + 12, y + 34);
+  doc.setFontSize(9);
+  doc.setTextColor(107, 114, 128);
+  if(dealCode)     doc.text('Deal code: ' + dealCode,        marginL + 12, y + 50);
+  if(counterparty) doc.text('Counterparty: ' + counterparty, marginL + 12, y + 64);
+  if(framework)    doc.text('Framework: ' + framework + (currency ? ' · ' + currency : ''), marginL + 12, y + 78);
+  y += 110;
+
+  // Notice body — the key statement
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.setFont('helvetica','normal');
+  const bodyStatements = {
+    drawdown:   'This notice confirms the borrower has drawn the below amount under the credit agreement. Funding is expected on the effective date.',
+    interest:   'Interest has accrued on the loan for the period indicated below. Payment is due on the effective date to the account of record.',
+    repayment:  'A scheduled principal repayment is due as detailed below. Please remit or apply the amount on the effective date.',
+    prepayment: 'The borrower has elected to prepay principal (with make-whole penalty where applicable) as detailed below.',
+    rate_reset: 'The reference rate has reset for the upcoming interest period. The new all-in coupon becomes effective on the date shown.',
+    fee:        'A fee has accrued for the period indicated and is payable on the effective date.',
+    waiver:     'The lender has been informed of a waiver request from the borrower. See notes for details.',
+    amendment:  'An amendment to the credit agreement is requested. See notes for the terms being modified.',
+    default:    'The borrower has failed to meet an obligation under the credit agreement. See notes for the specific breach.',
+    other:      'Please see the details below.'
+  };
+  const bodyLines = doc.splitTextToSize(bodyStatements[n.notice_type] || bodyStatements.other, pageW - marginL - marginR);
+  doc.text(bodyLines, marginL, y);
+  y += bodyLines.length * 13 + 12;
+
+  // Details table — key facts
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  const details = [
+    ['Notice type',    noticeLabel],
+    ['Reference',      n.reference || 'N/A'],
+    ['Notice date',    new Date(n.notice_date).toLocaleDateString()],
+    ['Effective date', new Date(n.effective_date).toLocaleDateString()],
+    ['Amount',         n.amount != null ? (currency ? currency + ' ' : '') + n.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : '—'],
+    ['Rate',           n.rate != null ? (n.rate * 100).toFixed(4) + '%' : '—'],
+    ['Status',         n.status.charAt(0).toUpperCase() + n.status.slice(1)]
+  ];
+  const detailRowH = 22;
+  doc.setFontSize(9);
+  for(const [k,v] of details){
+    doc.setFillColor(255);
+    doc.rect(marginL, y, 130, detailRowH, 'F');
+    doc.setFillColor(248, 250, 252);
+    doc.rect(marginL + 130, y, pageW - marginL - marginR - 130, detailRowH, 'F');
+    doc.rect(marginL, y, pageW - marginL - marginR, detailRowH); // border
+    doc.setFont('helvetica','bold'); doc.setTextColor(107, 114, 128);
+    doc.text(k, marginL + 8, y + 14);
+    doc.setFont('helvetica','normal'); doc.setTextColor(15, 23, 42);
+    doc.text(String(v), marginL + 140, y + 14);
+    y += detailRowH;
+  }
+  y += 18;
+
+  // Breakdown block if present
+  if(n.breakdown && Object.keys(n.breakdown).length){
+    doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(107, 114, 128);
+    doc.text('SUPPORTING DETAIL', marginL, y);
+    y += 14;
+    doc.setFont('helvetica','normal'); doc.setTextColor(15, 23, 42);
+    for(const [k,v] of Object.entries(n.breakdown)){
+      if(v == null || v === '') continue;
+      const label = k.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+      const valStr = typeof v === 'number' ? v.toLocaleString(undefined,{maximumFractionDigits:6}) : String(v);
+      doc.text(label + ':  ' + valStr, marginL + 8, y);
+      y += 12;
+      if(y > pageH - 120){ doc.addPage(); y = 60; }
+    }
+    y += 10;
+  }
+  // Notes if manual notice
+  if(n.notes){
+    doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(107, 114, 128);
+    doc.text('NOTES', marginL, y); y += 14;
+    doc.setFont('helvetica','normal'); doc.setTextColor(15, 23, 42);
+    const nl = doc.splitTextToSize(n.notes, pageW - marginL - marginR - 8);
+    doc.text(nl, marginL + 8, y);
+    y += nl.length * 11 + 12;
+  }
+
+  // Signature block
+  if(y > pageH - 180){ doc.addPage(); y = 60; }
+  y = Math.max(y, pageH - 180);
+  doc.setDrawColor(15, 23, 42);
+  doc.line(marginL, y, marginL + 200, y);
+  doc.line(pageW - marginR - 200, y, pageW - marginR, y);
+  doc.setFontSize(9); doc.setTextColor(107, 114, 128);
+  doc.text('Authorized signatory', marginL, y + 14);
+  doc.text('Date', pageW - marginR - 200, y + 14);
+
+  // Footer
+  doc.setFontSize(8); doc.setTextColor(148, 163, 184);
+  const footer = 'Generated ' + new Date().toLocaleString() + ' · PCS Loan Module V3 · Reference ' + (n.reference || 'N/A');
+  doc.text(footer, pageW / 2, pageH - 30, { align: 'center' });
+
+  const filename = 'NOTICE-' + (n.reference || n.id.slice(0,8)) + '-' + n.effective_date + '.pdf';
+  return { doc, filename, notice: n };
+}
+
+// Direct download — kept for backwards compat / API completeness
+window.downloadNoticePdf = function(){
+  const built = _buildNoticePdf(window._currentNoticeId);
+  if(!built) return;
+  built.doc.save(built.filename);
+  toast('Downloaded ' + built.filename, 3000);
+};
+
+// Preview via iframe embed. Generates the PDF as a Blob, sets iframe src to
+// a blob URL, opens the preview modal. Blob is stored on window so Download /
+// Print buttons in the preview modal can reuse it (no re-generation cost).
+window.previewNoticePdf = function(){
+  const built = _buildNoticePdf(window._currentNoticeId);
+  if(!built) return;
+  // Convert jsPDF doc → Blob → object URL
+  const blob = built.doc.output('blob');
+  // Revoke prior URL if any (avoid memory leak on repeat previews)
+  if(window._currentPdfBlobUrl){ URL.revokeObjectURL(window._currentPdfBlobUrl); }
+  window._currentPdfBlob = blob;
+  window._currentPdfFilename = built.filename;
+  window._currentPdfBlobUrl = URL.createObjectURL(blob);
+  const iframe = document.getElementById('pdf-preview-frame');
+  // #toolbar=1 asks the browser's built-in PDF viewer to show its toolbar
+  // (page nav, zoom). Chrome, Firefox, Edge, Safari all honor it.
+  iframe.src = window._currentPdfBlobUrl + '#toolbar=1&navpanes=0';
+  document.getElementById('pdf-preview-sub').textContent =
+    (built.notice.notice_type || '').replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()) +
+    ' · ref ' + (built.notice.reference || '—') + ' · ' + built.notice.effective_date;
+  document.getElementById('pdf-preview-modal').style.display = 'flex';
+};
+
+window.closePdfPreview = function(){
+  document.getElementById('pdf-preview-modal').style.display = 'none';
+  // Free the iframe src + blob URL after a short delay (some browsers need the
+  // iframe cleanup to happen before revoking)
+  setTimeout(() => {
+    const iframe = document.getElementById('pdf-preview-frame');
+    if(iframe) iframe.src = 'about:blank';
+    if(window._currentPdfBlobUrl){
+      URL.revokeObjectURL(window._currentPdfBlobUrl);
+      window._currentPdfBlobUrl = null;
+    }
+  }, 300);
+};
+
+// Download the currently-previewed PDF blob (avoids regenerating).
+window.downloadCurrentPdfBlob = function(){
+  if(!window._currentPdfBlob || !window._currentPdfFilename){
+    toast('No PDF loaded — click Preview PDF first'); return;
+  }
+  const url = URL.createObjectURL(window._currentPdfBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = window._currentPdfFilename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+  toast('Downloaded ' + window._currentPdfFilename, 2500);
+};
+
+// Print the currently-previewed PDF (opens system print dialog via iframe).
+window.printCurrentPdf = function(){
+  const iframe = document.getElementById('pdf-preview-frame');
+  try {
+    // Some browsers block direct iframe.contentWindow.print() cross-origin —
+    // fall back to opening the blob URL in a new tab which the user can print
+    // via the browser's built-in PDF viewer.
+    if(iframe && iframe.contentWindow){
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    }
+  } catch(err){
+    console.warn('[pdf] iframe print failed, opening in new tab:', err);
+    if(window._currentPdfBlobUrl) window.open(window._currentPdfBlobUrl, '_blank');
+  }
+};
+
+// ─── Notice Reconciliation (Phase 2) ───────────────────────
+// Fetch journal_entries for each visible deal and match against interest/
+// repayment/drawdown notices by (deal_id, effective_date, ~amount within 1%).
+// Cached in window._noticeReconMap { noticeId → status }.
+window._noticeReconMap = {};
+
+window.reconcileNotices = async function(){
+  if(!window.SB || !window.SB.connected) return;
+  const notices = window._noticesCache || [];
+  if(!notices.length) return;
+  // Group by deal_id — track BOTH effective_date AND breakdown.period_start
+  // so the JE fetch window covers whole notice periods, not just event days.
+  const byDeal = {};
+  for(const n of notices){
+    if(!byDeal[n.deal_id]) byDeal[n.deal_id] = { dealId: n.deal_id, minDate: n.effective_date, maxDate: n.effective_date, notices: [] };
+    byDeal[n.deal_id].notices.push(n);
+    const startCandidate = (n.breakdown && n.breakdown.period_start) || n.effective_date;
+    if(startCandidate < byDeal[n.deal_id].minDate) byDeal[n.deal_id].minDate = startCandidate;
+    if(n.effective_date > byDeal[n.deal_id].maxDate) byDeal[n.deal_id].maxDate = n.effective_date;
+  }
+  window._noticeReconMap = {};
+  for(const [dealId, info] of Object.entries(byDeal)){
+    const jes = await window.SB.fetchJournalEntriesForDeal(dealId, info.minDate, info.maxDate);
+    // Bucket JEs by effective_date
+    const jesByDate = {};
+    for(const je of jes){
+      const d = (je.effective_date || je.gl_posting_date || '').slice(0,10);
+      if(!jesByDate[d]) jesByDate[d] = [];
+      jesByDate[d].push(je);
+    }
+    for(const n of info.notices){
+      // Reconciliation is only meaningful for cash-movement notices
+      if(!['interest','repayment','prepayment','drawdown','fee'].includes(n.notice_type)){
+        window._noticeReconMap[n.id] = { status: 'n/a' };
+        continue;
+      }
+      // Period-vs-day: interest and fee notices aggregate accruals over a
+      // period (breakdown.period_start → period_end). JEs are emitted daily
+      // — so matching just on effective_date grabs only the last day. Instead
+      // sum JEs across the whole notice period.
+      const bd = n.breakdown || {};
+      let periodStart = n.effective_date, periodEnd = n.effective_date;
+      if((n.notice_type === 'interest' || n.notice_type === 'fee') && bd.period_start && bd.period_end){
+        periodStart = bd.period_start;
+        periodEnd   = bd.period_end;
+      }
+      // Collect JEs whose effective_date falls in the period
+      let periodMatches = [];
+      for(const [d, arr] of Object.entries(jesByDate)){
+        if(d >= periodStart && d <= periodEnd) periodMatches = periodMatches.concat(arr);
+      }
+      if(!periodMatches.length){
+        window._noticeReconMap[n.id] = {
+          status: 'unmatched', jeCount: 0, periodStart, periodEnd,
+          noticeAmt: +n.amount || 0, matchedJes: [], totalJesOnDate: 0
+        };
+        continue;
+      }
+      const noticeAmt = +n.amount || 0;
+      // Prefer the CASH-side DR (represents actual cash movement — what the
+      // notice literally tells the recipient). Fall back to ACCRUAL-side DR
+      // if no cash-side entry exists for that period. Never sum both, or the
+      // total will be 2x the real event (accrual + settlement = same $).
+      const typeMatchers = {
+        interest:   { primary: /Interest Cash Receipt/i,           fallback: /Interest Receivable|Interest Adjustment/i },
+        drawdown:   { primary: /Loan Drawdown(?:\s|$|\W)/i,        fallback: /Loan Drawdown/i },
+        repayment:  { primary: /Loan Repayment.*Cash|Repayment.*Cash/i, fallback: /Loan Repayment|Amortiz|Paydown|Principal Repayment/i },
+        prepayment: { primary: /Prepayment.*Cash|Mandatory Prepayment.*Cash/i, fallback: /Prepay/i },
+        fee:        { primary: /Fee.*Cash|Fee Receipt/i,           fallback: /Fee|Commitment|Arrangement/i }
+      };
+      const matcher = typeMatchers[n.notice_type];
+      // Try primary (cash-side) first; if empty, fall back to accrual-side. If
+      // both empty → truly no matching JE.
+      let finalRows = [];
+      if(matcher){
+        finalRows = periodMatches.filter(je => je.is_debit && (je.transaction_type || '').match(matcher.primary));
+        if(!finalRows.length){
+          finalRows = periodMatches.filter(je => je.is_debit && (je.transaction_type || '').match(matcher.fallback));
+        }
+      } else {
+        finalRows = periodMatches.filter(je => je.is_debit);
+      }
+      const jeSum = finalRows.reduce((s, je) => s + Math.abs(+je.amount_le || 0), 0);
+      const denom = Math.max(noticeAmt, jeSum, 1);
+      const diffPct = Math.abs(noticeAmt - jeSum) / denom;
+      // Distinguish "no matching JE" from "matched but numbers off"
+      let status;
+      if(jeSum === 0){
+        // No type-matching JE. Special case: SOME debits exist in the window
+        // but none of them are the right transaction type — flag as
+        // "type-mismatch" (renders as ✕ with a specific verdict).
+        status = periodMatches.some(je => je.is_debit) ? 'type-mismatch' : 'unmatched';
+      } else if(diffPct < 0.01){ status = 'matched'; }
+      else if(diffPct < 0.10){ status = 'partial'; }
+      else                    { status = 'mismatch'; }
+      window._noticeReconMap[n.id] = {
+        status, jeSum, noticeAmt, diffPct, jeCount: finalRows.length,
+        periodStart, periodEnd,
+        matchedJes: finalRows.slice(0, 100),
+        totalJesOnDate: periodMatches.length,
+        // Also store what other debits were in the window so the detail modal
+        // can show "there are other JEs in this window but of a different type"
+        otherJesInWindow: periodMatches.filter(je => je.is_debit && !finalRows.includes(je)).slice(0, 100)
+      };
+    }
+  }
+  // Summary diagnostic — counts per bucket so it's obvious if reconciliation is producing signal
+  const tally = { matched:0, partial:0, mismatch:0, unmatched:0, 'n/a':0 };
+  for(const r of Object.values(window._noticeReconMap)){ tally[r.status] = (tally[r.status] || 0) + 1; }
+  console.log('[notices] reconciliation done — ' + notices.length + ' notices, ' + Object.keys(byDeal).length + ' deals · matched=' + tally.matched + ' partial=' + tally.partial + ' mismatch=' + tally.mismatch + ' unmatched=' + tally.unmatched + ' n/a=' + tally['n/a']);
+};
+
+// ─── Recipients management (Phase 2) ───────────────────────
+window._recipientsCache = [];
+window._recipientsDealId = null;
+
+window.openRecipientsForNotice = function(){
+  const noticeId = window._currentNoticeId;
+  const n = (window._noticesCache || []).find(x => x.id === noticeId);
+  if(!n){ toast('No notice selected'); return; }
+  window._recipientsDealId = n.deal_id;
+  const dealNameById = {};
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(uuid) dealNameById[uuid] = p.label || p.dealCode || uuid;
+  }
+  document.getElementById('rc-subtitle').textContent = dealNameById[n.deal_id] || n.deal_id;
+  document.getElementById('recipients-modal').style.display = 'flex';
+  window.refreshRecipients();
+};
+window.closeRecipientsModal = function(){
+  document.getElementById('recipients-modal').style.display = 'none';
+  window._recipientsDealId = null;
+};
+
+window.refreshRecipients = async function(){
+  if(!window._recipientsDealId) return;
+  const recs = await window.SB.fetchRecipients(window._recipientsDealId);
+  window._recipientsCache = recs;
+  _renderRecipients();
+};
+
+function _renderRecipients(){
+  const recs = window._recipientsCache || [];
+  const empty = document.getElementById('rc-empty');
+  const table = document.getElementById('rc-table');
+  if(!recs.length){
+    empty.style.display = ''; table.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none'; table.style.display = '';
+  const roleLabel = {
+    lender:'Lender', agent_bank:'Agent Bank', admin_agent:'Admin Agent',
+    loan_officer:'Loan Officer', borrower:'Borrower', trustee:'Trustee',
+    legal_counsel:'Legal Counsel', operations:'Operations', other:'Other'
+  };
+  document.getElementById('rc-tbody').innerHTML = recs.map(r =>
+    '<tr style="border-bottom:1px solid #F1F5F9;">' +
+      '<td style="padding:6px 8px;">' + (r.is_primary ? '<span style="background:#DBEAFE; color:#1D4ED8; padding:1px 5px; border-radius:8px; font-size:9px; font-weight:700; margin-right:6px;">PRIMARY</span>' : '') + r.name + '</td>' +
+      '<td style="padding:6px 8px; font-family:ui-monospace,monospace; font-size:10.5px;"><a href="mailto:' + r.email + '" style="color:#4F46E5;">' + r.email + '</a></td>' +
+      '<td style="padding:6px 8px; color:#4B5563;">' + (roleLabel[r.role] || r.role) + '</td>' +
+      '<td style="padding:6px 8px; color:#4B5563;">' + (r.organization || '—') + '</td>' +
+      '<td style="padding:6px 8px; text-align:right;">' +
+        '<button onclick="window.editRecipient(\'' + r.id + '\')" style="padding:2px 8px; background:white; border:1px solid #D1D5DB; border-radius:4px; font-size:10px; cursor:pointer; color:#374151;">Edit</button> ' +
+        '<button onclick="window.deleteRecipient(\'' + r.id + '\',\'' + r.name.replace(/'/g,"\\'") + '\')" style="padding:2px 6px; background:white; border:1px solid #FCA5A5; border-radius:4px; font-size:10px; cursor:pointer; color:#DC2626;">×</button>' +
+      '</td>' +
+    '</tr>'
+  ).join('');
+}
+
+window.openRecipientForm = function(recipient){
+  const el = document.getElementById('recipient-form-modal');
+  document.getElementById('rf-title').textContent = recipient ? 'Edit contact' : 'Add contact';
+  document.getElementById('rf-id').value    = recipient ? recipient.id : '';
+  document.getElementById('rf-name').value  = recipient ? recipient.name : '';
+  document.getElementById('rf-email').value = recipient ? recipient.email : '';
+  document.getElementById('rf-role').value  = recipient ? recipient.role : 'lender';
+  document.getElementById('rf-org').value   = recipient ? (recipient.organization || '') : '';
+  document.getElementById('rf-phone').value = recipient ? (recipient.phone || '') : '';
+  document.getElementById('rf-primary').checked = recipient ? !!recipient.is_primary : false;
+  document.getElementById('rf-notes').value = recipient ? (recipient.notes || '') : '';
+  document.getElementById('rf-error').style.display = 'none';
+  el.style.display = 'flex';
+};
+window.closeRecipientForm = function(){
+  document.getElementById('recipient-form-modal').style.display = 'none';
+};
+window.editRecipient = function(recId){
+  const r = (window._recipientsCache || []).find(x => x.id === recId);
+  if(r) window.openRecipientForm(r);
+};
+window.submitRecipientForm = async function(){
+  const errEl = document.getElementById('rf-error');
+  errEl.style.display = 'none';
+  const id       = document.getElementById('rf-id').value || null;
+  const name     = document.getElementById('rf-name').value.trim();
+  const email    = document.getElementById('rf-email').value.trim();
+  const role     = document.getElementById('rf-role').value;
+  const org      = document.getElementById('rf-org').value.trim();
+  const phone    = document.getElementById('rf-phone').value.trim();
+  const primary  = document.getElementById('rf-primary').checked;
+  const notes    = document.getElementById('rf-notes').value.trim();
+  if(!name || !email){
+    errEl.textContent = 'Name and email are required.'; errEl.style.display = ''; return;
+  }
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    errEl.textContent = 'Enter a valid email address.'; errEl.style.display = ''; return;
+  }
+  const rec = {
+    deal_id: window._recipientsDealId,
+    name, email, role,
+    organization: org || null,
+    phone: phone || null,
+    is_primary: primary,
+    notes: notes || null
+  };
+  if(id) rec.id = id;
+  const res = await window.SB.upsertRecipient(rec);
+  if(!res.ok){
+    errEl.textContent = res.reason || 'Save failed';
+    errEl.style.display = ''; return;
+  }
+  window.closeRecipientForm();
+  toast('Contact saved', 2500);
+  window.refreshRecipients();
+};
+window.deleteRecipient = async function(recId, name){
+  const ok = window.showAppDialog
+    ? await window.showAppDialog({ severity:'warning', title:'Delete this contact?', message:'Remove ' + name + ' from this deal\'s recipient list?', confirmLabel:'Delete', cancelLabel:'Cancel' })
+    : confirm('Delete ' + name + '?');
+  if(!ok) return;
+  const res = await window.SB.deleteRecipient(recId);
+  if(!res.ok){ toast('Delete failed: ' + res.reason); return; }
+  toast('Contact deleted', 2500);
+  window.refreshRecipients();
+};
+
+// CSV export — respects current filters, downloads to disk.
+window.exportNoticesCsv = function(){
+  const cache = window._noticesCache || [];
+  if(!cache.length){ toast('Nothing to export'); return; }
+  const dealNameById = {};
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(uuid) dealNameById[uuid] = p.label || p.dealCode || uuid;
+  }
+  // Apply same filters as the current view for consistency
+  const dealFilter   = (document.getElementById('notices-filter-deal')   || {}).value || '';
+  const typeFilter   = (document.getElementById('notices-filter-type')   || {}).value || '';
+  const statusFilter = (document.getElementById('notices-filter-status') || {}).value || '';
+  const horizonRaw   = (document.getElementById('notices-filter-horizon')|| {}).value || '';
+  const cutoff = (horizonRaw && horizonRaw !== 'all') ? (function(){
+    const d = new Date(); d.setDate(d.getDate() + parseInt(horizonRaw,10));
+    return d.toISOString().slice(0,10);
+  })() : null;
+  const filtered = cache.filter(n => {
+    if(dealFilter && n.deal_id !== dealFilter) return false;
+    if(typeFilter && n.notice_type !== typeFilter) return false;
+    if(statusFilter === 'active' && !['pending','sent','acknowledged'].includes(n.status)) return false;
+    else if(statusFilter && statusFilter !== 'active' && n.status !== statusFilter) return false;
+    if(cutoff && n.effective_date > cutoff) return false;
+    return true;
+  });
+  const headers = ['effective_date','deal','notice_type','amount','currency','rate','reference','status','notice_date','is_auto_derived','sent_at','acknowledged_at','completed_at','notes'];
+  const rows = filtered.map(n => [
+    n.effective_date,
+    dealNameById[n.deal_id] || n.deal_id,
+    n.notice_type,
+    n.amount != null ? n.amount : '',
+    n.currency || '',
+    n.rate != null ? n.rate : '',
+    n.reference || '',
+    n.status,
+    n.notice_date,
+    n.is_auto_derived,
+    n.sent_at || '',
+    n.acknowledged_at || '',
+    n.completed_at || '',
+    (n.notes || '').replace(/\n/g,' ')
+  ]);
+  const csv = [headers, ...rows].map(r => r.map(c => {
+    const s = String(c == null ? '' : c);
+    return /[,"\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  }).join(',')).join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'notices_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Downloaded ' + filtered.length + ' notice' + (filtered.length===1?'':'s') + ' as CSV', 2500);
+};
+
+// Auto-derive notices for a specific deal — fires after Save to DB so newly
+// saved loans immediately populate the inbox without needing a manual Derive.
+window.deriveNoticesForDeal = async function(dealId){
+  if(!dealId || !window.SB || !window.SB.connected) return { ok:false };
+  if(typeof LMA === 'undefined' || typeof LMA.deriveNotices !== 'function') return { ok:false };
+  // Find the preset for this deal
+  const p = (window.PRESETS || []).find(x => (x.dealId || x._dbDealId || x.dbDealId) === dealId);
+  if(!p){ console.warn('[notices] deriveNoticesForDeal — no preset with dealId', dealId); return { ok:false }; }
+  try {
+    const def = (typeof p.build === 'function') ? p.build() : null;
+    if(!def) return { ok:false };
+    const inst = _portfolioBuilderDefToInst(def);
+    if(!inst) return { ok:false };
+    const schedule = _portfolioBuildSchedule(def);
+    if(!schedule || !schedule.length) return { ok:false };
+    const notices = LMA.deriveNotices(inst, schedule, { dealId });
+    if(!notices.length) return { ok:true, inserted:0 };
+    const res = await window.SB.bulkInsertNotices(notices);
+    console.log('[notices] deriveNoticesForDeal —', p.label, '·', notices.length, 'derived,', res.inserted, 'new');
+    return { ok: res.ok, derived: notices.length, inserted: res.inserted };
+  } catch(err){
+    console.warn('[notices] deriveNoticesForDeal failed', err);
+    return { ok:false, reason: err.message };
+  }
+};
+
+window.transitionNotice = async function(noticeId, newStatus){
+  const res = await window.SB.updateNoticeStatus(noticeId, newStatus);
+  if(!res.ok){
+    if(typeof window.showAppDialog === 'function'){
+      await window.showAppDialog({ severity:'error', title:'Notice update failed', message: res.reason || 'Unknown error' });
+    } else { alert('Notice update failed: ' + (res.reason || 'unknown')); }
+    return;
+  }
+  // Reflect in cache and re-render — avoids full refetch
+  const cached = (window._noticesCache || []).find(n => n.id === noticeId);
+  if(cached && res.notice) Object.assign(cached, res.notice);
+  _renderNotices();
+  _refreshNoticeBadge();
+};
+
+// Walk every preset's schedule, derive expected notices, bulk-upsert to DB.
+// Idempotent — dedupe index on (deal_id, type, effective_date, tranche_id, amount).
+window.deriveAllNotices = async function(){
+  if(!window.SB || !window.SB.connected){ toast('Not connected to database'); return; }
+  if(typeof LMA === 'undefined' || typeof LMA.deriveNotices !== 'function'){ toast('Analytics engine missing deriveNotices'); return; }
+  const summary = document.getElementById('notices-summary');
+  summary.textContent = 'Deriving notices from schedules…';
+  const presets = window.PRESETS || [];
+  // Confirm — Derive is destructive to auto-derived notices. Only wipes rows
+  // where is_auto_derived=true; manual entries (waivers, amendments) survive.
+  const ok = window.showAppDialog
+    ? await window.showAppDialog({
+        severity:'warning', title:'Re-derive notices from schedule?',
+        message:'This wipes existing auto-derived notices for every deal and rebuilds them from each loan\'s current schedule + coupon frequency.',
+        detail:'Manual notices (waivers / amendments / defaults) are preserved. Status transitions (Sent/Acknowledged/Completed) on auto-derived notices will be lost.',
+        confirmLabel:'Re-derive', cancelLabel:'Cancel'
+      })
+    : confirm('Re-derive all notices? This wipes auto-derived ones (manual entries preserved).');
+  if(!ok){ summary.textContent = ''; return; }
+  let totalDerived = 0, totalInserted = 0, dealsProcessed = 0, dealsSkipped = 0;
+  // Diagnostic snapshot before the loop — shows how many DB deals exist and
+  // what the first one's key fields look like. Debugs "0 notices" outcomes.
+  const dbDeals = presets.filter(p => p.source === 'db');
+  console.log('[notices] deriveAllNotices — presets=' + presets.length + ' · dbDeals=' + dbDeals.length + ' · first dbDeal keys:',
+    dbDeals[0] ? Object.keys(dbDeals[0]).slice(0,15).join(',') : 'none');
+  if(dbDeals[0]){
+    console.log('[notices] first dbDeal id/dealId/source:', dbDeals[0].id, '/', dbDeals[0].dealId, '/', dbDeals[0].source, '· label:', dbDeals[0].label);
+  }
+  for(const p of presets){
+    // Only DB-saved deals can host notices (notices FK deal_id → deals.id).
+    // fetchUserDeals sets p.dealId = row.id (real UUID); local presets don't
+    // have one, so skip them (no place to persist the notice).
+    const dealId = p.dealId || p._dbDealId || p.dbDealId;
+    if(!dealId || p.source !== 'db'){ dealsSkipped++; continue; }
+    // Wipe stale auto-derived notices for this deal so cadence/period changes
+    // (e.g. monthly → quarterly) take effect on re-derive.
+    try {
+      await window.SB.wipeAutoDerivedNoticesForDeal(dealId);
+    } catch(err){ console.warn('[notices] wipe pre-derive failed for', dealId, err); }
+    // Build inst + schedule via the same pipeline Portfolio uses
+    let def, inst, schedule;
+    try {
+      def = (typeof p.build === 'function') ? p.build() : null;
+      if(!def) { dealsSkipped++; continue; }
+      inst = _portfolioBuilderDefToInst(def);
+      if(!inst) { dealsSkipped++; continue; }
+      schedule = _portfolioBuildSchedule(def);
+      if(!schedule || !schedule.length) { dealsSkipped++; continue; }
+    } catch(err){ console.warn('[notices] preset processing failed', p.key, err); dealsSkipped++; continue; }
+    // Derive notices
+    const notices = LMA.deriveNotices(inst, schedule, { dealId });
+    if(dealsProcessed === 0){
+      // Log the first deal's derivation output so we can debug empty results
+      console.log('[notices] first-deal derivation — deal=' + (p.label || p.key) + ' · dealId=' + dealId + ' · schedule rows=' + schedule.length + ' · notices derived=' + notices.length);
+      if(notices.length) console.log('[notices] first 3 sample notices:', notices.slice(0,3));
+      else console.warn('[notices] deriveNotices returned 0 for this deal — schedule shape may be missing draw/paydown/dailyCash fields');
+    }
+    totalDerived += notices.length;
+    // Bulk upsert — dedupes on (deal_id, type, effective_date, tranche_id, amount)
+    const res = await window.SB.bulkInsertNotices(notices);
+    if(!res.ok && dealsProcessed === 0){
+      console.error('[notices] bulkInsertNotices returned error:', res);
+    }
+    if(res.ok) totalInserted += res.inserted;
+    dealsProcessed++;
+    summary.textContent = 'Deriving… ' + dealsProcessed + '/' + presets.length + ' deals · ' + totalDerived + ' notices derived · ' + totalInserted + ' new';
+  }
+  console.log('[notices] deriveAllNotices done — processed=' + dealsProcessed + ' · skipped=' + dealsSkipped + ' · derived=' + totalDerived + ' · inserted=' + totalInserted);
+  toast('Derived ' + totalDerived + ' notices from ' + dealsProcessed + ' deals (' + totalInserted + ' new · ' + dealsSkipped + ' skipped)', 4500);
+  window.refreshNotices();
+};
+
+// Badge count on the header button — notices due in next 7 days that need action
+function _refreshNoticeBadge(){
+  const badge = document.getElementById('notices-badge');
+  if(!badge) return;
+  const today = new Date().toISOString().slice(0,10);
+  const in7 = (function(){ const d = new Date(); d.setDate(d.getDate() + 7); return d.toISOString().slice(0,10); })();
+  const upcoming = (window._noticesCache || []).filter(n =>
+    ['pending','sent','acknowledged'].includes(n.status) &&
+    n.effective_date <= in7
+  ).length;
+  if(upcoming > 0){
+    badge.textContent = upcoming;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// ─── Manual notice form ────────────────────────────────────────
+window.openManualNoticeForm = function(){
+  const modal = document.getElementById('manual-notice-modal');
+  if(!modal) return;
+  // Populate the deal dropdown from PRESETS
+  const dealSel = document.getElementById('mn-deal');
+  dealSel.innerHTML = '';
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(!uuid || p.source !== 'db') continue;
+    const opt = document.createElement('option');
+    opt.value = uuid;
+    opt.textContent = p.label || (p.build && (function(){ try { return p.build().deal.name; } catch(_){ return p.key; } })()) || p.key;
+    dealSel.appendChild(opt);
+  }
+  if(!dealSel.options.length){
+    dealSel.innerHTML = '<option value="">No DB-saved deals — save a deal first</option>';
+  }
+  document.getElementById('mn-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('mn-amount').value = '';
+  document.getElementById('mn-ref').value = '';
+  document.getElementById('mn-notes').value = '';
+  document.getElementById('mn-error').style.display = 'none';
+  modal.style.display = 'flex';
+};
+window.closeManualNoticeForm = function(){
+  const modal = document.getElementById('manual-notice-modal');
+  if(modal) modal.style.display = 'none';
+};
+window.submitManualNotice = async function(){
+  const errEl = document.getElementById('mn-error');
+  errEl.style.display = 'none';
+  const dealId = document.getElementById('mn-deal').value;
+  const type   = document.getElementById('mn-type').value;
+  const date   = document.getElementById('mn-date').value;
+  const amount = document.getElementById('mn-amount').value;
+  const ref    = document.getElementById('mn-ref').value.trim();
+  const notes  = document.getElementById('mn-notes').value.trim();
+  if(!dealId || !type || !date){
+    errEl.textContent = 'Deal, type and date are required.';
+    errEl.style.display = ''; return;
+  }
+  const res = await window.SB.upsertNotice({
+    deal_id: dealId,
+    notice_type: type,
+    notice_date: date,
+    effective_date: date,
+    amount: amount ? parseFloat(amount) : null,
+    reference: ref || null,
+    notes: notes || null,
+    is_auto_derived: false,
+    status: 'pending'
+  });
+  if(!res.ok){
+    errEl.textContent = res.reason || 'Save failed';
+    errEl.style.display = ''; return;
+  }
+  window.closeManualNoticeForm();
+  toast('Manual notice added', 3000);
+  window.refreshNotices();
+};
+
 window.downloadBulkImportTemplate = function(){
   if(typeof XLSX === 'undefined'){ alert('XLSX library not loaded — refresh the page and try again.'); return; }
   const cols = BULK_IMPORT_SCHEMA.required.concat(BULK_IMPORT_SCHEMA.optional);
@@ -14102,27 +16398,32 @@ document.addEventListener('DOMContentLoaded', ()=>{
       if(M.portfData) runAccounting();
     });
   }
-  // Stage 1
-  $('btn-portf-load').onclick = ()=> openJsonModal({
-    title: 'Load Cashflow Payload',
-    subtitle: 'Paste the cashflow JSON exported from the Loan Builder for the active deal',
-    callback: payload => {
-      if(!payload.instrument || !Array.isArray(payload.accrualSchedule)){
-        throw new Error('Missing required fields: instrument and accrualSchedule[]');
+  // Stage 1 — legacy PortF buttons; wrap in a guard because these elements
+  // were removed when Stage 1 was rebuilt around Cashflow Generation. Without
+  // the guard, the first null.onclick throws and every subsequent DOMContentLoaded
+  // handler is skipped — including any listeners further down.
+  if($('btn-portf-load')){
+    $('btn-portf-load').onclick = ()=> openJsonModal({
+      title: 'Load Cashflow Payload',
+      subtitle: 'Paste the cashflow JSON exported from the Loan Builder for the active deal',
+      callback: payload => {
+        if(!payload.instrument || !Array.isArray(payload.accrualSchedule)){
+          throw new Error('Missing required fields: instrument and accrualSchedule[]');
+        }
+        applyPortFPayload(payload);
       }
-      applyPortFPayload(payload);
-    }
-  });
-  $('btn-portf-sample').onclick = loadPortFFromActiveDeal;
-  $('btn-portf-excel').onclick = ()=> $('portf-excel-input').click();
-  $('portf-excel-input').onchange = (e)=>{ const f = e.target.files?.[0]; if(f) applyPortFExcel(f); };
-  $('btn-portf-excel-sample').onclick = ()=>{
-    const a = document.createElement('a');
-    a.href = 'portf-cashflow-sample.xlsx';
-    a.download = 'portf-cashflow-sample.xlsx';
-    a.click();
-    toast('Downloading sample Loan Builder Excel format');
-  };
+    });
+    if($('btn-portf-sample')) $('btn-portf-sample').onclick = loadPortFFromActiveDeal;
+    if($('btn-portf-excel'))  $('btn-portf-excel').onclick  = ()=> $('portf-excel-input') && $('portf-excel-input').click();
+    if($('portf-excel-input')) $('portf-excel-input').onchange = (e)=>{ const f = e.target.files && e.target.files[0]; if(f) applyPortFExcel(f); };
+    if($('btn-portf-excel-sample')) $('btn-portf-excel-sample').onclick = ()=>{
+      const a = document.createElement('a');
+      a.href = 'portf-cashflow-sample.xlsx';
+      a.download = 'portf-cashflow-sample.xlsx';
+      a.click();
+      toast('Downloading sample Loan Builder Excel format');
+    };
+  }
   // Stage 2
   $('btn-acct-run').onclick = runAccounting;
   $('btn-diu-template').onclick = downloadDIUTemplate;
