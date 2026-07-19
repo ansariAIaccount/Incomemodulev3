@@ -628,6 +628,223 @@
     return notices;
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // Watchlist / Early-Warning (Tier 1 #5)
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Aggregates every red-flag signal we already compute elsewhere into a single
+  // per-deal scorecard. This is the "one screen to check each morning" view
+  // that PMs use to decide which deals need attention today.
+  //
+  // Data sources (all already flowing through the app):
+  //   • deal.inst.covenants[]              — breach + headroom
+  //   • deal.inst.covenants[].breachLog[]  — active breaches + consequences
+  //   • deal.inst.eclStage                 — 2 = SICR, 3 = credit-impaired
+  //   • deal.inst.maturityDate             — approaching maturity
+  //   • notices[]                          — overdue / unreconciled / mismatched
+  //   • deal.inst.tranches[].defaultInterest — default interest active
+  //
+  // Signal severities (drives sort order + colour badge):
+  //   • critical → red    (score 100) — needs action THIS WEEK
+  //   • warning  → amber  (score  40) — watch, may escalate
+  //   • info     → blue   (score  10) — FYI, no action needed
+  //
+  // Scoring is additive so a deal with 3 warnings still ranks above a deal
+  // with 1 warning, but any critical signal pushes it above pure-warning peers.
+  //
+  //   const watchlist = LMA.computeWatchlist({
+  //     deals: [{ key, name, inst }, ...],
+  //     notices: [ ... ],  // from SB.fetchNotices()
+  //     asOf: '2026-07-19'
+  //   });
+  //   → [{ dealKey, name, score, severity, signals: [{type,label,severity,detail}], ... }]
+  //     sorted by score DESC
+  //
+  function computeWatchlist(opts){
+    opts = opts || {};
+    const deals   = Array.isArray(opts.deals)   ? opts.deals   : [];
+    const notices = Array.isArray(opts.notices) ? opts.notices : [];
+    const asOf    = opts.asOf || new Date().toISOString().slice(0,10);
+    const proximityPct = +opts.proximityPct || 0.20;   // <20% headroom = warning
+    const maturityWarnDays = +opts.maturityWarnDays || 90;
+    const maturityCritDays = +opts.maturityCritDays || 30;
+
+    const SEV_SCORE = { critical: 100, warning: 40, info: 10 };
+    const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+
+    // Bucket notices by deal_id once (avoids O(deals × notices))
+    const noticesByDeal = new Map();
+    for(const n of notices){
+      const k = n.deal_id || n.dealId; if(!k) continue;
+      if(!noticesByDeal.has(k)) noticesByDeal.set(k, []);
+      noticesByDeal.get(k).push(n);
+    }
+
+    const rows = [];
+    for(const d of deals){
+      const inst = d.inst || d;
+      const dealKey = d.key || d.dealKey || inst.dealCode || inst.instrumentId;
+      const dealName = d.name || inst.name || inst.dealName || dealKey;
+      const signals = [];
+
+      // ── 1. Covenant breaches (active, not cured) — CRITICAL
+      const covenants = Array.isArray(inst.covenants) ? inst.covenants : [];
+      for(const c of covenants){
+        const active = (c.breachLog || []).filter(b =>
+          (b.status || '').toLowerCase() !== 'cured' &&
+          (b.status || '').toLowerCase() !== 'waived'
+        );
+        if(active.length){
+          const latest = active[0]; // breachLog already sorted DESC by breachDate
+          const consequences = (latest.consequenceApplied || []).join(', ') || 'none';
+          signals.push({
+            type: 'covenant_breach',
+            severity: 'critical',
+            label: 'Covenant breached: ' + (c.name || c.kpiMetric || 'unnamed'),
+            detail: 'Breach date ' + latest.breachDate +
+                    ' · value ' + latest.breachValue +
+                    ' vs threshold ' + latest.thresholdAtBreach +
+                    ' · consequences: ' + consequences
+          });
+        } else if(c.lastReportedValue != null && c.threshold != null){
+          // Proximity check — only meaningful when we have a fresh reading
+          const val = +c.lastReportedValue, thr = +c.threshold;
+          if(thr !== 0){
+            const dir = (c.direction || 'gte').toLowerCase();
+            // Headroom as fraction of threshold. For >= covenants (min ratio),
+            // headroom = (val - thr) / thr. For <= covenants (max ratio), it's
+            // flipped: (thr - val) / thr.
+            let headroom = null;
+            if(dir === 'gte' || dir === 'min' || dir === '>=' || dir === '>'){
+              headroom = (val - thr) / Math.abs(thr);
+            } else if(dir === 'lte' || dir === 'max' || dir === '<=' || dir === '<'){
+              headroom = (thr - val) / Math.abs(thr);
+            }
+            if(headroom != null && headroom < proximityPct && headroom >= 0){
+              signals.push({
+                type: 'covenant_proximity',
+                severity: 'warning',
+                label: 'Covenant proximity: ' + (c.name || c.kpiMetric),
+                detail: 'Headroom ' + (headroom * 100).toFixed(1) + '% (value ' + val +
+                        ' vs threshold ' + thr + ')'
+              });
+            }
+          }
+        }
+      }
+
+      // ── 2. ECL Stage drift — Stage 2 = warning, Stage 3 = critical
+      const stage = String(inst.eclStage || '1').toLowerCase().replace('stage','').trim();
+      if(stage === '3' || stage === 'poci'){
+        signals.push({
+          type: 'ecl_stage3',
+          severity: 'critical',
+          label: 'ECL Stage 3 (credit-impaired)',
+          detail: 'Lifetime ECL on gross basis · net interest accrual on carrying amount'
+        });
+      } else if(stage === '2'){
+        signals.push({
+          type: 'ecl_stage2',
+          severity: 'warning',
+          label: 'ECL Stage 2 (SICR)',
+          detail: 'Significant increase in credit risk since initial recognition'
+        });
+      }
+
+      // ── 3. Approaching maturity — 30 days = critical, 90 days = warning
+      const maturity = inst.maturityDate || (inst.tranches && inst.tranches[0] && inst.tranches[0].maturityDate);
+      if(maturity){
+        const dtm = daysBetween(asOf, maturity);
+        if(dtm >= 0 && dtm <= maturityCritDays){
+          signals.push({
+            type: 'maturity_critical',
+            severity: 'critical',
+            label: 'Maturity in ' + dtm + ' days',
+            detail: 'Matures ' + maturity + ' — refinancing / rollover decision required'
+          });
+        } else if(dtm > maturityCritDays && dtm <= maturityWarnDays){
+          signals.push({
+            type: 'maturity_warning',
+            severity: 'warning',
+            label: 'Maturity in ' + dtm + ' days',
+            detail: 'Matures ' + maturity
+          });
+        }
+      }
+
+      // ── 4. Overdue notices (past effective_date, still Draft/Pending) — WARNING
+      const dn = noticesByDeal.get(dealKey) || noticesByDeal.get(inst.instrumentId) || [];
+      const overdue = dn.filter(n =>
+        n.effective_date && n.effective_date < asOf &&
+        (n.status || 'draft').toLowerCase() !== 'sent' &&
+        (n.status || 'draft').toLowerCase() !== 'acknowledged'
+      );
+      if(overdue.length){
+        signals.push({
+          type: 'overdue_notices',
+          severity: 'warning',
+          label: overdue.length + ' overdue notice' + (overdue.length===1?'':'s'),
+          detail: overdue.slice(0,3).map(n =>
+            (n.notice_type || 'notice') + ' · due ' + n.effective_date
+          ).join('; ') + (overdue.length>3 ? ' … +'+(overdue.length-3)+' more' : '')
+        });
+      }
+
+      // ── 5. Default interest active (from tranche flag or breach consequence)
+      const trs = inst.tranches || [];
+      const dfltActive = trs.some(t => t.defaultInterestActive === true || t.defaultInterest === true);
+      if(dfltActive){
+        signals.push({
+          type: 'default_interest',
+          severity: 'critical',
+          label: 'Default interest active',
+          detail: 'Penalty margin currently applied per credit agreement'
+        });
+      }
+
+      // ── 6. Mandatory prepayment recently triggered (from breachLog)
+      const mandPre = covenants.flatMap(c => (c.breachLog || []))
+        .filter(b => b.prepaymentTriggered === true &&
+                     (b.status || '').toLowerCase() !== 'cured');
+      if(mandPre.length){
+        const total = mandPre.reduce((s,b) => s + (+b.prepaymentEventAmount || 0), 0);
+        signals.push({
+          type: 'mandatory_prepay',
+          severity: 'warning',
+          label: 'Mandatory prepayment triggered',
+          detail: mandPre.length + ' event' + (mandPre.length===1?'':'s') +
+                  ' · total ' + total.toLocaleString(undefined,{maximumFractionDigits:0})
+        });
+      }
+
+      // ── Score + top severity
+      const score = signals.reduce((s, x) => s + (SEV_SCORE[x.severity] || 0), 0);
+      const severity = signals.some(x => x.severity === 'critical') ? 'critical'
+                     : signals.some(x => x.severity === 'warning')  ? 'warning'
+                     : signals.length ? 'info' : 'clear';
+
+      rows.push({
+        dealKey, name: dealName, currency: inst.currency, framework: inst.accountingFramework,
+        team: (d.team || inst.team),
+        score, severity, signalCount: signals.length, signals,
+        maturityDate: maturity, eclStage: stage
+      });
+    }
+
+    rows.sort((a,b) => b.score - a.score || a.name.localeCompare(b.name));
+
+    // Roll-up KPIs
+    const kpi = {
+      total:    rows.length,
+      critical: rows.filter(r => r.severity === 'critical').length,
+      warning:  rows.filter(r => r.severity === 'warning').length,
+      info:     rows.filter(r => r.severity === 'info').length,
+      clear:    rows.filter(r => r.severity === 'clear').length,
+      asOf
+    };
+    return { rows, kpi };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Public API
   // ─────────────────────────────────────────────────────────────────────────
@@ -636,7 +853,8 @@
     computeYTM, computeYTC, computeWAL, computeDurationSuite, currentCoupon,
     deriveLoanMetrics, aggregatePortfolio,
     deriveNotices,
-    version: '1.1.0'
+    computeWatchlist,
+    version: '1.2.0'
   };
   if(typeof module !== 'undefined' && module.exports) module.exports = LMA;
   global.LMA = LMA;
