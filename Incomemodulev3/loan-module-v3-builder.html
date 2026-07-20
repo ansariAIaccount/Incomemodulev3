@@ -490,6 +490,14 @@
         Watchlist
         <span id="watchlist-badge" style="display:none; background:#DC2626; color:white; padding:0 5px; border-radius:9px; font-size:10px; font-weight:700; min-width:15px; text-align:center;">0</span>
       </button>
+      <!-- Borrower Financials — Phase 1. AI-extract quarterly/annual borrower financials, auto-update covenant KPIs. -->
+      <button id="financials-header-btn" onclick="window.openFinancialsModal && window.openFinancialsModal()"
+              class="chip"
+              style="font-size:11px; cursor:pointer; background:linear-gradient(135deg,#ECFDF5 0%,#D1FAE5 100%); color:#065F46; border:1px solid #6EE7B7; padding:3px 9px; display:inline-flex; align-items:center; gap:5px;"
+              title="Borrower financials — AI-extract quarterly / annual statements and auto-update covenant KPIs">
+        <span class="material-icons-outlined" style="font-size:13px;">insert_chart</span>
+        Financials
+      </button>
       <!-- Loan Notices Inbox — Tier 1 #3. Badge shows count of notices due in next 7 days. -->
       <button id="notices-header-btn" onclick="window.openNoticesModal && window.openNoticesModal()"
               class="chip"
@@ -3418,6 +3426,161 @@
   </div>
 </div>
 
+<!-- ═══ Borrower Financials modal (Phase 1) ═══
+     Lists past financials per deal + Import Financials button.
+     Each row is a snapshot (Q1 2026, FY 2025, etc.) with the computed
+     covenant KPIs (DSCR, ICR, Leverage) shown inline. -->
+<div id="financials-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeFinancialsModal && window.closeFinancialsModal()"></div>
+  <div class="json-modal-pn" style="width:min(1200px,97vw); max-height:94vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#065F46">insert_chart</span>
+          Borrower Financials
+        </div>
+        <div class="text-[11px] text-gray-500">AI-extracted quarterly / annual borrower statements. Computed KPIs auto-update matching covenants.</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="financials-deal-filter" onchange="window.refreshFinancials && window.refreshFinancials()"
+                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by deal">
+          <option value="">All deals</option>
+        </select>
+        <button onclick="window.openImportFinancialsModal && window.openImportFinancialsModal()"
+                class="mat-btn !py-1 !px-2 text-[11px]"
+                style="background:linear-gradient(135deg,#059669 0%,#0EA5E9 100%); color:white; border:none;"
+                title="Upload a borrower financial statement PDF for AI extraction">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">auto_awesome</span> Import Financials
+        </button>
+        <button onclick="window.refreshFinancials && window.refreshFinancials()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Reload
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeFinancialsModal && window.closeFinancialsModal()">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" style="padding:12px 16px; font-size:12px;">
+      <div id="financials-body" style="max-height:calc(94vh - 180px); overflow:auto;">
+        <div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <span id="financials-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
+      <button class="mat-btn outline" onclick="window.closeFinancialsModal && window.closeFinancialsModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Financials — upload flow -->
+<div id="import-financials-modal" class="json-modal" style="display:none; z-index:10001;">
+  <div class="json-modal-bd" onclick="window.closeImportFinancialsModal && window.closeImportFinancialsModal()"></div>
+  <div class="json-modal-pn" style="width:min(560px,94vw); max-height:90vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#065F46">auto_awesome</span>
+          Import Borrower Financials
+        </div>
+        <div class="text-[11px] text-gray-500">Drop a borrower quarterly / annual PDF. AI extracts BS / P&amp;L / CF and updates covenants.</div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeImportFinancialsModal && window.closeImportFinancialsModal()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:16px 20px;">
+      <div id="import-fin-ai-status" style="margin-bottom:12px; padding:8px 10px; border-radius:6px; font-size:11px;"></div>
+      <div style="margin-bottom:10px;">
+        <label class="text-[10px] uppercase text-gray-600 block">Deal</label>
+        <select id="import-fin-deal-picker" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full">
+          <option value="">— Pick a deal —</option>
+        </select>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label class="text-[10px] uppercase text-gray-600 block">Period type (optional hint)</label>
+        <select id="import-fin-period-hint" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full">
+          <option value="">— Let AI infer —</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="annual">Annual</option>
+          <option value="monthly">Monthly</option>
+          <option value="semi_annual">Semi-annual</option>
+          <option value="ttm">TTM</option>
+          <option value="ytd">YTD</option>
+        </select>
+      </div>
+      <label id="import-fin-dropzone" for="import-fin-file-input" style="display:block; padding:24px; border:2px dashed #6EE7B7; border-radius:8px; background:#ECFDF5; text-align:center; cursor:pointer; transition:background 120ms, border-color 120ms;">
+        <div style="font-size:32px; color:#059669; margin-bottom:6px;">
+          <span class="material-icons-outlined" style="font-size:32px;">upload_file</span>
+        </div>
+        <div style="font-size:13px; font-weight:600; color:#064E3B;">Click to pick a PDF, or drop it here</div>
+        <div style="font-size:11px; color:#6B7280; margin-top:4px;">Up to 25 MB · text-native or scanned</div>
+        <input id="import-fin-file-input" type="file" accept="application/pdf" style="display:none;"
+               onchange="window._onImportFinancialsFilePicked && window._onImportFinancialsFilePicked(this.files[0])"/>
+      </label>
+      <div id="import-fin-file-name" style="display:none; margin-top:8px; padding:6px 10px; background:#F1F5F9; border-radius:4px; font-size:11px; color:#374151;"></div>
+      <div id="import-fin-error" style="display:none; margin-top:8px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+      <div id="import-fin-progress" style="display:none; margin-top:10px; padding:10px; background:#EEF2FF; border:1px solid #C7D2FE; border-radius:6px; font-size:11px; color:#3730A3;">
+        <span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">hourglass_top</span>
+        <span id="import-fin-progress-text">Extracting financials with AI…</span>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <button class="mat-btn outline" onclick="window.closeImportFinancialsModal && window.closeImportFinancialsModal()">Cancel</button>
+      <button id="import-fin-extract-btn" onclick="window.runFinancialsExtraction && window.runFinancialsExtraction()" class="mat-btn primary" disabled>
+        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">auto_awesome</span> Extract with AI
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Review + edit extracted financials -->
+<div id="review-financials-modal" class="json-modal" style="display:none; z-index:10002;">
+  <div class="json-modal-bd" onclick="window.closeReviewFinancialsModal && window.closeReviewFinancialsModal()"></div>
+  <div class="json-modal-pn" style="width:min(1200px,97vw); height:min(92vh, 1100px); display:flex; flex-direction:column;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#059669">preview</span>
+          Review AI-Extracted Financials
+        </div>
+        <div id="review-fin-sub" class="text-[11px] text-gray-500"></div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeReviewFinancialsModal && window.closeReviewFinancialsModal()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:0; flex:1; overflow:hidden; display:flex;">
+      <div style="flex:1; background:#374151; display:flex; flex-direction:column;">
+        <div style="padding:6px 10px; background:#1F2937; color:#F3F4F6; font-size:11px;">
+          <span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">picture_as_pdf</span>
+          <span id="review-fin-pdf-name">Source document</span>
+        </div>
+        <iframe id="review-fin-pdf-frame" style="flex:1; width:100%; border:none;" title="Source PDF"></iframe>
+      </div>
+      <div style="flex:1.1; overflow-y:auto; padding:12px 14px; background:#F9FAFB;">
+        <div id="review-fin-header" style="font-size:11px; color:#6B7280; margin-bottom:10px;"></div>
+        <!-- Computed KPIs panel — dominant, top of the pane -->
+        <div id="review-fin-kpis" style="margin-bottom:12px; padding:10px 12px; background:linear-gradient(135deg,#ECFDF5 0%,#DBEAFE 100%); border:1px solid #86EFAC; border-radius:8px;">
+          <div style="font-size:10.5px; text-transform:uppercase; color:#065F46; font-weight:700; letter-spacing:0.4px; margin-bottom:6px;">Computed covenant KPIs</div>
+          <div id="review-fin-kpi-grid" style="display:grid; grid-template-columns:repeat(2,1fr); gap:6px; font-size:11.5px;"></div>
+          <div id="review-fin-covenant-preview" style="margin-top:8px; padding-top:8px; border-top:1px dashed #86EFAC; font-size:10.5px; color:#065F46;"></div>
+        </div>
+        <!-- 3 sections: BS / IS / CF -->
+        <div id="review-fin-sections"></div>
+        <div id="review-fin-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <span id="review-fin-hint" class="text-[10.5px] text-gray-500 mr-auto"></span>
+      <button class="mat-btn outline" onclick="window.discardFinancialsExtraction && window.discardFinancialsExtraction()">Discard</button>
+      <button id="review-fin-save-btn" onclick="window.saveExtractedFinancials && window.saveExtractedFinancials()" class="mat-btn primary">
+        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">check</span> Save + update covenants
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Loan Agent Notices Inbox (Tier 1 #3) ═══ -->
 <div id="notices-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" onclick="window.closeNoticesModal && window.closeNoticesModal()"></div>
@@ -3535,7 +3698,7 @@
      full breakdown, timeline of status transitions, related deal + run. -->
 <div id="notice-detail-modal" class="json-modal" style="display:none; z-index:10001;">
   <div class="json-modal-bd" onclick="window.closeNoticeDetail && window.closeNoticeDetail()"></div>
-  <div class="json-modal-pn" style="width:min(680px,94vw); max-height:92vh;">
+  <div id="notice-detail-panel" class="json-modal-pn" style="width:min(680px,94vw); max-height:92vh; transition:width 160ms ease;">
     <div class="json-modal-h">
       <div>
         <div class="font-semibold text-[14px] flex items-center gap-2">
@@ -4622,6 +4785,27 @@ window.SB = (function(){
     return { ok:true };
   }
 
+  // Generic partial-update for editable notice fields (amount, dates, type, etc).
+  // Restricted whitelist keeps the caller from accidentally mutating audit /
+  // provenance columns (created_by, sent_at, source_extraction_id, …).
+  async function updateNoticeFields(noticeId, patch){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!noticeId) return { ok:false, reason:'noticeId required' };
+    if(!patch || typeof patch !== 'object') return { ok:false, reason:'patch object required' };
+    const EDITABLE = ['notice_type','notice_date','effective_date','amount','currency',
+                      'reference','rate','breakdown','sender','notes','tranche_id'];
+    const clean = {};
+    for(const k of EDITABLE){
+      if(Object.prototype.hasOwnProperty.call(patch, k)) clean[k] = patch[k];
+    }
+    if(!Object.keys(clean).length) return { ok:false, reason:'no editable fields in patch' };
+    clean.updated_at = new Date().toISOString();
+    const { data, error } = await _client
+      .from('loan_notices').update(clean).eq('id', noticeId).select().single();
+    if(error){ console.error('[SB] updateNoticeFields:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, notice: data };
+  }
+
   // Wipe auto-derived notices for a specific deal — used before Re-derive so
   // cadence/period changes take effect. Manual notices are preserved.
   async function wipeAutoDerivedNoticesForDeal(dealId){
@@ -5063,6 +5247,7 @@ window.SB = (function(){
       source:         'agent_received',   // AI-extracted PDFs are (by definition) received from an agent
       notes:          (merged.notes ? merged.notes + ' · ' : '') + 'AI-extracted from ' + (ex.source_file_name || 'PDF'),
       is_auto_derived: false,
+      source_extraction_id: extractionId,   // FK back to document_extractions for PDF drill-down
       created_by:      _currentUser ? _currentUser.id : null
     };
 
@@ -5153,6 +5338,253 @@ window.SB = (function(){
     } catch(err){
       return { available: false, reason:'Ingestion service unreachable at ' + base + ' — is `npm start` running in the server-ingest/ folder?' };
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Borrower Financials Ingestion (Phase 1)
+  // ═══════════════════════════════════════════════════════════════════
+  // Mirror of the notice extraction plumbing, but for borrower financial
+  // statements. On import → save financials row → auto-compute KPIs →
+  // walk deal's covenants → update lastReportedValue for any matching KPI.
+  async function extractFinancialsFromPdf(file, opts){
+    opts = opts || {};
+    const base = _ingestBaseUrl();
+    if(!base) return { ok:false, reason:'Ingestion Service URL not set — open ⚙️ DB Settings' };
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      if(opts.dealHint)   form.append('deal_hint', opts.dealHint);
+      if(opts.periodHint) form.append('period_hint', opts.periodHint);
+      const r = await fetch(base.replace(/\/$/,'') + '/api/extract/borrower-financials', {
+        method: 'POST', body: form
+      });
+      const j = await r.json();
+      if(!r.ok) return { ok:false, reason: j.reason || 'ingest server error' };
+      return j;
+    } catch(err){
+      console.error('[SB] extractFinancialsFromPdf threw:', err);
+      return { ok:false, reason: err.message };
+    }
+  }
+
+  // Lightweight covenants fetch — used by the financials review UI to
+  // preview which covenants will auto-update on Save.
+  async function fetchCovenantsForDeal(dealId){
+    if(!_client || !_connected || !dealId) return [];
+    const { data, error } = await _client.from('covenants')
+      .select('id, name, kpi_metric, direction, threshold, last_reported_value, last_reported_date')
+      .eq('deal_id', dealId);
+    if(error){ console.error('[SB] fetchCovenantsForDeal:', error); return []; }
+    return data || [];
+  }
+
+  async function fetchBorrowerFinancials(dealId){
+    if(!_client || !_connected) return [];
+    let q = _client.from('borrower_financials').select('*')
+      .order('as_of_date', { ascending: false });
+    if(dealId) q = q.eq('deal_id', dealId);
+    const { data, error } = await q;
+    if(error){ console.error('[SB] fetchBorrowerFinancials:', error); return []; }
+    return data || [];
+  }
+
+  // ─── Storage / provenance helpers for "view saved row" ─────────
+  // Returns a signed download URL (default 5 min) for a private notice-docs path.
+  // `uploadNoticeDoc` historically stored the bucket name inside the object
+  // key (e.g. name = "notice-docs/<uid>/2026/07/…"), so we try the path
+  // exactly as recorded first, and only strip the redundant prefix as a
+  // fallback for future rows where we clean this up.
+  async function getSignedDocUrl(path, seconds){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!path) return { ok:false, reason:'path required' };
+    seconds = seconds || 300;
+    const candidates = [path];
+    if(path.startsWith('notice-docs/')) candidates.push(path.replace(/^notice-docs\//, ''));
+    else candidates.push('notice-docs/' + path);
+    let lastErr = null;
+    for(const key of candidates){
+      try {
+        const { data, error } = await _client.storage.from('notice-docs').createSignedUrl(key, seconds);
+        if(!error && data && data.signedUrl){ return { ok:true, url: data.signedUrl, key }; }
+        lastErr = error;
+      } catch(err){ lastErr = err; }
+    }
+    console.error('[SB] getSignedDocUrl: no candidate resolved', { path, candidates, lastErr });
+    return { ok:false, reason: (lastErr && lastErr.message) || 'not found' };
+  }
+  // Load a single document_extractions row (used to resolve source PDF for
+  // an already-imported borrower_financials record).
+  async function getExtractionById(id){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!id) return { ok:false, reason:'id required' };
+    const { data, error } = await _client.from('document_extractions')
+      .select('id, deal_id, source_file_path, source_file_name, source_file_size, model_used, processing_ms, confidence, extracted_json, review_status, created_at')
+      .eq('id', id).maybeSingle();
+    if(error){ console.error('[SB] getExtractionById:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, extraction: data };
+  }
+  // Delete a saved borrower_financials row (for the "delete this record"
+  // action in edit mode). Does NOT reset covenant.lastReportedValue —
+  // deleting a snapshot doesn't invalidate the last known KPI.
+  async function deleteBorrowerFinancials(id){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!id) return { ok:false, reason:'id required' };
+    const { error } = await _client.from('borrower_financials').delete().eq('id', id);
+    if(error){ console.error('[SB] deleteBorrowerFinancials:', error); return { ok:false, reason: error.message }; }
+    return { ok:true };
+  }
+
+  async function saveBorrowerFinancials(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!row || !row.deal_id || !row.as_of_date){
+      return { ok:false, reason:'deal_id + as_of_date required' };
+    }
+    const payload = Object.assign({
+      period_type: 'quarterly', currency: 'USD',
+      created_by: _currentUser ? _currentUser.id : null,
+      updated_at: new Date().toISOString()
+    }, row);
+    // Upsert on natural key so re-importing the same period overwrites
+    const { data, error } = await _client.from('borrower_financials')
+      .upsert(payload, { onConflict: 'deal_id,as_of_date,period_type', ignoreDuplicates: false })
+      .select().single();
+    if(error){ console.error('[SB] saveBorrowerFinancials:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, financials: data };
+  }
+
+  // The main import workflow: takes extraction JSON + editedFields, flattens
+  // into a borrower_financials row, saves, then updates any matching covenants.
+  async function importFinancialsAsRecord(extractionId, editedExtraction, dealId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!dealId) return { ok:false, reason:'dealId required' };
+    if(!editedExtraction) return { ok:false, reason:'editedExtraction required' };
+
+    // Compute KPIs client-side (analytics.js is authoritative)
+    const kpis = (typeof LMA !== 'undefined' && LMA.computeFinancialKpis)
+      ? LMA.computeFinancialKpis(editedExtraction) : {};
+
+    const bs = editedExtraction.balance_sheet   || {};
+    const is = editedExtraction.income_statement || {};
+    const cf = editedExtraction.cash_flow       || {};
+
+    const row = {
+      deal_id:              dealId,
+      as_of_date:           editedExtraction.as_of_date,
+      period_type:          editedExtraction.period_type || 'quarterly',
+      currency:             editedExtraction.currency || 'USD',
+      fiscal_year_end:      editedExtraction.fiscal_year_end || null,
+      borrower_name:        editedExtraction.borrower_name || null,
+      reporter_note:        editedExtraction.reporter_note || null,
+      // Balance sheet
+      total_assets:         bs.total_assets ?? null,
+      current_assets:       bs.current_assets ?? null,
+      cash:                 bs.cash ?? null,
+      accounts_receivable:  bs.accounts_receivable ?? null,
+      inventory:            bs.inventory ?? null,
+      fixed_assets:         bs.fixed_assets ?? null,
+      total_liabilities:    bs.total_liabilities ?? null,
+      current_liabilities:  bs.current_liabilities ?? null,
+      accounts_payable:     bs.accounts_payable ?? null,
+      short_term_debt:      bs.short_term_debt ?? null,
+      long_term_debt:       bs.long_term_debt ?? null,
+      total_debt:           bs.total_debt != null ? bs.total_debt : ((bs.short_term_debt ?? 0) + (bs.long_term_debt ?? 0)) || null,
+      total_equity:         bs.total_equity ?? null,
+      // Income statement
+      revenue:              is.revenue ?? null,
+      cogs:                 is.cogs ?? null,
+      gross_profit:         is.gross_profit ?? null,
+      operating_expenses:   is.operating_expenses ?? null,
+      ebitda:               is.ebitda ?? null,
+      depreciation_amort:   is.depreciation_amort ?? null,
+      ebit:                 is.ebit ?? null,
+      interest_expense:     is.interest_expense ?? null,
+      tax_expense:          is.tax_expense ?? null,
+      net_income:           is.net_income ?? null,
+      // Cash flow
+      operating_cash_flow:  cf.operating_cash_flow ?? null,
+      capex:                cf.capex ?? null,
+      free_cash_flow:       cf.free_cash_flow ?? null,
+      principal_payments:   cf.principal_payments ?? null,
+      // Auto-computed KPIs
+      dscr:                 kpis.dscr,
+      interest_coverage:    kpis.interest_coverage,
+      leverage_ratio:       kpis.leverage_ratio,
+      net_leverage_ratio:   kpis.net_leverage_ratio,
+      current_ratio:        kpis.current_ratio,
+      debt_to_equity:       kpis.debt_to_equity,
+      quick_ratio:          kpis.quick_ratio,
+      // Provenance
+      source_extraction_id: extractionId || null,
+      raw_extraction_json:  editedExtraction,
+      confidence:           editedExtraction.confidence ?? null,
+      notes:                editedExtraction.notes || null
+    };
+
+    const saveRes = await saveBorrowerFinancials(row);
+    if(!saveRes.ok) return saveRes;
+
+    // Link extraction back to the financials record
+    if(extractionId){
+      await _client.from('document_extractions')
+        .update({
+          review_status: 'imported',
+          reviewed_by:   _currentUser ? _currentUser.id : null,
+          reviewed_at:   new Date().toISOString(),
+          extracted_json: editedExtraction,
+          deal_id:       dealId
+        })
+        .eq('id', extractionId);
+    }
+
+    // ─── Auto-update covenant.lastReportedValue for any covenant whose
+    // kpiMetric maps to a KPI we just computed. This is the killer feature.
+    let covenantsUpdated = 0;
+    const updateDetails = [];
+    try {
+      const { data: covs, error: covErr } = await _client
+        .from('covenants')
+        .select('id, name, kpi_metric, direction, threshold, last_reported_value, last_reported_date')
+        .eq('deal_id', dealId);
+      if(!covErr && Array.isArray(covs)){
+        for(const c of covs){
+          const v = (typeof LMA !== 'undefined' && LMA.covenantKpiValue)
+            ? LMA.covenantKpiValue(c.kpi_metric, kpis) : null;
+          if(v == null) continue;
+          const prior = c.last_reported_value != null ? +c.last_reported_value : null;
+          const { error: upErr } = await _client.from('covenants')
+            .update({
+              last_reported_value: v,
+              last_reported_date:  editedExtraction.as_of_date,
+              updated_at:          new Date().toISOString()
+            })
+            .eq('id', c.id);
+          if(!upErr){
+            covenantsUpdated++;
+            updateDetails.push({
+              covenant: c.name || c.kpi_metric,
+              kpi: c.kpi_metric,
+              prior_value: prior,
+              new_value: v,
+              threshold: +c.threshold,
+              direction: c.direction,
+              breached: (c.direction === 'min' || c.direction === 'gte') ? v < +c.threshold
+                       : (c.direction === 'max' || c.direction === 'lte') ? v > +c.threshold
+                       : false
+            });
+          }
+        }
+      }
+    } catch(err){
+      console.warn('[SB] covenant auto-update failed (non-fatal):', err);
+    }
+
+    return {
+      ok: true,
+      financials: saveRes.financials,
+      kpis,
+      covenantsUpdated,
+      updateDetails
+    };
   }
 
   async function syncBreachLog(dealId, covList, pSched){
@@ -6609,7 +7041,7 @@ window.SB = (function(){
   return {
     init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals, syncBreachLog,
     // Loan agent notices (Tier 1 #3)
-    fetchNotices, upsertNotice, bulkInsertNotices, updateNoticeStatus, deleteNotice, wipeAutoDerivedNoticesForDeal,
+    fetchNotices, upsertNotice, bulkInsertNotices, updateNoticeStatus, updateNoticeFields, deleteNotice, wipeAutoDerivedNoticesForDeal,
     // Notice Phase 2 — recipients + reconciliation
     fetchRecipients, upsertRecipient, deleteRecipient,
     fetchJournalEntriesForDeal,
@@ -6625,6 +7057,10 @@ window.SB = (function(){
     discardDocumentExtraction,
     // Notice matching (Phase 2 — pair Expected vs Received)
     pairNotices, unpairNotice,
+    // Borrower Financials (Phase 1)
+    extractFinancialsFromPdf, fetchBorrowerFinancials, saveBorrowerFinancials, importFinancialsAsRecord,
+    getSignedDocUrl, getExtractionById, deleteBorrowerFinancials,
+    fetchCovenantsForDeal,
     // Approval workflow (#231)
     getRun, approveRun, postRun, reopenRun,
     // Auth
@@ -14347,23 +14783,90 @@ function _renderNoticeActions(n){
     acknowledged: { label:'Complete',         next:'completed' }
   };
   const next = nextByStatus[n.status];
-  if(!next) return '<span style="color:#94A3B8; font-size:10px;">—</span>';
-  return '<button onclick="window.transitionNotice(\'' + n.id + '\',\'' + next.next + '\')" ' +
-         'style="padding:2px 8px; background:white; border:1px solid #D1D5DB; border-radius:4px; font-size:10px; cursor:pointer; color:#374151;">' +
-         next.label + '</button>' +
-         ' <button onclick="window.transitionNotice(\'' + n.id + '\',\'cancelled\')" ' +
-         'style="padding:2px 6px; background:white; border:1px solid #FCA5A5; border-radius:4px; font-size:10px; cursor:pointer; color:#DC2626;" title="Cancel this notice">×</button>';
+  const nextBtn = next
+    ? '<button onclick="window.transitionNotice(\'' + n.id + '\',\'' + next.next + '\')" ' +
+      'style="padding:2px 8px; background:white; border:1px solid #D1D5DB; border-radius:4px; font-size:10px; cursor:pointer; color:#374151;">' +
+      next.label + '</button>'
+    : '';
+  // Real DELETE (with confirm) — the previous × set status to cancelled which
+  // left the row visible. Users overwhelmingly wanted this to actually delete.
+  const delBtn = '<button onclick="window.confirmDeleteNotice(\'' + n.id + '\')" ' +
+    'style="padding:2px 6px; margin-left:3px; background:white; border:1px solid #FCA5A5; border-radius:4px; font-size:10px; cursor:pointer; color:#DC2626;" title="Delete this notice permanently">' +
+    '<span class="material-icons-outlined" style="font-size:12px; vertical-align:-2px;">delete</span></button>';
+  return nextBtn + delBtn;
 }
+
+// Delete with confirm — reuses SB.deleteNotice, refreshes the list on success.
+// For matched pairs, unlinks the partner via the sync_notice_pairing trigger.
+// showAppDialog uses a Promise-return API: opts.confirmLabel + opts.cancelLabel,
+// resolves to true when the user clicks the confirm button.
+window.confirmDeleteNotice = async function(noticeId){
+  const n = (window._noticesCache || []).find(x => x.id === noticeId);
+  if(!n){ toast('Notice not found — refresh first'); return; }
+  const label = ((n.notice_type || 'notice') + ' · ' + (n.effective_date || '') +
+    (n.amount != null ? ' · ' + (n.currency || 'USD') + ' ' + (+n.amount).toLocaleString() : '') +
+    (n.reference ? ' · ' + n.reference : '')).slice(0, 200);
+  let confirmed = false;
+  if(window.showAppDialog){
+    confirmed = await window.showAppDialog({
+      severity:     'warning',
+      title:        'Delete this notice?',
+      message:      label,
+      detail:       'This cannot be undone. If the notice is matched to another, the pair link clears automatically.',
+      confirmLabel: 'Delete',
+      cancelLabel:  'Cancel'
+    });
+  } else {
+    confirmed = confirm('Delete this notice?\n\n' + label + '\n\nThis cannot be undone.');
+  }
+  if(!confirmed) return;
+  const res = await window.SB.deleteNotice(noticeId);
+  if(!res.ok){ toast('Delete failed: ' + res.reason, 5000); return; }
+  // Snappy UX: strip from cache immediately, then re-render
+  window._noticesCache = (window._noticesCache || []).filter(x => x.id !== noticeId);
+  toast('Notice deleted', 2500);
+  if(typeof window.refreshNotices === 'function') window.refreshNotices();
+};
 
 // ─── Notice detail modal — full row inspection ──────────────
 window._currentNoticeId = null;
 
-window.openNoticeDetail = function(noticeId){
+window.openNoticeDetail = async function(noticeId){
   const n = (window._noticesCache || []).find(x => x.id === noticeId);
   if(!n){ toast('Notice not found in cache — try Refresh'); return; }
   window._currentNoticeId = noticeId;
+  window._noticeEditDirty = false;   // reset per-open
+  window._noticeEditState = { patch: {} };
   const modal = document.getElementById('notice-detail-modal');
   if(!modal) return;
+  // Resolve the source PDF (signed URL) if this notice came from an AI extract
+  let pdfUrl = null;
+  let extraction = null;
+  if(n.source_extraction_id && window.SB && window.SB.getExtractionById){
+    try {
+      const r = await window.SB.getExtractionById(n.source_extraction_id);
+      if(r.ok && r.extraction){
+        extraction = r.extraction;
+        if(extraction.source_file_path && window.SB.getSignedDocUrl){
+          const s = await window.SB.getSignedDocUrl(extraction.source_file_path, 600);
+          if(s.ok) pdfUrl = s.url;
+        }
+      }
+    } catch(_){ /* silent — PDF pane will show unavailable */ }
+  }
+  // Widen the panel to two-pane when we have a PDF (or when the notice came
+  // from an AI extract at all — user still wants to see extracted-fields view).
+  const twoPane = !!(n.source_extraction_id || pdfUrl);
+  const panel = document.getElementById('notice-detail-panel');
+  if(panel){
+    panel.style.width = twoPane ? 'min(1180px, 97vw)' : 'min(680px, 94vw)';
+    panel.style.maxHeight = twoPane ? 'min(92vh, 1100px)' : '92vh';
+  }
+  // Stash for saveNoticeEdits + renderer
+  window._noticeEditState.notice = n;
+  window._noticeEditState.pdfUrl = pdfUrl;
+  window._noticeEditState.extraction = extraction;
+  window._noticeEditState.twoPane = twoPane;
   // Build the deal-name lookup once
   const dealNameById = {};
   for(const p of (window.PRESETS || [])){
@@ -14451,15 +14954,182 @@ window.openNoticeDetail = function(noticeId){
           'class="mat-btn outline" style="color:#DC2626; border-color:#FCA5A5;">Cancel notice</button>' +
       '</div>'
     : '';
-  document.getElementById('nd-body').innerHTML = kvHtml + notesHtml + timelineHtml + breakdownHtml + actionsHtml;
+  // ── Two-pane rendering: PDF (left) + editable form (right) when the notice
+  // came from an AI-extracted agent PDF. Otherwise, fall back to the compact
+  // single-column view for system-derived / manual notices.
+  const body = document.getElementById('nd-body');
+  if(twoPane){
+    body.style.padding = '0';
+    body.style.background = '#F9FAFB';
+    // Build the editable form panel
+    const fc = (extraction && extraction.extracted_json && extraction.extracted_json.field_confidence) || {};
+    const confBadge = (c) => {
+      if(c == null) return '';
+      const pct = Math.round(c * 100);
+      const color = c >= 0.8 ? '#166534' : c >= 0.5 ? '#92400E' : '#991B1B';
+      const bg    = c >= 0.8 ? '#DCFCE7' : c >= 0.5 ? '#FEF3C7' : '#FEE2E2';
+      return '<span style="padding:0 5px; border-radius:9px; font-size:9px; font-weight:700; background:' + bg + '; color:' + color + '; margin-left:5px;">AI ' + pct + '%</span>';
+    };
+    const field = (key, label, val, opts) => {
+      opts = opts || {};
+      const inputAttrs = 'data-notice-edit-key="' + key + '" ' +
+        'onchange="window._onNoticeFieldEdit && window._onNoticeFieldEdit(this)" ' +
+        'oninput="window._onNoticeFieldEdit && window._onNoticeFieldEdit(this)"';
+      let input;
+      if(opts.type === 'select'){
+        input = '<select ' + inputAttrs + ' style="width:100%; padding:5px 6px; border:1px solid #D1D5DB; border-radius:4px; font-size:12px;">' +
+          opts.options.map(o => '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o.replace(/_/g,' ') + '</option>').join('') +
+        '</select>';
+      } else {
+        const t = opts.type || 'text';
+        const step = t === 'number' ? ' step="any"' : '';
+        input = '<input type="' + t + '"' + step + ' ' + inputAttrs +
+          ' value="' + (val != null ? String(val).replace(/"/g,'&quot;') : '') + '" ' +
+          'style="width:100%; padding:5px 6px; border:1px solid #D1D5DB; border-radius:4px; font-size:12px; font-variant-numeric:tabular-nums;"/>';
+      }
+      return '<div><label style="font-size:9.5px; color:#475569; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; display:block; margin-bottom:2px;">' +
+        label + confBadge(fc[key]) + '</label>' + input + '</div>';
+    };
+    const noticeTypes = ['drawdown','interest','repayment','prepayment','rate_reset','fee','waiver','amendment','default','other'];
+    const rateForEdit = n.rate != null ? +(n.rate * 100).toFixed(6) : '';   // display as percent
+    const formHtml =
+      '<div style="padding:10px 14px 4px;">' +
+        '<div style="font-size:10px; text-transform:uppercase; color:#065F46; font-weight:700; letter-spacing:0.4px; margin-bottom:6px;">Extracted fields — editable</div>' +
+        '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 10px;">' +
+          field('notice_type',    'Type',            n.notice_type,    { type:'select', options: noticeTypes }) +
+          field('reference',      'Reference',       n.reference,      { type:'text' }) +
+          field('notice_date',    'Notice date',     n.notice_date,    { type:'date' }) +
+          field('effective_date', 'Effective date',  n.effective_date, { type:'date' }) +
+          field('amount',         'Amount',          n.amount,         { type:'number' }) +
+          field('currency',       'Currency',        n.currency,       { type:'text' }) +
+          field('rate',           'Rate (%)',        rateForEdit,      { type:'number' }) +
+          field('sender',         'Sender / agent',  n.sender,         { type:'text' }) +
+        '</div>' +
+      '</div>';
+    // Reuse the existing prose blocks (notes / timeline / breakdown / actions)
+    const rightExtras =
+      '<div style="padding:0 14px 12px;">' +
+        (notesHtml || '') + (timelineHtml || '') + (breakdownHtml || '') +
+        (actionsHtml ? '<div style="margin-top:8px;">' + actionsHtml + '</div>' : '') +
+      '</div>';
+    // Left pane: PDF or placeholder
+    const pdfName = (extraction && extraction.source_file_name) || 'Source document';
+    const leftPane =
+      '<div style="flex:1; background:#374151; display:flex; flex-direction:column; min-width:0;">' +
+        '<div style="padding:6px 10px; background:#1F2937; color:#F3F4F6; font-size:11px;">' +
+          '<span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">picture_as_pdf</span> ' +
+          pdfName.replace(/</g,'&lt;') +
+        '</div>' +
+        (pdfUrl
+          ? '<iframe src="' + pdfUrl + '#toolbar=1&navpanes=0" style="flex:1; width:100%; border:none;" title="Notice PDF"></iframe>'
+          : '<div style="flex:1; display:flex; align-items:center; justify-content:center; color:#9CA3AF; font-size:12px; padding:40px; text-align:center;">' +
+              '<div><div style="font-size:32px; margin-bottom:6px;">📄</div>Source PDF unavailable<br/>' +
+              '<span style="font-size:10.5px;">(extraction row present but storage object could not be signed)</span></div>' +
+            '</div>') +
+      '</div>';
+    // Right pane wrapper with save-status footer
+    const rightPane =
+      '<div style="flex:1.1; overflow-y:auto; min-width:0;">' +
+        formHtml + rightExtras +
+      '</div>';
+    body.innerHTML =
+      '<div style="display:flex; height:min(78vh, 900px); overflow:hidden;">' + leftPane + rightPane + '</div>' +
+      '<div id="nd-edit-status" style="display:none; padding:6px 14px; background:#FEF2F2; color:#7F1D1D; font-size:11px; border-top:1px solid #FCA5A5;"></div>';
+    // Show Save Edits button in footer + a "dirty" hint
+    _wireNoticeEditFooter(true);
+  } else {
+    body.style.padding = '16px 20px';
+    body.style.background = '';
+    body.innerHTML = kvHtml + notesHtml + timelineHtml + breakdownHtml + actionsHtml;
+    _wireNoticeEditFooter(false);
+  }
   document.getElementById('nd-footer-audit').textContent = 'id: ' + n.id;
   modal.style.display = 'flex';
+};
+
+// Add / remove the "Save edits" button in the notice-detail footer.
+function _wireNoticeEditFooter(show){
+  const footer = document.querySelector('#notice-detail-modal .json-modal-f');
+  if(!footer) return;
+  let btn = document.getElementById('nd-save-edits-btn');
+  if(show){
+    if(!btn){
+      btn = document.createElement('button');
+      btn.id = 'nd-save-edits-btn';
+      btn.className = 'mat-btn primary';
+      btn.style.cssText = 'background:#059669; border-color:#059669; color:#fff;';
+      btn.setAttribute('onclick', 'window.saveNoticeEdits && window.saveNoticeEdits()');
+      btn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">save</span> Save edits';
+      btn.disabled = true;
+      // Insert before the trailing Close button
+      const closeBtn = footer.querySelector('.mat-btn.outline');
+      if(closeBtn) footer.insertBefore(btn, closeBtn); else footer.appendChild(btn);
+    } else {
+      btn.style.display = ''; btn.disabled = true;
+      btn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">save</span> Save edits';
+    }
+  } else if(btn){
+    btn.style.display = 'none';
+  }
+}
+
+// Track edits per-field on the fly — writes into _noticeEditState.patch and
+// flips the Save button on when anything changed.
+window._onNoticeFieldEdit = function(el){
+  const state = window._noticeEditState; if(!state || !state.notice) return;
+  const key = el.getAttribute('data-notice-edit-key');
+  let val = el.value;
+  if(val === '') val = null;
+  else if(el.type === 'number') val = +val;
+  // rate is displayed as % — persist as decimal
+  if(key === 'rate' && val != null && !isNaN(val)) val = val / 100;
+  state.patch[key] = val;
+  window._noticeEditDirty = Object.keys(state.patch).some(k => {
+    const orig = state.notice[k];
+    const cur  = state.patch[k];
+    // treat null/undefined/'' as equal for dirty check
+    const norm = v => v == null || v === '' ? null : v;
+    return norm(orig) !== norm(cur);
+  });
+  const btn = document.getElementById('nd-save-edits-btn');
+  if(btn) btn.disabled = !window._noticeEditDirty;
+};
+
+// Persist the accumulated patch to loan_notices and refresh caches.
+window.saveNoticeEdits = async function(){
+  const state = window._noticeEditState;
+  const nId = window._currentNoticeId;
+  if(!state || !nId || !window._noticeEditDirty) return;
+  const status = document.getElementById('nd-edit-status');
+  const btn = document.getElementById('nd-save-edits-btn');
+  if(btn){ btn.disabled = true; btn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">hourglass_top</span> Saving…'; }
+  try {
+    const res = await window.SB.updateNoticeFields(nId, state.patch);
+    if(!res.ok) throw new Error(res.reason);
+    // Update in-memory cache so the next re-render is fresh
+    const idx = (window._noticesCache || []).findIndex(x => x.id === nId);
+    if(idx >= 0) window._noticesCache[idx] = res.notice;
+    window._noticeEditDirty = false;
+    window._noticeEditState.patch = {};
+    toast('Notice updated', 2500);
+    if(typeof _renderNotices === 'function') try { _renderNotices(); } catch(_){}
+    // Re-open to reflect saved values + reset badges/dirty flag
+    await window.openNoticeDetail(nId);
+  } catch(e){
+    console.error('[notice-edit] save failed:', e);
+    if(status){ status.style.display = ''; status.textContent = 'Save failed: ' + e.message; }
+    if(btn){ btn.disabled = false; btn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">save</span> Save edits'; }
+  }
 };
 
 window.closeNoticeDetail = function(){
   const modal = document.getElementById('notice-detail-modal');
   if(modal) modal.style.display = 'none';
   window._currentNoticeId = null;
+  window._noticeEditDirty = false;
+  window._noticeEditState = null;
+  // Hide the Save Edits button on next open (rebuilt as needed)
+  _wireNoticeEditFooter(false);
 };
 
 // Delete the currently-open notice — confirmation via app dialog
@@ -15261,6 +15931,619 @@ async function _doDiscardExtraction(state){
   window.closeReviewExtractionModal();
   toast('Extraction discarded', 2500);
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// Borrower Financials — Import + Review + Auto-Update Covenants
+// ═════════════════════════════════════════════════════════════════════
+// Mirror of the notice extraction flow, adapted for balance-sheet / P&L /
+// cash-flow schema and post-save covenant KPI updates.
+window._financialsState = null;   // upload state
+window._reviewFinState  = null;   // review-modal state
+
+// ─── Main Financials modal (list view) ───────────────────────────
+window.openFinancialsModal = async function(){
+  const el = document.getElementById('financials-modal');
+  if(!el){ console.error('[financials] modal not found'); return; }
+  el.style.display = 'flex';
+  await window.refreshFinancials();
+};
+window.closeFinancialsModal = function(){
+  const el = document.getElementById('financials-modal');
+  if(el) el.style.display = 'none';
+};
+
+window.refreshFinancials = async function(){
+  const body = document.getElementById('financials-body');
+  const sum  = document.getElementById('financials-summary');
+  body.innerHTML = '<div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>';
+  // Populate deal filter dropdown (DB-saved deals)
+  const dealSel = document.getElementById('financials-deal-filter');
+  if(dealSel){
+    const prev = dealSel.value;
+    dealSel.innerHTML = '<option value="">All deals</option>';
+    for(const p of (window.PRESETS || [])){
+      const uuid = p.dealId || p._dbDealId || p.dbDealId;
+      if(!uuid || p.source !== 'db') continue;
+      const opt = document.createElement('option');
+      opt.value = uuid; opt.textContent = p.label + ' (' + (p.dealCode || '') + ')';
+      dealSel.appendChild(opt);
+    }
+    if(prev) dealSel.value = prev;
+  }
+  const dealFilter = (dealSel && dealSel.value) || null;
+  if(!window.SB || !window.SB.fetchBorrowerFinancials){
+    body.innerHTML = '<div style="padding:20px; color:#B91C1C;">DB not connected.</div>'; return;
+  }
+  const rows = await window.SB.fetchBorrowerFinancials(dealFilter);
+  window._financialsCache = rows;
+  const dealNameById = {};
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(uuid) dealNameById[uuid] = p.label || p.dealCode || uuid;
+  }
+  const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const money = (v, ccy) => v == null ? '—' : (ccy ? ccy + ' ' : '') + (+v).toLocaleString(undefined,{maximumFractionDigits:0});
+  const ratio = (v, unit) => v == null ? '—' : (+v).toFixed(2) + (unit || '');
+
+  if(!rows.length){
+    body.innerHTML = '<div style="padding:40px; text-align:center; color:#6B7280;">' +
+      '<div style="font-size:28px; margin-bottom:8px;">📊</div>' +
+      '<div style="font-weight:600; margin-bottom:4px;">No borrower financials yet</div>' +
+      '<div style="font-size:11px; margin-bottom:12px;">Click <b>Import Financials</b> to upload a borrower\'s quarterly / annual PDF. AI extracts the balance sheet, P&L, and cash flow — then computes DSCR / ICR / Leverage and auto-updates matching covenants.</div>' +
+    '</div>';
+    sum.textContent = '0 records';
+    return;
+  }
+  body.innerHTML = '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+    '<thead style="background:#F1F5F9; position:sticky; top:0;"><tr>' +
+      ['Deal','As of','Period','Revenue','EBITDA','Total Debt','DSCR','ICR','Leverage','Confidence','']
+        .map(h => '<th style="text-align:left; padding:6px 10px; font-size:10px; text-transform:uppercase; color:#475569;">' + h + '</th>').join('') +
+    '</tr></thead><tbody>' +
+    rows.map((r, i) => {
+      const conf = r.confidence != null ? Math.round(+r.confidence * 100) : null;
+      const confColor = conf == null ? '#94A3B8' : conf >= 80 ? '#166534' : conf >= 50 ? '#92400E' : '#991B1B';
+      const hasPdf = !!r.source_extraction_id;
+      return '<tr data-fin-idx="' + i + '" class="fin-row" style="border-top:1px solid #F1F5F9; cursor:pointer;" ' +
+             'onmouseover="this.style.background=\'#F0FDF4\'" onmouseout="this.style.background=\'\'" ' +
+             'title="Click to open — view source PDF and edit extracted fields">' +
+        '<td style="padding:6px 10px; font-weight:600;">' + escHtml(dealNameById[r.deal_id] || r.deal_id.slice(0,8)) +
+          (r.borrower_name ? '<div style="font-size:9.5px; color:#6B7280;">' + escHtml(r.borrower_name) + '</div>' : '') + '</td>' +
+        '<td style="padding:6px 10px; font-family:ui-monospace,monospace;">' + escHtml(r.as_of_date) + '</td>' +
+        '<td style="padding:6px 10px; font-size:10.5px;"><span style="padding:1px 6px; background:#EEF2FF; color:#3730A3; border-radius:9px; font-size:9.5px;">' + escHtml(r.period_type) + '</span></td>' +
+        '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;">' + money(r.revenue, r.currency) + '</td>' +
+        '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600;">' + money(r.ebitda, r.currency) + '</td>' +
+        '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;">' + money(r.total_debt, r.currency) + '</td>' +
+        '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600;">' + ratio(r.dscr, 'x') + '</td>' +
+        '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600;">' + ratio(r.interest_coverage, 'x') + '</td>' +
+        '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600;">' + ratio(r.leverage_ratio, 'x') + '</td>' +
+        '<td style="padding:6px 10px; color:' + confColor + '; font-weight:600;">' + (conf != null ? conf + '%' : '—') + '</td>' +
+        '<td style="padding:6px 10px; text-align:right;">' +
+          (hasPdf ? '<span class="material-icons-outlined text-[15px]" title="Source PDF available" style="color:#059669; vertical-align:-3px;">picture_as_pdf</span> '
+                  : '<span class="material-icons-outlined text-[15px]" title="No PDF linked — fields only" style="color:#94A3B8; vertical-align:-3px;">edit_note</span> ') +
+          '<span class="material-icons-outlined text-[15px]" style="color:#4F46E5; vertical-align:-3px;">chevron_right</span>' +
+        '</td>' +
+      '</tr>';
+    }).join('') +
+    '</tbody></table>';
+  // Wire row clicks — delegated to keep re-renders cheap
+  const tb = body.querySelector('tbody');
+  if(tb){
+    tb.addEventListener('click', function(e){
+      const tr = e.target.closest('tr.fin-row');
+      if(!tr) return;
+      const idx = +tr.getAttribute('data-fin-idx');
+      const row = (window._financialsCache || [])[idx];
+      if(row && typeof window.openSavedFinancialsRow === 'function'){
+        window.openSavedFinancialsRow(row);
+      }
+    });
+  }
+  sum.textContent = rows.length + ' record' + (rows.length===1?'':'s') + ' — click any row to view the PDF and edit fields';
+};
+
+// ─── Upload flow ────────────────────────────────────────────────
+// Wire drag-and-drop on the Import Financials dropzone (idempotent).
+function _wireFinancialsDropzone(){
+  const dz = document.getElementById('import-fin-dropzone');
+  if(!dz || dz.__dndWired) return;
+  dz.__dndWired = true;
+  const paint = (active) => {
+    dz.style.borderColor = active ? '#059669' : '#6EE7B7';
+    dz.style.background  = active ? '#D1FAE5' : '#ECFDF5';
+  };
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    if(e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    paint(true);
+  }));
+  ['dragleave','dragend'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); paint(false);
+  }));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); e.stopPropagation(); paint(false);
+    const dt = e.dataTransfer;
+    if(!dt || !dt.files || !dt.files.length) return;
+    const file = dt.files[0];
+    // Sync into the hidden <input> so downstream code sees the same file
+    try {
+      const input = document.getElementById('import-fin-file-input');
+      if(input && typeof DataTransfer !== 'undefined'){
+        const t = new DataTransfer(); t.items.add(file); input.files = t.files;
+      }
+    } catch(_){ /* not fatal — state.file below is source of truth */ }
+    if(typeof window._onImportFinancialsFilePicked === 'function'){
+      window._onImportFinancialsFilePicked(file);
+    }
+  });
+}
+
+window.openImportFinancialsModal = async function(){
+  const modal = document.getElementById('import-financials-modal');
+  if(!modal) return;
+  window._financialsState = { file: null, dealId: null, dealHint: null, periodHint: null };
+  document.getElementById('import-fin-file-input').value = '';
+  document.getElementById('import-fin-file-name').style.display = 'none';
+  document.getElementById('import-fin-error').style.display = 'none';
+  document.getElementById('import-fin-progress').style.display = 'none';
+  document.getElementById('import-fin-extract-btn').disabled = true;
+  _wireFinancialsDropzone();
+  const sel = document.getElementById('import-fin-deal-picker');
+  sel.innerHTML = '<option value="">— Pick a deal —</option>';
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(!uuid || p.source !== 'db') continue;
+    const opt = document.createElement('option');
+    opt.value = uuid; opt.textContent = p.label + ' (' + (p.dealCode || '') + ')';
+    opt.dataset.hint = p.label;
+    sel.appendChild(opt);
+  }
+  document.getElementById('import-fin-period-hint').value = '';
+  modal.style.display = 'flex';
+  // AI status probe
+  if(window.SB && window.SB.checkAiExtractStatus){
+    const status = await window.SB.checkAiExtractStatus();
+    const el = document.getElementById('import-fin-ai-status');
+    if(status.available){
+      el.style.background = '#DCFCE7'; el.style.border = '1px solid #86EFAC'; el.style.color = '#166534';
+      el.innerHTML = '<span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">check_circle</span> ' +
+        '<b>AI ready</b> — ' + (status.model || 'Claude') + ' will extract this statement.';
+    } else {
+      el.style.background = '#FEF3C7'; el.style.border = '1px solid #FCD34D'; el.style.color = '#92400E';
+      el.innerHTML = '<span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">info</span> ' +
+        '<b>Mock mode</b> — ' + (status.reason || 'no key') + '. Extraction returns placeholder data.';
+    }
+  }
+};
+window.closeImportFinancialsModal = function(){
+  const el = document.getElementById('import-financials-modal');
+  if(el) el.style.display = 'none';
+  window._financialsState = null;
+};
+
+window._onImportFinancialsFilePicked = function(file){
+  if(!file) return;
+  if(file.type && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || '')){
+    const err = document.getElementById('import-fin-error');
+    err.style.display = ''; err.textContent = 'Only PDF files are supported.'; return;
+  }
+  if(file.size > 25 * 1024 * 1024){
+    const err = document.getElementById('import-fin-error');
+    err.style.display = ''; err.textContent = 'File too large: ' + Math.round(file.size/1024/1024) + ' MB (max 25 MB).'; return;
+  }
+  window._financialsState = window._financialsState || {};
+  window._financialsState.file = file;
+  const el = document.getElementById('import-fin-file-name');
+  el.style.display = '';
+  el.innerHTML = '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px; color:#DC2626;">picture_as_pdf</span> <b>' +
+    (file.name || 'financials.pdf') + '</b> <span style="color:#94A3B8;">· ' + Math.round(file.size/1024) + ' KB</span>';
+  document.getElementById('import-fin-error').style.display = 'none';
+  const dealSel = document.getElementById('import-fin-deal-picker');
+  document.getElementById('import-fin-extract-btn').disabled = !(file && dealSel.value);
+};
+// Deal picker + period-hint listener (shared with document handler on change)
+document.addEventListener('change', function(e){
+  if(e.target && e.target.id === 'import-fin-deal-picker'){
+    const dealId = e.target.value;
+    const state = window._financialsState = window._financialsState || {};
+    state.dealId = dealId;
+    const opt = e.target.options[e.target.selectedIndex];
+    state.dealHint = opt && opt.dataset ? opt.dataset.hint : null;
+    document.getElementById('import-fin-extract-btn').disabled = !(state.file && dealId);
+  }
+  if(e.target && e.target.id === 'import-fin-period-hint'){
+    (window._financialsState = window._financialsState || {}).periodHint = e.target.value || null;
+  }
+});
+
+window.runFinancialsExtraction = async function(){
+  const state = window._financialsState;
+  if(!state || !state.file || !state.dealId) return;
+  const err = document.getElementById('import-fin-error'); err.style.display = 'none';
+  const prog = document.getElementById('import-fin-progress'); prog.style.display = '';
+  const btn = document.getElementById('import-fin-extract-btn'); btn.disabled = true;
+  try {
+    document.getElementById('import-fin-progress-text').textContent = 'Uploading PDF…';
+    const up = await window.SB.uploadNoticeDoc(state.file, state.dealId);
+    if(!up.ok) throw new Error('Upload failed: ' + up.reason);
+    document.getElementById('import-fin-progress-text').textContent = 'Extracting financials with AI…';
+    const ex = await window.SB.extractFinancialsFromPdf(state.file, {
+      dealHint: state.dealHint, periodHint: state.periodHint
+    });
+    if(!ex.ok) throw new Error('Extract failed: ' + ex.reason);
+    // Save extraction record for provenance
+    const save = await window.SB.saveDocumentExtraction({
+      deal_id: state.dealId,
+      source_file_path: up.path,
+      source_file_name: state.file.name,
+      source_file_size: state.file.size,
+      extraction_type: 'borrower_financials',
+      model_used: ex.model || (ex.mock ? 'mock' : null),
+      extracted_json: ex.extraction,
+      confidence: ex.extraction && ex.extraction.confidence != null ? ex.extraction.confidence : null,
+      processing_ms: ex.elapsed_ms || null,
+      review_status: 'pending'
+    });
+    if(!save.ok) throw new Error('Save failed: ' + save.reason);
+    prog.style.display = 'none';
+    btn.disabled = false;
+    window.closeImportFinancialsModal();
+    _openReviewFinancialsModal(save.extraction, state.file, state.dealId);
+  } catch(e){
+    console.error('[fin-import] failed:', e);
+    prog.style.display = 'none';
+    err.style.display = ''; err.textContent = e.message;
+    btn.disabled = false;
+  }
+};
+
+// ─── Review + edit ──────────────────────────────────────────────
+// sourceFileOrUrl: File | string URL | null
+// opts.savedRowMode: true when opened from the Financials list (edit-existing).
+// opts.savedRowId:   PK of the borrower_financials row being edited (enables Delete).
+// opts.fileName:     display label when sourceFileOrUrl is a URL string.
+function _openReviewFinancialsModal(extractionRow, sourceFileOrUrl, dealId, opts){
+  opts = opts || {};
+  window._reviewFinState = {
+    extraction: extractionRow, sourceFile: sourceFileOrUrl, dealId,
+    editedFields: JSON.parse(JSON.stringify(extractionRow.extracted_json || {})),
+    savedRowMode: !!opts.savedRowMode,
+    savedRowId:   opts.savedRowId || null,
+    originalKey:  opts.savedRowMode ? {
+      as_of_date: (extractionRow.extracted_json || {}).as_of_date,
+      period_type: (extractionRow.extracted_json || {}).period_type
+    } : null
+  };
+  const modal   = document.getElementById('review-financials-modal');
+  const iframe  = document.getElementById('review-fin-pdf-frame');
+  const nameEl  = document.getElementById('review-fin-pdf-name');
+  // Free any previous blob before switching source
+  if(window._reviewFinPdfUrl){ URL.revokeObjectURL(window._reviewFinPdfUrl); window._reviewFinPdfUrl = null; }
+  if(sourceFileOrUrl){
+    if(typeof sourceFileOrUrl === 'string'){
+      const anchor = sourceFileOrUrl.includes('#') ? '&' : '#';
+      iframe.src = sourceFileOrUrl + anchor + 'toolbar=1&navpanes=0';
+      nameEl.textContent = opts.fileName || 'Source document';
+    } else {
+      window._reviewFinPdfUrl = URL.createObjectURL(sourceFileOrUrl);
+      iframe.src = window._reviewFinPdfUrl + '#toolbar=1&navpanes=0';
+      nameEl.textContent = sourceFileOrUrl.name || 'financials.pdf';
+    }
+  } else {
+    iframe.removeAttribute('src');
+    nameEl.textContent = 'Source PDF unavailable';
+  }
+  const ex = extractionRow.extracted_json || {};
+  const conf = ex.confidence != null ? Math.round(+ex.confidence * 100) : null;
+  document.getElementById('review-fin-sub').textContent =
+    (ex.borrower_name || '') + ' · ' + (ex.as_of_date || '?') + ' · ' + (ex.period_type || '?') + ' · confidence ' + (conf != null ? conf + '%' : 'n/a');
+  document.getElementById('review-fin-header').textContent =
+    'Model: ' + (extractionRow.model_used || 'n/a') +
+    ' · Processing: ' + (extractionRow.processing_ms || 0) + 'ms' +
+    (extractionRow.id ? ' · Extraction ID ' + String(extractionRow.id).slice(0,8) : '');
+  document.getElementById('review-fin-error').style.display = 'none';
+  _renderFinancialsForm();
+  _renderFinancialsKpis();
+  _applyReviewModeUi();
+  modal.style.display = 'flex';
+}
+
+// Contextualise the review-modal footer & title based on mode.
+function _applyReviewModeUi(){
+  const state = window._reviewFinState; if(!state) return;
+  const saveBtn = document.getElementById('review-fin-save-btn');
+  const discardBtn = document.querySelector('#review-financials-modal .json-modal-f .mat-btn.outline');
+  const hint = document.getElementById('review-fin-hint');
+  let deleteBtn = document.getElementById('review-fin-delete-btn');
+  if(state.savedRowMode){
+    // Rewrite Save label
+    if(saveBtn) saveBtn.innerHTML =
+      '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">save</span> Save changes';
+    // Rewrite Discard → Close (non-destructive)
+    if(discardBtn){
+      discardBtn.textContent = 'Close';
+      discardBtn.setAttribute('onclick', 'window.closeReviewFinancialsModal && window.closeReviewFinancialsModal()');
+    }
+    // Add / show Delete button
+    if(!deleteBtn){
+      deleteBtn = document.createElement('button');
+      deleteBtn.id = 'review-fin-delete-btn';
+      deleteBtn.className = 'mat-btn';
+      deleteBtn.style.cssText = 'background:#B91C1C;color:#fff;border:none;';
+      deleteBtn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">delete</span> Delete record';
+      deleteBtn.setAttribute('onclick', 'window.deleteSavedFinancialsRow && window.deleteSavedFinancialsRow()');
+      // Insert before the Save button
+      if(saveBtn && saveBtn.parentNode) saveBtn.parentNode.insertBefore(deleteBtn, saveBtn);
+    } else {
+      deleteBtn.style.display = '';
+    }
+    if(hint) hint.textContent = 'Editing saved record. Changing As-of date or Period type will create a new row (unique key).';
+  } else {
+    if(saveBtn) saveBtn.innerHTML =
+      '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">check</span> Save + update covenants';
+    if(discardBtn){
+      discardBtn.textContent = 'Discard';
+      discardBtn.setAttribute('onclick', 'window.discardFinancialsExtraction && window.discardFinancialsExtraction()');
+    }
+    if(deleteBtn) deleteBtn.style.display = 'none';
+    if(hint) hint.textContent = '';
+  }
+}
+window.closeReviewFinancialsModal = function(){
+  const modal = document.getElementById('review-financials-modal');
+  if(modal) modal.style.display = 'none';
+  if(window._reviewFinPdfUrl){ URL.revokeObjectURL(window._reviewFinPdfUrl); window._reviewFinPdfUrl = null; }
+  window._reviewFinState = null;
+};
+
+function _finConfidenceColor(c){
+  if(c == null) return { bg:'#F3F4F6', bd:'#D1D5DB', fg:'#6B7280', label:'?' };
+  if(c >= 0.8)  return { bg:'#DCFCE7', bd:'#86EFAC', fg:'#166534', label: Math.round(c*100)+'%' };
+  if(c >= 0.5)  return { bg:'#FEF3C7', bd:'#FCD34D', fg:'#92400E', label: Math.round(c*100)+'%' };
+  return           { bg:'#FEE2E2', bd:'#FCA5A5', fg:'#991B1B', label: Math.round(c*100)+'%' };
+}
+
+function _renderFinancialsForm(){
+  const state = window._reviewFinState; if(!state) return;
+  const ex = state.editedFields;
+  const fc = ex.field_confidence || {};
+  const host = document.getElementById('review-fin-sections');
+  // Small header fields (as_of_date, period_type, currency, borrower_name)
+  const meta = [
+    { key: 'borrower_name', label: 'Borrower', type: 'text', path: null },
+    { key: 'as_of_date',    label: 'As of',     type: 'date', path: null },
+    { key: 'period_type',   label: 'Period',    type: 'select', options: ['monthly','quarterly','semi_annual','annual','ttm','ytd','custom'], path: null },
+    { key: 'currency',      label: 'Ccy',       type: 'text',  path: null }
+  ];
+  // 3 sections × N fields
+  const sections = [
+    { title: 'Balance Sheet', path: 'balance_sheet', fields: [
+      'total_assets','current_assets','cash','accounts_receivable','inventory','fixed_assets',
+      'total_liabilities','current_liabilities','accounts_payable','short_term_debt','long_term_debt','total_debt','total_equity'
+    ]},
+    { title: 'Income Statement', path: 'income_statement', fields: [
+      'revenue','cogs','gross_profit','operating_expenses','ebitda','depreciation_amort','ebit','interest_expense','tax_expense','net_income'
+    ]},
+    { title: 'Cash Flow', path: 'cash_flow', fields: [
+      'operating_cash_flow','capex','free_cash_flow','principal_payments'
+    ]}
+  ];
+  const humanize = (s) => s.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+  const renderField = (key, label, val, confKey, opts) => {
+    const c = _finConfidenceColor(fc[confKey]);
+    let input;
+    if(opts && opts.type === 'select'){
+      input = '<select data-fin-path="' + (opts.path || '') + '" data-fin-key="' + key + '" ' +
+        'style="width:100%; padding:4px 6px; border:1px solid ' + c.bd + '; border-radius:4px; font-size:11px; background:' + c.bg + ';">' +
+        opts.options.map(o => '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o + '</option>').join('') + '</select>';
+    } else {
+      const t = (opts && opts.type) || 'number';
+      input = '<input type="' + t + '" data-fin-path="' + (opts && opts.path || '') + '" data-fin-key="' + key + '" ' +
+        'value="' + (val != null ? String(val).replace(/"/g,'&quot;') : '') + '" ' +
+        'style="width:100%; padding:4px 6px; border:1px solid ' + c.bd + '; border-radius:4px; font-size:11px; background:' + c.bg + '; text-align:' + (t === 'number' ? 'right' : 'left') + '; font-variant-numeric:tabular-nums;"/>';
+    }
+    return '<div>' +
+      '<div style="display:flex; align-items:center; gap:5px; margin-bottom:2px;">' +
+        '<label style="font-size:9.5px; color:#475569; font-weight:600; text-transform:uppercase; letter-spacing:0.3px;">' + label + '</label>' +
+        '<span style="padding:0 5px; border-radius:9px; font-size:9px; font-weight:700; background:' + c.bg + '; color:' + c.fg + '; border:1px solid ' + c.bd + ';">' + c.label + '</span>' +
+      '</div>' + input +
+    '</div>';
+  };
+  const metaHtml = '<div style="display:grid; grid-template-columns:2fr 1fr 1fr 60px; gap:6px; margin-bottom:10px;">' +
+    meta.map(f => renderField(f.key, f.label, ex[f.key], f.key, f)).join('') +
+  '</div>';
+  const sectionsHtml = sections.map(sec => {
+    const bag = ex[sec.path] || {};
+    return '<details open style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">' + sec.title + '</summary>' +
+      '<div style="padding:8px 10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">' +
+        sec.fields.map(f => renderField(f, humanize(f), bag[f], sec.path + '.' + f, { type: 'number', path: sec.path })).join('') +
+      '</div>' +
+    '</details>';
+  }).join('');
+  host.innerHTML = metaHtml + sectionsHtml;
+  // Wire inputs — write edits back into state.editedFields
+  host.querySelectorAll('[data-fin-key]').forEach(el => {
+    el.oninput = el.onchange = () => {
+      const path = el.getAttribute('data-fin-path');
+      const key = el.getAttribute('data-fin-key');
+      let v = el.value;
+      if(el.type === 'number' && v !== '') v = +v;
+      if(v === '') v = null;
+      if(path){
+        state.editedFields[path] = state.editedFields[path] || {};
+        state.editedFields[path][key] = v;
+      } else {
+        state.editedFields[key] = v;
+      }
+      _renderFinancialsKpis();   // live update
+    };
+  });
+}
+
+function _renderFinancialsKpis(){
+  const state = window._reviewFinState; if(!state) return;
+  const kpis = (typeof LMA !== 'undefined' && LMA.computeFinancialKpis)
+    ? LMA.computeFinancialKpis(state.editedFields) : {};
+  const grid = document.getElementById('review-fin-kpi-grid');
+  const cell = (label, v, unit, hint) => {
+    const shown = v == null ? '<span style="color:#94A3B8;">not computable</span>'
+                             : '<b style="color:#065F46;">' + (+v).toFixed(2) + (unit||'') + '</b>';
+    return '<div style="padding:4px 8px; background:rgba(255,255,255,0.6); border-radius:4px;">' +
+      '<div style="font-size:9.5px; text-transform:uppercase; color:#065F46; letter-spacing:0.3px;">' + label + '</div>' +
+      '<div style="font-size:13px; font-family:ui-monospace,monospace;">' + shown + '</div>' +
+      (hint ? '<div style="font-size:9px; color:#065F46; opacity:0.7;">' + hint + '</div>' : '') +
+    '</div>';
+  };
+  grid.innerHTML =
+    cell('DSCR',              kpis.dscr,              'x', 'EBITDA ÷ (Interest + Principal)') +
+    cell('Interest Coverage', kpis.interest_coverage, 'x', 'EBITDA ÷ Interest') +
+    cell('Leverage',          kpis.leverage_ratio,    'x', 'Total Debt ÷ Annualised EBITDA') +
+    cell('Net Leverage',      kpis.net_leverage_ratio,'x', '(Total Debt − Cash) ÷ Annualised EBITDA') +
+    cell('Current Ratio',     kpis.current_ratio,     'x', 'Current Assets ÷ Current Liabilities') +
+    cell('Debt / Equity',     kpis.debt_to_equity,    'x', 'Total Debt ÷ Total Equity');
+  // Preview which covenants will update — via SB method (proper API, no reaching into internals)
+  const preview = document.getElementById('review-fin-covenant-preview');
+  (async () => {
+    try {
+      if(!window.SB || !window.SB.fetchCovenantsForDeal){ preview.textContent = ''; return; }
+      const covs = await window.SB.fetchCovenantsForDeal(state.dealId);
+      if(!covs.length){ preview.innerHTML = '<i>No covenants on this deal — no auto-update will occur.</i>'; return; }
+      const rows = covs.map(c => {
+        const v = (typeof LMA !== 'undefined' && LMA.covenantKpiValue) ? LMA.covenantKpiValue(c.kpi_metric, kpis) : null;
+        if(v == null) return null;
+        const prior = c.last_reported_value != null ? +c.last_reported_value : null;
+        const breached = (c.direction === 'min' || c.direction === 'gte') ? v < +c.threshold
+                       : (c.direction === 'max' || c.direction === 'lte') ? v > +c.threshold : false;
+        const arrow = prior != null && v !== prior ? (v > prior ? ' ↑' : ' ↓') : '';
+        return '<div style="padding:2px 0;">' +
+          '<b>' + c.name + '</b> (' + c.kpi_metric + ')' +
+          ' — will update from ' + (prior != null ? prior.toFixed(2) : 'n/a') +
+          ' → <b>' + v.toFixed(2) + arrow + '</b> vs threshold ' + c.threshold +
+          (breached ? ' <span style="color:#B91C1C; font-weight:700;">⚠ BREACH</span>' : ' ✓')  +
+        '</div>';
+      }).filter(Boolean).join('');
+      preview.innerHTML = rows
+        ? '<b>Covenants that will auto-update on Save:</b>' + rows
+        : '<i>No covenants map to computable KPIs — nothing to auto-update.</i>';
+    } catch(err){ console.debug('[fin-review] covenant preview failed:', err); }
+  })();
+}
+
+window.saveExtractedFinancials = async function(){
+  const state = window._reviewFinState; if(!state) return;
+  const err = document.getElementById('review-fin-error'); err.style.display = 'none';
+  const btn = document.getElementById('review-fin-save-btn');
+  const origHtml = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">hourglass_top</span> Saving…';
+  try {
+    if(!state.editedFields.as_of_date){ throw new Error('as_of_date is required (edit the top-left field)'); }
+    const res = await window.SB.importFinancialsAsRecord(state.extraction.id, state.editedFields, state.dealId);
+    if(!res.ok) throw new Error(res.reason);
+    // Edit mode: if the natural key (as_of_date OR period_type) changed, the
+    // upsert wrote a NEW row and the original row still exists. Purge it so
+    // we don't leave orphaned duplicates behind.
+    if(state.savedRowMode && state.savedRowId && state.originalKey){
+      const newKey = { as_of_date: state.editedFields.as_of_date, period_type: state.editedFields.period_type };
+      const keyChanged = newKey.as_of_date  !== state.originalKey.as_of_date
+                      || newKey.period_type !== state.originalKey.period_type;
+      const newRowId = res.financials && res.financials.id;
+      if(keyChanged && newRowId && newRowId !== state.savedRowId){
+        try { await window.SB.deleteBorrowerFinancials(state.savedRowId); }
+        catch(err){ console.warn('[fin-review] failed to purge stale row after key change:', err); }
+      }
+    }
+    const covMsg = res.covenantsUpdated
+      ? ' · ' + res.covenantsUpdated + ' covenant' + (res.covenantsUpdated===1?'':'s') + ' auto-updated'
+      : ' · no matching covenants';
+    toast((state.savedRowMode ? 'Financials updated' : 'Financials saved') + covMsg, 4000);
+    window.closeReviewFinancialsModal();
+    if(typeof window.refreshFinancials === 'function') window.refreshFinancials();
+    // If the Dashboard is showing covenants for this deal, refresh it too
+    if(typeof window.refreshDashboard === 'function') try { window.refreshDashboard(); } catch(_){}
+  } catch(e){
+    console.error('[fin-review] save failed:', e);
+    err.style.display = ''; err.textContent = 'Save failed: ' + e.message;
+    btn.disabled = false; btn.innerHTML = origHtml;
+  }
+};
+
+// Open the Review modal on an already-saved borrower_financials row (edit-existing).
+// Loads the source PDF via signed URL, hydrates editedFields from raw_extraction_json.
+window.openSavedFinancialsRow = async function(financialsRow){
+  if(!financialsRow || !financialsRow.deal_id){ toast('Row missing deal id', 2500); return; }
+  const extId = financialsRow.source_extraction_id;
+  let pdfUrl = null;
+  let ext = null;
+  let fileName = null;
+  if(extId && window.SB && window.SB.getExtractionById){
+    const res = await window.SB.getExtractionById(extId);
+    if(res.ok && res.extraction){
+      ext = res.extraction;
+      fileName = ext.source_file_name;
+      if(ext.source_file_path && window.SB.getSignedDocUrl){
+        const signed = await window.SB.getSignedDocUrl(ext.source_file_path, 600);
+        if(signed.ok) pdfUrl = signed.url;
+      }
+    }
+  }
+  // Prefer the fully-hydrated snapshot stored on the borrower_financials row.
+  // Fall back to the extraction's own JSON if the row doesn't have raw_extraction_json.
+  const extractedJson = financialsRow.raw_extraction_json ||
+    (ext && ext.extracted_json) || {};
+  const fakeExtractionRow = {
+    id:             extId || null,
+    extracted_json: extractedJson,
+    model_used:     (ext && ext.model_used) || '(saved record)',
+    processing_ms:  (ext && ext.processing_ms) || null,
+    confidence:     (ext && ext.confidence) || financialsRow.confidence
+  };
+  _openReviewFinancialsModal(fakeExtractionRow, pdfUrl, financialsRow.deal_id, {
+    savedRowMode: true,
+    savedRowId:   financialsRow.id,
+    fileName:     fileName || (financialsRow.borrower_name + ' — ' + financialsRow.as_of_date + '.pdf')
+  });
+};
+
+// Delete a saved borrower_financials row (edit mode).
+window.deleteSavedFinancialsRow = async function(){
+  const state = window._reviewFinState;
+  if(!state || !state.savedRowMode || !state.savedRowId) return;
+  const proceed = window.showAppDialog ? await window.showAppDialog({
+    severity:'danger', title:'Delete financials record?',
+    message:'The snapshot row will be removed. Covenants keep their current lastReportedValue — reset them separately if needed.',
+    confirmLabel:'Delete', cancelLabel:'Cancel'
+  }) : confirm('Delete financials record?');
+  if(!proceed) return;
+  try {
+    const res = await window.SB.deleteBorrowerFinancials(state.savedRowId);
+    if(!res.ok) throw new Error(res.reason);
+    toast('Financials record deleted', 2500);
+    window.closeReviewFinancialsModal();
+    if(typeof window.refreshFinancials === 'function') window.refreshFinancials();
+    if(typeof window.refreshDashboard  === 'function') try { window.refreshDashboard(); } catch(_){}
+  } catch(e){
+    console.error('[fin-review] delete failed:', e);
+    const err = document.getElementById('review-fin-error');
+    err.style.display = ''; err.textContent = 'Delete failed: ' + e.message;
+  }
+};
+
+window.discardFinancialsExtraction = async function(){
+  const state = window._reviewFinState; if(!state) return;
+  const proceed = window.showAppDialog ? await window.showAppDialog({
+    severity:'warning', title:'Discard financials?',
+    message:'This extraction will not create a financials record. The source PDF stays in Storage.',
+    confirmLabel:'Discard', cancelLabel:'Cancel'
+  }) : confirm('Discard extraction?');
+  if(!proceed) return;
+  try {
+    if(window.SB && window.SB.discardDocumentExtraction){
+      await window.SB.discardDocumentExtraction(state.extraction.id, 'user rejected review');
+    }
+  } catch(e){ console.warn('[fin-review] discard failed:', e); }
+  window.closeReviewFinancialsModal();
+  toast('Financials discarded', 2500);
+};
 
 // ─── Notice Reconciliation (Phase 2) ───────────────────────
 // Fetch journal_entries for each visible deal and match against interest/

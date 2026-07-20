@@ -1447,6 +1447,106 @@
     };
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // Borrower financials — KPI computation
+  // ═════════════════════════════════════════════════════════════════════════
+  // Takes an extracted financial statement (balance_sheet + income_statement
+  // + cash_flow) and computes the standard credit-covenant KPIs. Handles
+  // nulls gracefully — any KPI whose inputs are missing returns null instead
+  // of throwing.
+  //
+  //   const kpis = LMA.computeFinancialKpis(extraction);
+  //   → { dscr, interest_coverage, leverage_ratio, net_leverage_ratio,
+  //       current_ratio, debt_to_equity, quick_ratio, warnings: [...] }
+  function computeFinancialKpis(fin){
+    fin = fin || {};
+    const bs = fin.balance_sheet || {};
+    const is = fin.income_statement || {};
+    const cf = fin.cash_flow || {};
+    const warnings = [];
+    const num = (v) => (v == null || isNaN(+v)) ? null : +v;
+
+    const ebitda    = num(is.ebitda);
+    const interest  = num(is.interest_expense);
+    const principal = num(cf.principal_payments);
+    const totalDebt = num(bs.total_debt) != null
+      ? num(bs.total_debt)
+      : (num(bs.short_term_debt) != null && num(bs.long_term_debt) != null
+          ? num(bs.short_term_debt) + num(bs.long_term_debt) : null);
+    const cash          = num(bs.cash);
+    const equity        = num(bs.total_equity);
+    const currentAssets = num(bs.current_assets);
+    const currentLiab   = num(bs.current_liabilities);
+    const ar            = num(bs.accounts_receivable);
+
+    // DSCR = EBITDA / (Interest + Principal Payments)
+    // If principal not reported, fall back to ICR-style denominator with a warning
+    let dscr = null;
+    if(ebitda != null && interest != null){
+      const denom = interest + (principal != null ? principal : 0);
+      if(denom > 0) dscr = ebitda / denom;
+      if(principal == null) warnings.push('DSCR uses interest only (principal payments not reported)');
+    }
+    // Interest Coverage = EBITDA / Interest
+    const icr = (ebitda != null && interest != null && interest > 0) ? ebitda / interest : null;
+    // Leverage = Total Debt / EBITDA (annualised — quarterly EBITDA × 4)
+    let leverage = null, netLeverage = null;
+    if(totalDebt != null && ebitda != null && ebitda !== 0){
+      const period = String(fin.period_type || '').toLowerCase();
+      const annEbitda = (period === 'quarterly') ? ebitda * 4
+                       : (period === 'monthly') ? ebitda * 12
+                       : (period === 'semi_annual') ? ebitda * 2
+                       : ebitda;
+      leverage = totalDebt / annEbitda;
+      if(cash != null) netLeverage = (totalDebt - cash) / annEbitda;
+      if(['quarterly','monthly','semi_annual'].includes(period)){
+        warnings.push('Leverage annualised (period=' + period + ', EBITDA × ' + Math.round(annEbitda / ebitda) + ')');
+      }
+    }
+    // Current Ratio = Current Assets / Current Liabilities
+    const currentRatio = (currentAssets != null && currentLiab != null && currentLiab > 0)
+      ? currentAssets / currentLiab : null;
+    // Debt to Equity = Total Debt / Total Equity
+    const debtToEquity = (totalDebt != null && equity != null && equity > 0)
+      ? totalDebt / equity : null;
+    // Quick Ratio = (Cash + AR) / Current Liabilities
+    const quickRatio = (currentLiab != null && currentLiab > 0 && cash != null)
+      ? (cash + (ar || 0)) / currentLiab : null;
+
+    return {
+      dscr: dscr != null ? round(dscr, 4) : null,
+      interest_coverage: icr != null ? round(icr, 4) : null,
+      leverage_ratio: leverage != null ? round(leverage, 4) : null,
+      net_leverage_ratio: netLeverage != null ? round(netLeverage, 4) : null,
+      current_ratio: currentRatio != null ? round(currentRatio, 4) : null,
+      debt_to_equity: debtToEquity != null ? round(debtToEquity, 4) : null,
+      quick_ratio: quickRatio != null ? round(quickRatio, 4) : null,
+      warnings
+    };
+  }
+
+  // Map a covenant.kpiMetric string to a field on the computed KPI object.
+  // Used by the client to auto-update covenant.lastReportedValue after a
+  // financials import. Returns null when the covenant KPI isn't derivable
+  // from financials (e.g. 'esgScore', 'borrowingBase', 'custom').
+  function covenantKpiValue(kpiMetric, kpis){
+    if(!kpis) return null;
+    const m = String(kpiMetric || '').toLowerCase().replace(/[_\s-]/g, '');
+    const map = {
+      dscr:              kpis.dscr,
+      interestcoverage:  kpis.interest_coverage,
+      icr:               kpis.interest_coverage,
+      leverage:          kpis.leverage_ratio,
+      leverageratio:     kpis.leverage_ratio,
+      netleverage:       kpis.net_leverage_ratio,
+      netleverageratio:  kpis.net_leverage_ratio,
+      currentratio:      kpis.current_ratio,
+      debttoequity:      kpis.debt_to_equity,
+      quickratio:        kpis.quick_ratio
+    };
+    return m in map ? map[m] : null;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Public API
   // ─────────────────────────────────────────────────────────────────────────
@@ -1458,7 +1558,8 @@
     computeWatchlist,
     computeRegulatoryReports,
     matchNoticePair,
-    version: '1.5.0'
+    computeFinancialKpis, covenantKpiValue,
+    version: '1.6.0'
   };
   if(typeof module !== 'undefined' && module.exports) module.exports = LMA;
   global.LMA = LMA;

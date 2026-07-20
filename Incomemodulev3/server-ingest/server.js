@@ -225,6 +225,185 @@ app.post('/api/extract/notice', upload.single('file'), async (req, res) => {
   }
 });
 
+// ═════════════════════════════════════════════════════════════════════
+// Borrower Financials extraction
+// ═════════════════════════════════════════════════════════════════════
+// POST /api/extract/borrower-financials
+//   multipart file (PDF) + optional deal_hint + optional period_hint
+//
+// Returns structured JSON: balance sheet, income statement, cash flow,
+// per-field confidence. Client computes covenant KPIs from these fields.
+
+function buildFinancialsExtractionPrompt(dealHint, periodHint){
+  return `You are extracting a borrower's financial statements from a private-credit lending report (quarterly / annual / management accounts).
+
+Return ONLY a JSON object matching this schema — no prose, no markdown:
+
+{
+  "borrower_name": "borrower / issuer name as it appears (string) or null",
+  "as_of_date": "YYYY-MM-DD — the period END date (e.g. 2026-03-31 for Q1 2026)",
+  "period_type": "monthly" | "quarterly" | "semi_annual" | "annual" | "ttm" | "ytd" | "custom",
+  "currency": "3-letter ISO code (USD/EUR/GBP/etc)" or null,
+  "fiscal_year_end": "YYYY-MM-DD if stated, else null",
+  "reporter_note": "e.g. 'unaudited management accounts', 'audited by KPMG', etc.",
+
+  "balance_sheet": {
+    "total_assets": <number>,
+    "current_assets": <number>,
+    "cash": <number>,
+    "accounts_receivable": <number>,
+    "inventory": <number>,
+    "fixed_assets": <number>,
+    "total_liabilities": <number>,
+    "current_liabilities": <number>,
+    "accounts_payable": <number>,
+    "short_term_debt": <number>,
+    "long_term_debt": <number>,
+    "total_debt": <number>,
+    "total_equity": <number>
+  },
+
+  "income_statement": {
+    "revenue": <number>,
+    "cogs": <number>,
+    "gross_profit": <number>,
+    "operating_expenses": <number>,
+    "ebitda": <number>,
+    "depreciation_amort": <number>,
+    "ebit": <number>,
+    "interest_expense": <number>,
+    "tax_expense": <number>,
+    "net_income": <number>
+  },
+
+  "cash_flow": {
+    "operating_cash_flow": <number>,
+    "capex": <number>,
+    "free_cash_flow": <number>,
+    "principal_payments": <number>
+  },
+
+  "notes": "one-sentence summary of period performance, e.g. 'Q1 revenue up 8% YoY, EBITDA margin compressed 200bps'",
+  "confidence": <overall 0..1>,
+  "field_confidence": { "balance_sheet.total_assets": 0.95, ... },
+  "source_pages": [1,2]
+}
+
+Rules:
+- All monetary amounts as raw numbers, no commas, no currency symbols, no scaling (i.e. $2.5M → 2500000)
+- If reported in thousands or millions, convert to raw units — do NOT preserve K/M abbreviations
+- For any field not present in the document, use null and set field_confidence to 0
+- Confidence per field is your honest estimate of extraction accuracy
+- If EBITDA is not explicitly reported, compute it from Net Income + Interest + Tax + Depreciation & Amortization and note that in "notes"
+${dealHint    ? `\nContext hint — the user pre-selected this deal / borrower: "${dealHint}". Bias interpretation accordingly.` : ''}
+${periodHint  ? `\nContext hint — the user thinks this is a "${periodHint}" report.` : ''}`;
+}
+
+function mockFinancialsExtraction(dealHint){
+  return {
+    borrower_name: dealHint || 'Mock Borrower Inc.',
+    as_of_date: new Date().toISOString().slice(0,10),
+    period_type: 'quarterly',
+    currency: 'USD',
+    fiscal_year_end: null,
+    reporter_note: 'MOCK — set ANTHROPIC_API_KEY on server-ingest for real extraction',
+    balance_sheet: {
+      total_assets: 250_000_000, current_assets: 80_000_000, cash: 25_000_000,
+      accounts_receivable: 35_000_000, inventory: 20_000_000, fixed_assets: 170_000_000,
+      total_liabilities: 180_000_000, current_liabilities: 40_000_000,
+      accounts_payable: 25_000_000, short_term_debt: 15_000_000, long_term_debt: 120_000_000,
+      total_debt: 135_000_000, total_equity: 70_000_000
+    },
+    income_statement: {
+      revenue: 50_000_000, cogs: 32_000_000, gross_profit: 18_000_000,
+      operating_expenses: 12_000_000, ebitda: 8_000_000, depreciation_amort: 2_000_000,
+      ebit: 6_000_000, interest_expense: 3_200_000, tax_expense: 700_000, net_income: 2_100_000
+    },
+    cash_flow: {
+      operating_cash_flow: 6_500_000, capex: 3_000_000, free_cash_flow: 3_500_000,
+      principal_payments: 2_500_000
+    },
+    notes: 'Mock extraction — computed DSCR ≈ 1.40x, ICR ≈ 2.50x, leverage ≈ 4.22x',
+    confidence: 0.5,
+    field_confidence: { 'income_statement.ebitda': 0.5, 'balance_sheet.total_debt': 0.5 },
+    source_pages: [1]
+  };
+}
+
+app.post('/api/extract/borrower-financials', upload.single('file'), async (req, res) => {
+  const start = Date.now();
+  try {
+    if(!req.file){ return res.status(400).json({ ok:false, reason:'file (PDF) required' }); }
+    const dealHint   = req.body.deal_hint || req.body.dealHint || null;
+    const periodHint = req.body.period_hint || req.body.periodHint || null;
+
+    if(LOG_VERBOSE){
+      console.log('[extract:financials]', { file: req.file.originalname, size: req.file.size, dealHint, periodHint });
+    }
+
+    if(!AI_CONFIGURED){
+      return res.json({
+        ok:true, mock:true, elapsed_ms: Date.now() - start,
+        model: 'mock-extraction',
+        extraction: mockFinancialsExtraction(dealHint),
+        tokens: { input:0, output:0 }
+      });
+    }
+
+    const b64 = req.file.buffer.toString('base64');
+    const body = {
+      model: ANTHROPIC_MODEL,
+      // Financials are field-heavy; give the model more headroom than notices
+      max_tokens: 4000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
+          { type: 'text', text: buildFinancialsExtractionPrompt(dealHint, periodHint) }
+        ]
+      }]
+    };
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+    if(!r.ok){
+      const err = await r.text();
+      console.error('[extract:financials] Anthropic error:', r.status, err);
+      return res.status(r.status).json({ ok:false, reason:'anthropic api: ' + err.slice(0,300) });
+    }
+    const data = await r.json();
+    const textOut = (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim();
+    let cleaned = textOut.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
+    let extraction;
+    try { extraction = JSON.parse(cleaned); }
+    catch(parseErr){
+      const first = cleaned.indexOf('{');
+      const last  = cleaned.lastIndexOf('}');
+      if(first >= 0 && last > first){
+        try { extraction = JSON.parse(cleaned.slice(first, last+1)); }
+        catch(e){ return res.status(500).json({ ok:false, reason:'unparseable JSON: ' + textOut.slice(0,300) }); }
+      } else {
+        return res.status(500).json({ ok:false, reason:'no JSON in model output: ' + textOut.slice(0,200) });
+      }
+    }
+    return res.json({
+      ok: true, extraction,
+      model: ANTHROPIC_MODEL,
+      tokens: data.usage || {},
+      elapsed_ms: Date.now() - start
+    });
+  } catch(err){
+    console.error('[extract:financials] threw:', err);
+    return res.status(500).json({ ok:false, reason: err.message });
+  }
+});
+
 // ──────── Boot ───────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log('════════════════════════════════════════════');
