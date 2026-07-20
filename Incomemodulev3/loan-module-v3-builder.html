@@ -3448,6 +3448,11 @@
                 class="mat-btn outline !py-1 !px-2 text-[11px]" title="Download filtered notices as CSV">
           <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> CSV
         </button>
+        <button onclick="window.openImportNoticeModal && window.openImportNoticeModal()"
+                class="mat-btn !py-1 !px-2 text-[11px]"
+                style="background:linear-gradient(135deg,#7C3AED 0%,#4F46E5 100%); color:white; border:none;" title="Import a notice from a PDF using AI extraction">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">auto_awesome</span> Import PDF
+        </button>
         <button onclick="window.openManualNoticeForm && window.openManualNoticeForm()"
                 class="mat-btn !py-1 !px-2 text-[11px]"
                 style="background:#D97706; color:white; border-color:#D97706;" title="Add a manual notice (waiver, amendment, default, other)">
@@ -3544,6 +3549,120 @@
     <div class="json-modal-f">
       <span id="nd-footer-audit" class="text-[10.5px] text-gray-500 mr-auto"></span>
       <button class="mat-btn outline" onclick="window.closeNoticeDetail && window.closeNoticeDetail()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Import Notice from PDF (AI Extract Phase 1) ═══
+     Two-step flow: (1) upload picker, (2) review + save. -->
+<div id="import-notice-modal" class="json-modal" style="display:none; z-index:10001;">
+  <div class="json-modal-bd" onclick="window.closeImportNoticeModal && window.closeImportNoticeModal()"></div>
+  <div class="json-modal-pn" style="width:min(560px,94vw); max-height:90vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#7C3AED">auto_awesome</span>
+          Import Notice from PDF
+        </div>
+        <div class="text-[11px] text-gray-500">Drop the notice PDF. AI extracts fields for review.</div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeImportNoticeModal && window.closeImportNoticeModal()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:16px 20px;">
+      <!-- AI status banner -->
+      <div id="import-ai-status" style="margin-bottom:12px; padding:8px 10px; border-radius:6px; font-size:11px;"></div>
+
+      <!-- Deal picker -->
+      <div style="margin-bottom:10px;">
+        <label class="text-[10px] uppercase text-gray-600 block">Deal (hint for extraction + destination for the imported notice)</label>
+        <select id="import-deal-picker" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full">
+          <option value="">— Pick a deal —</option>
+        </select>
+      </div>
+
+      <!-- Optional notice type hint -->
+      <div style="margin-bottom:10px;">
+        <label class="text-[10px] uppercase text-gray-600 block">Notice type hint (optional — AI will infer if left blank)</label>
+        <select id="import-type-hint" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full">
+          <option value="">— Let AI infer —</option>
+          <option value="interest">Interest payment</option>
+          <option value="principal">Principal / paydown</option>
+          <option value="fee">Fee</option>
+          <option value="rate_reset">Rate reset</option>
+          <option value="drawdown">Drawdown request</option>
+          <option value="waiver">Waiver / amendment</option>
+          <option value="default">Default / breach</option>
+        </select>
+      </div>
+
+      <!-- File drop zone -->
+      <label for="import-file-input" style="display:block; padding:24px; border:2px dashed #A78BFA; border-radius:8px; background:#FAF5FF; text-align:center; cursor:pointer;">
+        <div style="font-size:28px; color:#7C3AED; margin-bottom:6px;">
+          <span class="material-icons-outlined" style="font-size:32px;">upload_file</span>
+        </div>
+        <div style="font-size:13px; font-weight:600; color:#4C1D95;">Click to pick a PDF, or drop it here</div>
+        <div style="font-size:11px; color:#6B7280; margin-top:4px;">Up to 25 MB · text-native or scanned</div>
+        <input id="import-file-input" type="file" accept="application/pdf" style="display:none;" onchange="window._onImportFilePicked && window._onImportFilePicked(this.files[0])"/>
+      </label>
+
+      <div id="import-file-name" style="display:none; margin-top:8px; padding:6px 10px; background:#F1F5F9; border-radius:4px; font-size:11px; color:#374151;"></div>
+      <div id="import-error" style="display:none; margin-top:8px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+      <div id="import-progress" style="display:none; margin-top:10px; padding:10px; background:#EEF2FF; border:1px solid #C7D2FE; border-radius:6px; font-size:11px; color:#3730A3;">
+        <span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">hourglass_top</span>
+        <span id="import-progress-text">Extracting fields with AI…</span>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <button class="mat-btn outline" onclick="window.closeImportNoticeModal && window.closeImportNoticeModal()">Cancel</button>
+      <button id="import-extract-btn" onclick="window.runNoticeExtraction && window.runNoticeExtraction()" class="mat-btn primary" disabled>
+        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">auto_awesome</span> Extract with AI
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Review + edit extracted fields -->
+<div id="review-extraction-modal" class="json-modal" style="display:none; z-index:10002;">
+  <div class="json-modal-bd" onclick="window.closeReviewExtractionModal && window.closeReviewExtractionModal()"></div>
+  <div class="json-modal-pn" style="width:min(1100px,97vw); height:min(90vh, 1000px); display:flex; flex-direction:column;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#7C3AED">preview</span>
+          Review AI-Extracted Notice
+        </div>
+        <div id="review-sub" class="text-[11px] text-gray-500"></div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeReviewExtractionModal && window.closeReviewExtractionModal()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:0; flex:1; overflow:hidden; display:flex;">
+      <!-- Left: PDF preview -->
+      <div style="flex:1.2; background:#374151; display:flex; flex-direction:column;">
+        <div style="padding:6px 10px; background:#1F2937; color:#F3F4F6; font-size:11px;">
+          <span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">picture_as_pdf</span>
+          <span id="review-pdf-name">Source document</span>
+        </div>
+        <iframe id="review-pdf-frame" style="flex:1; width:100%; border:none;" title="Source PDF"></iframe>
+      </div>
+      <!-- Right: editable fields -->
+      <div style="flex:1; overflow-y:auto; padding:14px 16px; background:#F9FAFB;">
+        <div id="review-model-info" style="font-size:10.5px; color:#6B7280; margin-bottom:8px;"></div>
+        <div id="review-fields" style="display:flex; flex-direction:column; gap:10px;">
+          <!-- Rendered dynamically -->
+        </div>
+        <div id="review-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <span id="review-hint" class="text-[10.5px] text-gray-500 mr-auto"></span>
+      <button class="mat-btn outline" onclick="window.discardExtraction && window.discardExtraction()">Discard</button>
+      <button id="review-save-btn" onclick="window.saveExtractedNotice && window.saveExtractedNotice()" class="mat-btn primary">
+        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">check</span> Save as notice
+      </button>
     </div>
   </div>
 </div>
@@ -4779,6 +4898,164 @@ window.SB = (function(){
       };
     } catch(err){
       return { available: false, reason: 'Proxy unreachable — will fall back to mailto:' };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // AI Document Extraction — Phase 1 (ongoing notices workflow)
+  // ═══════════════════════════════════════════════════════════════════
+  // Three-step flow:
+  //   1. uploadNoticeDoc(file)          — pushes PDF to Supabase Storage
+  //   2. extractNoticeFromPdf(file)     — POSTs to /api/extract/notice on
+  //                                       the DIU proxy; returns extracted JSON
+  //   3. saveDocumentExtraction(row)    — persists extraction record
+  //   4. importExtractionAsNotice(id)   — creates loan_notices row, links back
+
+  async function uploadNoticeDoc(file, dealId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!file) return { ok:false, reason:'file required' };
+    if(!_currentUser) return { ok:false, reason:'not signed in' };
+    // Path: notice-docs/<uid>/<yyyy>/<mm>/<uuid>-<safe-name>
+    const now = new Date();
+    const uid = _currentUser.id;
+    const yyyy = now.getUTCFullYear();
+    const mm = String(now.getUTCMonth() + 1).padStart(2,'0');
+    const safeName = (file.name || 'notice.pdf').replace(/[^a-z0-9._-]/gi, '_').slice(0, 100);
+    const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('doc-' + Date.now());
+    const path = 'notice-docs/' + uid + '/' + yyyy + '/' + mm + '/' + uuid + '-' + safeName;
+    try {
+      const { data, error } = await _client.storage.from('notice-docs').upload(path, file, {
+        contentType: file.type || 'application/pdf',
+        cacheControl: '3600', upsert: false
+      });
+      if(error){ console.error('[SB] uploadNoticeDoc:', error); return { ok:false, reason: error.message }; }
+      return { ok:true, path, storageData: data };
+    } catch(err){
+      console.error('[SB] uploadNoticeDoc threw:', err);
+      return { ok:false, reason: err.message };
+    }
+  }
+
+  async function extractNoticeFromPdf(file, opts){
+    // Server call — sends the raw file to /api/extract/notice
+    opts = opts || {};
+    const proxyUrl = ((typeof localStorage !== 'undefined' && localStorage.getItem('pcs_v3_diu_proxy_url')) || '').trim();
+    if(!proxyUrl) return { ok:false, reason:'DIU proxy URL not configured — set it in DB Settings so /api/extract/notice is reachable' };
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      if(opts.dealHint) form.append('deal_hint', opts.dealHint);
+      if(opts.noticeTypeHint) form.append('notice_type_hint', opts.noticeTypeHint);
+      const r = await fetch(proxyUrl.replace(/\/$/,'') + '/api/extract/notice', {
+        method: 'POST', body: form
+      });
+      const j = await r.json();
+      if(!r.ok) return { ok:false, reason: j.reason || 'server error' };
+      return j;
+    } catch(err){
+      console.error('[SB] extractNoticeFromPdf threw:', err);
+      return { ok:false, reason: err.message };
+    }
+  }
+
+  async function saveDocumentExtraction(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const payload = Object.assign({
+      extraction_type: 'notice',
+      review_status: 'pending',
+      created_by: _currentUser ? _currentUser.id : null
+    }, row);
+    const { data, error } = await _client.from('document_extractions')
+      .insert(payload).select().single();
+    if(error){ console.error('[SB] saveDocumentExtraction:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, extraction: data };
+  }
+
+  async function discardDocumentExtraction(extractionId, reason){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('document_extractions')
+      .update({
+        review_status: 'discarded',
+        discarded_reason: reason || null,
+        reviewed_by: _currentUser ? _currentUser.id : null,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq('id', extractionId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  async function fetchDocumentExtractions(dealId){
+    if(!_client || !_connected) return [];
+    let q = _client.from('document_extractions').select('*').order('created_at', { ascending: false });
+    if(dealId) q = q.eq('deal_id', dealId);
+    const { data, error } = await q;
+    if(error){ console.error('[SB] fetchDocumentExtractions:', error); return []; }
+    return data || [];
+  }
+
+  // The "user reviewed + accepted" happy path: reads the extraction, applies
+  // the (possibly edited) fields into a real loan_notices row, links back,
+  // flips extraction.review_status='imported'.
+  async function importExtractionAsNotice(extractionId, editedFields){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!extractionId) return { ok:false, reason:'extraction id required' };
+    // Load the extraction to reuse deal_id + any fields the user didn't override
+    const { data: ex, error: fetchErr } = await _client.from('document_extractions')
+      .select('*').eq('id', extractionId).single();
+    if(fetchErr) return { ok:false, reason: fetchErr.message };
+    const merged = Object.assign({}, ex.extracted_json || {}, editedFields || {});
+    if(!ex.deal_id && !editedFields.deal_id){
+      return { ok:false, reason:'deal_id required — either extraction.deal_id or editedFields.deal_id must be set' };
+    }
+    // Build the loan_notices row from merged fields
+    const noticeRow = {
+      deal_id:        editedFields.deal_id || ex.deal_id,
+      tranche_id:     merged.tranche_id || null,
+      notice_type:    merged.notice_type || 'other',
+      notice_date:    merged.notice_date || merged.effective_date || null,
+      effective_date: merged.effective_date || null,
+      amount:         merged.amount != null ? +merged.amount : null,
+      currency:       merged.currency || 'USD',
+      reference:      merged.reference || null,
+      rate:           merged.rate != null ? +merged.rate : null,
+      breakdown:      merged.breakdown || null,
+      status:         'draft',
+      notes:          (merged.notes ? merged.notes + ' · ' : '') + 'AI-extracted from ' + (ex.source_file_name || 'PDF'),
+      is_auto_derived: false,
+      created_by:      _currentUser ? _currentUser.id : null
+    };
+    const noticeRes = await upsertNotice(noticeRow);
+    if(!noticeRes.ok) return { ok:false, reason:'notice insert failed: ' + noticeRes.reason };
+    // Link extraction → notice + flip status
+    const { error: upErr } = await _client.from('document_extractions')
+      .update({
+        notice_id: noticeRes.notice.id,
+        review_status: 'imported',
+        reviewed_by: _currentUser ? _currentUser.id : null,
+        reviewed_at: new Date().toISOString(),
+        deal_id: noticeRow.deal_id,   // ensure deal_id is set if user picked it
+        extracted_json: merged        // save the user's edits back so audit trail matches what was imported
+      })
+      .eq('id', extractionId);
+    if(upErr) console.warn('[SB] extraction link update failed:', upErr);
+    return { ok:true, notice: noticeRes.notice, extractionId };
+  }
+
+  async function checkAiExtractStatus(){
+    const proxyUrl = ((typeof localStorage !== 'undefined' && localStorage.getItem('pcs_v3_diu_proxy_url')) || '').trim();
+    if(!proxyUrl) return { available: false, reason:'No DIU proxy URL configured — extract endpoint unreachable' };
+    try {
+      const r = await fetch(proxyUrl.replace(/\/$/,'') + '/api/extract/status');
+      const j = await r.json();
+      return {
+        available: !!(j.aiConfigured),
+        model: j.model,
+        fallback: j.fallback,
+        reason: j.aiConfigured ? null : 'Server up but ANTHROPIC_API_KEY not set — will use mock extraction for UI testing'
+      };
+    } catch(err){
+      return { available: false, reason:'Proxy unreachable' };
     }
   }
 
@@ -6246,6 +6523,10 @@ window.SB = (function(){
     replaceFundAllocationsForDeal,
     // Notice email delivery (Phase 2A)
     sendNoticeEmail, fetchNoticeDeliveries, checkNoticeDeliveryStatus,
+    // AI Document Extraction (Phase 1)
+    uploadNoticeDoc, extractNoticeFromPdf, saveDocumentExtraction,
+    fetchDocumentExtractions, importExtractionAsNotice, checkAiExtractStatus,
+    discardDocumentExtraction,
     // Approval workflow (#231)
     getRun, approveRun, postRun, reopenRun,
     // Auth
@@ -14382,6 +14663,307 @@ window.confirmSendNotice = async function(){
     btn.disabled = false; btn.innerHTML = origBtnHtml;
   }
 };
+
+// ═════════════════════════════════════════════════════════════════════
+// AI Extract — Import from PDF (Phase 1)
+// ═════════════════════════════════════════════════════════════════════
+// Two-modal flow:
+//   1. Import modal — pick deal + type hint + PDF file → click "Extract"
+//   2. Review modal — PDF on left, editable form on right (colour-coded by
+//      confidence). Save → creates notice + auto-reconciles.
+window._importState = null;
+
+window.openImportNoticeModal = async function(){
+  const modal = document.getElementById('import-notice-modal');
+  if(!modal) return;
+  // Reset state
+  window._importState = { file: null, dealId: null, dealHint: null, noticeTypeHint: null };
+  document.getElementById('import-file-input').value = '';
+  document.getElementById('import-file-name').style.display = 'none';
+  document.getElementById('import-error').style.display = 'none';
+  document.getElementById('import-progress').style.display = 'none';
+  document.getElementById('import-extract-btn').disabled = true;
+  // Populate deal picker from PRESETS (DB-saved deals only — need a deal_id
+  // to attach the notice to)
+  const sel = document.getElementById('import-deal-picker');
+  sel.innerHTML = '<option value="">— Pick a deal —</option>';
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dbDealId || p._dbDealId || p.dealId;
+    if(!uuid || p.source !== 'db') continue;
+    const opt = document.createElement('option');
+    opt.value = uuid; opt.textContent = p.label + ' (' + (p.dealCode || '') + ')';
+    opt.dataset.hint = p.label;
+    sel.appendChild(opt);
+  }
+  document.getElementById('import-type-hint').value = '';
+  modal.style.display = 'flex';
+  // Check AI status in parallel
+  if(window.SB && window.SB.checkAiExtractStatus){
+    const status = await window.SB.checkAiExtractStatus();
+    const el = document.getElementById('import-ai-status');
+    if(status.available){
+      el.style.background = '#DCFCE7'; el.style.border = '1px solid #86EFAC'; el.style.color = '#166534';
+      el.innerHTML = '<span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">check_circle</span> ' +
+        '<b>AI ready</b> — ' + (status.model || 'Claude') + ' will extract this notice.';
+    } else {
+      el.style.background = '#FEF3C7'; el.style.border = '1px solid #FCD34D'; el.style.color = '#92400E';
+      el.innerHTML = '<span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">info</span> ' +
+        '<b>Mock mode</b> — ' + (status.reason || 'ANTHROPIC_API_KEY not set') +
+        '. Extractions will return placeholder data for UI testing.';
+    }
+  }
+};
+
+window.closeImportNoticeModal = function(){
+  const el = document.getElementById('import-notice-modal');
+  if(el) el.style.display = 'none';
+  window._importState = null;
+};
+
+window._onImportFilePicked = function(file){
+  if(!file) return;
+  if(file.type && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || '')){
+    const err = document.getElementById('import-error');
+    err.style.display = ''; err.textContent = 'Only PDF files are supported. Selected: ' + (file.type || file.name);
+    return;
+  }
+  if(file.size > 25 * 1024 * 1024){
+    const err = document.getElementById('import-error');
+    err.style.display = ''; err.textContent = 'File too large: ' + Math.round(file.size / 1024 / 1024) + ' MB (max 25 MB).';
+    return;
+  }
+  window._importState = window._importState || {};
+  window._importState.file = file;
+  const el = document.getElementById('import-file-name');
+  el.style.display = '';
+  el.innerHTML = '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px; color:#DC2626;">picture_as_pdf</span> <b>' +
+    (file.name || 'notice.pdf') + '</b> <span style="color:#94A3B8;">· ' + Math.round(file.size / 1024) + ' KB</span>';
+  document.getElementById('import-error').style.display = 'none';
+  // Enable extract button if deal + file present
+  const dealSel = document.getElementById('import-deal-picker');
+  document.getElementById('import-extract-btn').disabled = !(file && dealSel.value);
+};
+
+// Drag-and-drop onto the entire modal body — nicer UX than click-only
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('import-notice-modal');
+  if(!modal) return;
+  const panel = modal.querySelector('.json-modal-pn');
+  if(!panel) return;
+  panel.addEventListener('dragover', e => { e.preventDefault(); panel.style.background = '#F3E8FF'; });
+  panel.addEventListener('dragleave', e => { panel.style.background = ''; });
+  panel.addEventListener('drop', e => {
+    e.preventDefault(); panel.style.background = '';
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) window._onImportFilePicked(f);
+  });
+});
+
+// Rewire deal picker to also toggle button state
+document.addEventListener('change', function(e){
+  if(e.target && e.target.id === 'import-deal-picker'){
+    const dealId = e.target.value;
+    const state = window._importState = window._importState || {};
+    state.dealId = dealId;
+    const opt = e.target.options[e.target.selectedIndex];
+    state.dealHint = opt && opt.dataset ? opt.dataset.hint : null;
+    document.getElementById('import-extract-btn').disabled = !(state.file && dealId);
+  }
+  if(e.target && e.target.id === 'import-type-hint'){
+    (window._importState = window._importState || {}).noticeTypeHint = e.target.value || null;
+  }
+});
+
+window.runNoticeExtraction = async function(){
+  const state = window._importState;
+  if(!state || !state.file || !state.dealId){ return; }
+  const err = document.getElementById('import-error'); err.style.display = 'none';
+  const prog = document.getElementById('import-progress'); prog.style.display = '';
+  document.getElementById('import-progress-text').textContent = 'Uploading PDF…';
+  const btn = document.getElementById('import-extract-btn');
+  btn.disabled = true;
+  try {
+    // 1. Upload PDF to Storage
+    const up = await window.SB.uploadNoticeDoc(state.file, state.dealId);
+    if(!up.ok){ throw new Error('Upload failed: ' + up.reason); }
+    document.getElementById('import-progress-text').textContent = 'Extracting fields with AI…';
+
+    // 2. Extract via server
+    const ex = await window.SB.extractNoticeFromPdf(state.file, {
+      dealHint: state.dealHint, noticeTypeHint: state.noticeTypeHint
+    });
+    if(!ex.ok){ throw new Error('Extract failed: ' + ex.reason); }
+
+    // 3. Save extraction record
+    const save = await window.SB.saveDocumentExtraction({
+      deal_id: state.dealId,
+      source_file_path: up.path,
+      source_file_name: state.file.name,
+      source_file_size: state.file.size,
+      extraction_type: 'notice',
+      model_used: ex.model || (ex.mock ? 'mock' : null),
+      extracted_json: ex.extraction,
+      confidence: ex.extraction && ex.extraction.confidence != null ? ex.extraction.confidence : null,
+      processing_ms: ex.elapsed_ms || null,
+      review_status: 'pending'
+    });
+    if(!save.ok){ throw new Error('Save failed: ' + save.reason); }
+
+    // 4. Open review modal
+    prog.style.display = 'none';
+    btn.disabled = false;
+    window.closeImportNoticeModal();
+    _openReviewExtractionModal(save.extraction, state.file);
+  } catch(e){
+    console.error('[import] failed:', e);
+    prog.style.display = 'none';
+    err.style.display = ''; err.textContent = e.message;
+    btn.disabled = false;
+  }
+};
+
+// Review modal — PDF preview + editable form with colour-coded confidence.
+function _openReviewExtractionModal(extractionRow, sourceFile){
+  window._reviewState = { extraction: extractionRow, sourceFile, editedFields: {} };
+  const modal = document.getElementById('review-extraction-modal');
+  const iframe = document.getElementById('review-pdf-frame');
+  // Load PDF into iframe via blob URL (safer than data URL for large files)
+  if(sourceFile){
+    if(window._reviewPdfUrl){ URL.revokeObjectURL(window._reviewPdfUrl); }
+    window._reviewPdfUrl = URL.createObjectURL(sourceFile);
+    iframe.src = window._reviewPdfUrl + '#toolbar=1&navpanes=0';
+    document.getElementById('review-pdf-name').textContent = sourceFile.name || 'notice.pdf';
+  }
+  const ex = extractionRow.extracted_json || {};
+  const overallConf = ex.confidence != null ? Math.round(ex.confidence * 100) : null;
+  document.getElementById('review-sub').textContent =
+    (ex.notice_type || 'unknown').replace(/_/g,' ') + ' · ' +
+    'confidence: ' + (overallConf != null ? overallConf + '%' : 'n/a');
+  document.getElementById('review-model-info').textContent =
+    'Model: ' + (extractionRow.model_used || 'n/a') +
+    ' · Processing: ' + (extractionRow.processing_ms || 0) + 'ms' +
+    ' · Extraction ID: ' + extractionRow.id.slice(0,8);
+  _renderReviewFields(ex);
+  document.getElementById('review-error').style.display = 'none';
+  modal.style.display = 'flex';
+}
+
+window.closeReviewExtractionModal = function(){
+  const modal = document.getElementById('review-extraction-modal');
+  if(modal) modal.style.display = 'none';
+  if(window._reviewPdfUrl){ URL.revokeObjectURL(window._reviewPdfUrl); window._reviewPdfUrl = null; }
+  window._reviewState = null;
+};
+
+function _confidenceColor(c){
+  // green > 0.8, amber 0.5-0.8, red < 0.5, gray unknown
+  if(c == null) return { bg:'#F3F4F6', bd:'#D1D5DB', fg:'#6B7280', label:'?' };
+  if(c >= 0.8)  return { bg:'#DCFCE7', bd:'#86EFAC', fg:'#166534', label: Math.round(c*100)+'%' };
+  if(c >= 0.5)  return { bg:'#FEF3C7', bd:'#FCD34D', fg:'#92400E', label: Math.round(c*100)+'%' };
+  return           { bg:'#FEE2E2', bd:'#FCA5A5', fg:'#991B1B', label: Math.round(c*100)+'%' };
+}
+
+function _renderReviewFields(ex){
+  const host = document.getElementById('review-fields');
+  const fc = ex.field_confidence || {};
+  // Field definitions for the review form — ordered by importance
+  const fields = [
+    { key: 'notice_type',    label: 'Notice type',       type: 'select', options: ['interest','principal','fee','rate_reset','drawdown','default','waiver','amendment','other'] },
+    { key: 'reference',      label: 'Agent reference',   type: 'text' },
+    { key: 'effective_date', label: 'Effective date',    type: 'date' },
+    { key: 'notice_date',    label: 'Notice date',       type: 'date' },
+    { key: 'amount',         label: 'Amount',            type: 'number' },
+    { key: 'currency',       label: 'Currency',          type: 'text', maxLength: 3 },
+    { key: 'rate',           label: 'Rate (decimal)',    type: 'number', step: '0.000001' },
+    { key: 'period_start',   label: 'Period start',      type: 'date' },
+    { key: 'period_end',     label: 'Period end',        type: 'date' },
+    { key: 'day_count',      label: 'Day count',         type: 'text' },
+    { key: 'borrower_hint',  label: 'Borrower (from doc)', type: 'text' },
+    { key: 'deal_hint',      label: 'Loan ID (from doc)',  type: 'text' },
+    { key: 'notes',          label: 'Summary',           type: 'textarea' }
+  ];
+  host.innerHTML = fields.map(f => {
+    const val = ex[f.key];
+    const c = _confidenceColor(fc[f.key]);
+    let input;
+    if(f.type === 'select'){
+      input = '<select data-key="' + f.key + '" style="width:100%; padding:5px 8px; border:1px solid ' + c.bd + '; border-radius:4px; font-size:12px; background:' + c.bg + '; color:#111827;">' +
+        f.options.map(o => '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o + '</option>').join('') + '</select>';
+    } else if(f.type === 'textarea'){
+      input = '<textarea data-key="' + f.key + '" rows="2" style="width:100%; padding:5px 8px; border:1px solid ' + c.bd + '; border-radius:4px; font-size:11.5px; background:' + c.bg + '; color:#111827; font-family:ui-monospace,monospace;">' + (val || '') + '</textarea>';
+    } else {
+      const extra = f.step ? ' step="' + f.step + '"' : (f.maxLength ? ' maxlength="' + f.maxLength + '"' : '');
+      input = '<input type="' + f.type + '"' + extra + ' data-key="' + f.key + '" value="' + (val != null ? String(val).replace(/"/g,'&quot;') : '') + '" style="width:100%; padding:5px 8px; border:1px solid ' + c.bd + '; border-radius:4px; font-size:12px; background:' + c.bg + '; color:#111827;"/>';
+    }
+    return '<div>' +
+      '<div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">' +
+        '<label style="font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px; color:#475569; font-weight:600;">' + f.label + '</label>' +
+        '<span style="padding:0 6px; border-radius:9px; font-size:9.5px; font-weight:700; background:' + c.bg + '; color:' + c.fg + '; border:1px solid ' + c.bd + ';">' + c.label + '</span>' +
+      '</div>' +
+      input +
+    '</div>';
+  }).join('');
+  // Wire input handlers to accumulate edits
+  host.querySelectorAll('[data-key]').forEach(el => {
+    el.oninput = el.onchange = () => {
+      const k = el.getAttribute('data-key');
+      let v = el.value;
+      if(el.type === 'number' && v !== '') v = +v;
+      if(v === '') v = null;
+      window._reviewState.editedFields[k] = v;
+    };
+  });
+}
+
+window.saveExtractedNotice = async function(){
+  const state = window._reviewState;
+  if(!state){ return; }
+  const err = document.getElementById('review-error'); err.style.display = 'none';
+  const btn = document.getElementById('review-save-btn'); btn.disabled = true;
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">hourglass_top</span> Saving…';
+  try {
+    const merged = Object.assign({}, state.extraction.extracted_json || {}, state.editedFields || {});
+    // Ensure deal_id is set — pull from extraction row
+    const editedWithDeal = Object.assign({}, state.editedFields, { deal_id: state.extraction.deal_id });
+    const res = await window.SB.importExtractionAsNotice(state.extraction.id, editedWithDeal);
+    if(!res.ok){ throw new Error(res.reason); }
+    toast('Notice created from PDF · running reconciliation…', 3000);
+    window.closeReviewExtractionModal();
+    // Refresh notices list + trigger reconciliation
+    if(typeof window.refreshNotices === 'function') window.refreshNotices();
+    if(typeof window.reconcileNotices === 'function') setTimeout(() => window.reconcileNotices(), 500);
+  } catch(e){
+    console.error('[review] save failed:', e);
+    err.style.display = ''; err.textContent = 'Save failed: ' + e.message;
+    btn.disabled = false; btn.innerHTML = origHtml;
+  }
+};
+
+window.discardExtraction = async function(){
+  const state = window._reviewState; if(!state) return;
+  if(window.showAppDialog){
+    window.showAppDialog({
+      severity: 'warning', title: 'Discard extraction?',
+      message: 'This extraction will be marked as discarded and won\'t create a notice. The source PDF is kept in Storage.',
+      buttons: [
+        { label: 'Cancel' },
+        { label: 'Discard', variant: 'danger', onClick: async () => { await _doDiscardExtraction(state); } }
+      ]
+    });
+  } else if(confirm('Discard this extraction?')){
+    await _doDiscardExtraction(state);
+  }
+};
+async function _doDiscardExtraction(state){
+  try {
+    if(window.SB && window.SB.discardDocumentExtraction){
+      await window.SB.discardDocumentExtraction(state.extraction.id, 'user rejected review');
+    }
+  } catch(e){ console.warn('[review] discard update failed:', e); }
+  window.closeReviewExtractionModal();
+  toast('Extraction discarded', 2500);
+}
 
 // ─── Notice Reconciliation (Phase 2) ───────────────────────
 // Fetch journal_entries for each visible deal and match against interest/
