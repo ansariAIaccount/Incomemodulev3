@@ -2941,6 +2941,33 @@
         </div>
       </div>
 
+      <!-- ═══ Document Ingestion Service (separate microservice) ═══ -->
+      <div style="margin-top:16px; padding:14px 16px; border:1px solid #4C1D95; border-radius:8px; background:linear-gradient(135deg,rgba(76,29,149,0.15) 0%, rgba(30,58,138,0.10) 100%);">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+          <span class="material-icons-outlined text-[20px]" style="color:#A78BFA;">auto_awesome</span>
+          <div style="font-weight:700; font-size:13px;">Document Ingestion Service</div>
+          <span id="ingestcfg-status-chip" class="chip" style="margin-left:auto; font-size:10px; font-weight:600; padding:3px 8px; border-radius:10px; background:#334155; color:#E2E8F0;">not configured</span>
+        </div>
+        <div style="font-size:11px; color:#CBD5E1; margin-bottom:12px; line-height:1.5;">
+          Standalone microservice for AI-powered PDF ingestion (Import Notice from PDF). Separated from the DIU proxy so long LLM calls don't block JE posts. Runs from <code style="background:rgba(255,255,255,0.1); padding:1px 5px; border-radius:3px;">server-ingest/</code> on its own port (default 4319).
+        </div>
+        <div style="display:grid; gap:10px;">
+          <div>
+            <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#A78BFA; margin-bottom:4px;">
+              Ingestion Service URL <span style="color:#94A3B8; font-weight:400; text-transform:none; letter-spacing:0;">— leave blank to disable AI import</span>
+            </label>
+            <input id="ingestcfg-url" type="text" placeholder="http://localhost:4319 · https://pcs-ingest.onrender.com" style="width:100%; padding:7px 10px; border:1px solid #4C1D95; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:12px;"/>
+            <div style="font-size:10.5px; color:#A78BFA; margin-top:4px;">Holds the Anthropic API key. Browser never sees it.</div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:2px;">
+            <button id="btn-ingestcfg-test" type="button" style="padding:6px 14px; background:#7C3AED; color:white; border:none; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;">
+              <span class="material-icons-outlined" style="font-size:14px;">network_check</span>Test Ingest Connection
+            </button>
+            <div id="ingestcfg-test-result" style="font-size:11px; color:#CBD5E1;">—</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Schema contract reminder -->
       <details style="margin-top:14px; font-size:11px;">
         <summary style="cursor:pointer; color:#4B5563; font-weight:600;">Required schema contract</summary>
@@ -3476,13 +3503,13 @@
           <table id="notices-table" style="width:100%; border-collapse:collapse; font-size:11px;">
             <thead style="position:sticky; top:0; background:#F3F4F6; z-index:1;">
               <tr>
-                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Effective</th>
                 <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Deal</th>
                 <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Type</th>
-                <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #E5E7EB;">Amount</th>
-                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Reference</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB; background:#EFF6FF;" title="What our engine expected the agent to send us">Expected</th>
+                <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB; background:#FDF4FF;" title="What the loan agent actually sent us (via PDF import, email, or manual entry)">Received</th>
+                <th style="padding:6px 8px; text-align:center; border-bottom:1px solid #E5E7EB;" title="Match quality between Expected vs Received">Variance</th>
                 <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Status</th>
-                <th style="padding:6px 8px; text-align:center; border-bottom:1px solid #E5E7EB;" title="Reconciliation with journal entries">Rec</th>
+                <th style="padding:6px 8px; text-align:center; border-bottom:1px solid #E5E7EB;" title="Reconciliation with journal entries">JE Rec</th>
                 <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB;">Actions</th>
               </tr>
             </thead>
@@ -4936,21 +4963,31 @@ window.SB = (function(){
     }
   }
 
+  // Ingest service — separate microservice from the DIU proxy. Client stores
+  // its URL under a distinct localStorage key so each service can be pointed
+  // at a different host in production.
+  function _ingestBaseUrl(){
+    return ((typeof localStorage !== 'undefined' && localStorage.getItem('pcs_v3_ingest_url')) || '').trim();
+  }
+
   async function extractNoticeFromPdf(file, opts){
-    // Server call — sends the raw file to /api/extract/notice
+    // Server call — sends the raw file to /api/extract/notice on the
+    // Document Ingestion Service (default port 4319).
     opts = opts || {};
-    const proxyUrl = ((typeof localStorage !== 'undefined' && localStorage.getItem('pcs_v3_diu_proxy_url')) || '').trim();
-    if(!proxyUrl) return { ok:false, reason:'DIU proxy URL not configured — set it in DB Settings so /api/extract/notice is reachable' };
+    const base = _ingestBaseUrl();
+    if(!base){
+      return { ok:false, reason:'Ingestion Service URL not set — open ⚙️ DB Settings and enter http://localhost:4319 (or wherever server-ingest/ runs)' };
+    }
     try {
       const form = new FormData();
       form.append('file', file);
       if(opts.dealHint) form.append('deal_hint', opts.dealHint);
       if(opts.noticeTypeHint) form.append('notice_type_hint', opts.noticeTypeHint);
-      const r = await fetch(proxyUrl.replace(/\/$/,'') + '/api/extract/notice', {
+      const r = await fetch(base.replace(/\/$/,'') + '/api/extract/notice', {
         method: 'POST', body: form
       });
       const j = await r.json();
-      if(!r.ok) return { ok:false, reason: j.reason || 'server error' };
+      if(!r.ok) return { ok:false, reason: j.reason || 'ingest server error' };
       return j;
     } catch(err){
       console.error('[SB] extractNoticeFromPdf threw:', err);
@@ -5009,6 +5046,8 @@ window.SB = (function(){
       return { ok:false, reason:'deal_id required — either extraction.deal_id or editedFields.deal_id must be set' };
     }
     // Build the loan_notices row from merged fields
+    // NOTE: notice_status_enum = pending | sent | acknowledged | completed | cancelled
+    // ('draft' is NOT valid — AI-imported notices land in 'pending' awaiting send)
     const noticeRow = {
       deal_id:        editedFields.deal_id || ex.deal_id,
       tranche_id:     merged.tranche_id || null,
@@ -5020,13 +5059,38 @@ window.SB = (function(){
       reference:      merged.reference || null,
       rate:           merged.rate != null ? +merged.rate : null,
       breakdown:      merged.breakdown || null,
-      status:         'draft',
+      status:         'pending',
+      source:         'agent_received',   // AI-extracted PDFs are (by definition) received from an agent
       notes:          (merged.notes ? merged.notes + ' · ' : '') + 'AI-extracted from ' + (ex.source_file_name || 'PDF'),
       is_auto_derived: false,
       created_by:      _currentUser ? _currentUser.id : null
     };
+
+    // ─── Run the matcher BEFORE inserting so we can attach the link + variance
+    // in the same INSERT (avoids a redundant UPDATE cycle + trigger flap).
+    let matchResult = null;
+    try {
+      if(typeof LMA !== 'undefined' && LMA.matchNoticePair){
+        // Load unpaired notices for the same deal to score against
+        const { data: pool, error: poolErr } = await _client.from('loan_notices')
+          .select('id, deal_id, notice_type, effective_date, amount, currency, reference, rate, matched_notice_id, source')
+          .eq('deal_id', noticeRow.deal_id)
+          .is('matched_notice_id', null);
+        if(!poolErr && Array.isArray(pool) && pool.length){
+          matchResult = LMA.matchNoticePair(noticeRow, pool);
+        }
+      }
+    } catch(mErr){ console.warn('[SB] matcher threw (non-fatal):', mErr); }
+
+    if(matchResult && matchResult.bestMatch && matchResult.severity !== 'unmatched'){
+      noticeRow.matched_notice_id = matchResult.bestMatch.id;
+      noticeRow.match_score       = matchResult.score;
+      noticeRow.variance_json     = { severity: matchResult.severity, ...matchResult.variance };
+    }
+
     const noticeRes = await upsertNotice(noticeRow);
     if(!noticeRes.ok) return { ok:false, reason:'notice insert failed: ' + noticeRes.reason };
+
     // Link extraction → notice + flip status
     const { error: upErr } = await _client.from('document_extractions')
       .update({
@@ -5034,28 +5098,60 @@ window.SB = (function(){
         review_status: 'imported',
         reviewed_by: _currentUser ? _currentUser.id : null,
         reviewed_at: new Date().toISOString(),
-        deal_id: noticeRow.deal_id,   // ensure deal_id is set if user picked it
-        extracted_json: merged        // save the user's edits back so audit trail matches what was imported
+        deal_id: noticeRow.deal_id,
+        extracted_json: merged
       })
       .eq('id', extractionId);
     if(upErr) console.warn('[SB] extraction link update failed:', upErr);
-    return { ok:true, notice: noticeRes.notice, extractionId };
+
+    return {
+      ok: true,
+      notice: noticeRes.notice,
+      extractionId,
+      match: matchResult ? {
+        matched: !!matchResult.bestMatch,
+        matchedNoticeId: matchResult.bestMatch && matchResult.bestMatch.id,
+        severity: matchResult.severity,
+        score: matchResult.score,
+        variance: matchResult.variance
+      } : { matched: false }
+    };
+  }
+
+  // Manual pair/unpair (user override from the UI)
+  async function pairNotices(noticeAId, noticeBId, variance){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('loan_notices')
+      .update({ matched_notice_id: noticeBId, variance_json: variance || null, match_score: 100 })
+      .eq('id', noticeAId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+  async function unpairNotice(noticeId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('loan_notices')
+      .update({ matched_notice_id: null, variance_json: null, match_score: null })
+      .eq('id', noticeId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
   }
 
   async function checkAiExtractStatus(){
-    const proxyUrl = ((typeof localStorage !== 'undefined' && localStorage.getItem('pcs_v3_diu_proxy_url')) || '').trim();
-    if(!proxyUrl) return { available: false, reason:'No DIU proxy URL configured — extract endpoint unreachable' };
+    const base = _ingestBaseUrl();
+    if(!base){
+      return { available: false, reason:'Ingestion Service URL not set — open ⚙️ DB Settings and enter http://localhost:4319 (or wherever server-ingest/ runs)' };
+    }
     try {
-      const r = await fetch(proxyUrl.replace(/\/$/,'') + '/api/extract/status');
+      const r = await fetch(base.replace(/\/$/,'') + '/api/extract/status');
       const j = await r.json();
       return {
         available: !!(j.aiConfigured),
         model: j.model,
         fallback: j.fallback,
-        reason: j.aiConfigured ? null : 'Server up but ANTHROPIC_API_KEY not set — will use mock extraction for UI testing'
+        reason: j.aiConfigured ? null : 'Ingestion service is running but ANTHROPIC_API_KEY not set in server-ingest/.env — extraction returns mock data.'
       };
     } catch(err){
-      return { available: false, reason:'Proxy unreachable' };
+      return { available: false, reason:'Ingestion service unreachable at ' + base + ' — is `npm start` running in the server-ingest/ folder?' };
     }
   }
 
@@ -6527,6 +6623,8 @@ window.SB = (function(){
     uploadNoticeDoc, extractNoticeFromPdf, saveDocumentExtraction,
     fetchDocumentExtractions, importExtractionAsNotice, checkAiExtractStatus,
     discardDocumentExtraction,
+    // Notice matching (Phase 2 — pair Expected vs Received)
+    pairNotices, unpairNotice,
     // Approval workflow (#231)
     getRun, approveRun, postRun, reopenRun,
     // Auth
@@ -8683,6 +8781,60 @@ window.openDBConfigModal = function(){
   };
   refreshDiuStatusChip();
   diuProxyEl.oninput = refreshDiuStatusChip;
+  // ─── Ingestion Service config load ─────────────────────────
+  // Standalone microservice (default port 4319). Uses a separate localStorage
+  // key so DIU and Ingest can be pointed at different hosts in production.
+  const ingestUrlEl     = $g('ingestcfg-url');
+  const ingestStatusChip = $g('ingestcfg-status-chip');
+  const ingestTestResult = $g('ingestcfg-test-result');
+  const btnIngestTest    = $g('btn-ingestcfg-test');
+  if(ingestUrlEl){
+    try { ingestUrlEl.value = localStorage.getItem('pcs_v3_ingest_url') || ''; } catch(_){}
+    const refreshIngestStatusChip = () => {
+      const url = ingestUrlEl.value.trim();
+      if(!url){
+        ingestStatusChip.textContent = 'not configured';
+        ingestStatusChip.style.background = '#334155';
+        ingestStatusChip.style.color = '#E2E8F0';
+      } else {
+        ingestStatusChip.textContent = 'set · ' + url.replace(/^https?:\/\//, '').split('/')[0];
+        ingestStatusChip.style.background = '#7C3AED';
+        ingestStatusChip.style.color = 'white';
+      }
+    };
+    refreshIngestStatusChip();
+    ingestUrlEl.oninput = refreshIngestStatusChip;
+    if(btnIngestTest){
+      btnIngestTest.onclick = async () => {
+        const url = ingestUrlEl.value.trim().replace(/\/$/, '');
+        if(!url){
+          ingestTestResult.innerHTML = '<span style="color:#FBBF24;">◐ No URL — AI import (Notices) will be disabled.</span>';
+          return;
+        }
+        ingestTestResult.innerHTML = '<span style="color:#CBD5E1;">◌ Pinging ' + escapeHTML(url) + '/api/extract/status…</span>';
+        try {
+          const ac = new AbortController();
+          const timer = setTimeout(() => ac.abort(), 8000);
+          const res = await fetch(url + '/api/extract/status', { method:'GET', signal: ac.signal });
+          clearTimeout(timer);
+          if(!res.ok){
+            ingestTestResult.innerHTML = '<span style="color:#F87171;">✕ HTTP ' + res.status + ' · ' + res.statusText + '</span>';
+            return;
+          }
+          const data = await res.json().catch(() => ({}));
+          if(data.aiConfigured){
+            ingestTestResult.innerHTML = '<span style="color:#34D399;">✓ Live · Anthropic configured · ' + escapeHTML(data.model || 'model?') + '</span>';
+          } else {
+            ingestTestResult.innerHTML = '<span style="color:#FBBF24;">◐ Service reachable but ANTHROPIC_API_KEY blank in server-ingest/.env — will return mock extractions.</span>';
+          }
+        } catch(err){
+          const msg = err && err.name === 'AbortError' ? 'timeout after 8s' : (err && err.message ? err.message : String(err));
+          ingestTestResult.innerHTML = '<span style="color:#F87171;">✕ ' + escapeHTML(msg) + '</span>';
+        }
+      };
+    }
+  }
+
   // Test DIU Connection — pings /healthz on the proxy
   btnDiuTest.onclick = async () => {
     const url = diuProxyEl.value.trim().replace(/\/$/, '');
@@ -8833,10 +8985,15 @@ window.openDBConfigModal = function(){
       localStorage.removeItem('pcs_v3_diu_template');
       localStorage.removeItem('pcs_v3_diu_le_domain');
       localStorage.removeItem('pcs_v3_diu_allocation_rule');
+      localStorage.removeItem('pcs_v3_ingest_url');
     } catch(_){}
     diuProxyEl.value = ''; diuTemplateEl.value = ''; diuLeDomainEl.value = ''; diuAllocEl.value = '';
+    const ingestUrlElReset = document.getElementById('ingestcfg-url');
+    if(ingestUrlElReset){ ingestUrlElReset.value = ''; ingestUrlElReset.dispatchEvent(new Event('input')); }
     refreshDiuStatusChip();
     diuTestResult.innerHTML = '—';
+    const ingestTestResultReset = document.getElementById('ingestcfg-test-result');
+    if(ingestTestResultReset) ingestTestResultReset.innerHTML = '—';
     applyTypeUI();
     if(typeof toast === 'function') toast('All settings reset — click Save & Reload to apply', 4000);
   };
@@ -8884,6 +9041,17 @@ window.openDBConfigModal = function(){
       if(dTpl)   localStorage.setItem('pcs_v3_diu_template', dTpl);        else localStorage.removeItem('pcs_v3_diu_template');
       if(dLE)    localStorage.setItem('pcs_v3_diu_le_domain', dLE);         else localStorage.removeItem('pcs_v3_diu_le_domain');
       if(dAlloc) localStorage.setItem('pcs_v3_diu_allocation_rule', dAlloc); else localStorage.removeItem('pcs_v3_diu_allocation_rule');
+      // Ingestion Service URL — separate microservice from DIU proxy
+      const ingestUrlElSave = document.getElementById('ingestcfg-url');
+      if(ingestUrlElSave){
+        const iURL = (ingestUrlElSave.value || '').trim();
+        if(iURL){
+          if(!/^https?:\/\//.test(iURL)){ alert('Ingestion Service URL must start with https:// (or http://)'); ingestUrlElSave.focus(); return; }
+          localStorage.setItem('pcs_v3_ingest_url', iURL);
+        } else {
+          localStorage.removeItem('pcs_v3_ingest_url');
+        }
+      }
     } catch(_){}
     if(typeof toast === 'function') toast('Saved · reloading…', 2000);
     setTimeout(() => location.reload(), 400);
@@ -13845,24 +14013,153 @@ function _renderNotices(){
     pending:'#EAB308', sent:'#3B82F6', acknowledged:'#8B5CF6', completed:'#10B981', cancelled:'#94A3B8'
   };
   const fmtMoney = (n) => n == null ? '—' : (+n).toLocaleString(undefined, { maximumFractionDigits:0 });
-  document.getElementById('notices-tbody').innerHTML = filtered.map(n => {
-    const t = typeLabel[n.notice_type] || { label:n.notice_type, color:'#6B7280' };
-    const overdue = ['pending','sent','acknowledged'].includes(n.status) && n.effective_date < today;
-    // Row is clickable → opens notice detail modal. Actions stop propagation so the
-    // action buttons don't trigger the detail open.
-    return '<tr onclick="window.openNoticeDetail && window.openNoticeDetail(\'' + n.id + '\')" style="border-bottom:1px solid #F1F5F9; cursor:pointer;' + (overdue ? ' background:#FEF2F2;' : '') + '" onmouseover="this.style.background=\'' + (overdue ? '#FEE2E2' : '#F8FAFC') + '\'" onmouseout="this.style.background=\'' + (overdue ? '#FEF2F2' : 'white') + '\'">' +
-      '<td style="padding:5px 8px; font-family:ui-monospace,monospace;">' + n.effective_date + (overdue ? ' <span style="color:#DC2626; font-weight:700;">⚠</span>' : '') + '</td>' +
-      '<td style="padding:5px 8px;">' + (dealNameById[n.deal_id] || (n.deal_id ? n.deal_id.slice(0,8) : '—')) + '</td>' +
+
+  // ─── Pair matched notices into single visual rows ───────────────────
+  // Group logic: for each notice N in filtered[], if N is matched, prefer
+  // rendering the system_derived side (Expected) as the "primary" row and
+  // squash its partner into the Received column. Skip the partner when we
+  // reach it separately. Unmatched notices render on their own with an
+  // empty column on the other side.
+  const byId = new Map();
+  for(const n of (window._noticesCache || [])) byId.set(n.id, n);
+  const rendered = new Set();
+  const pairs = [];   // [{ expected, received, matched: bool }]
+  for(const n of filtered){
+    if(rendered.has(n.id)) continue;
+    const partner = n.matched_notice_id ? byId.get(n.matched_notice_id) : null;
+    if(partner){
+      // Determine which side is Expected vs Received based on `source`
+      const isNSystem = n.source === 'system_derived';
+      const isPSystem = partner.source === 'system_derived';
+      const expected = isNSystem ? n : (isPSystem ? partner : n);           // fallback: whichever is older
+      const received = expected === n ? partner : n;
+      pairs.push({ expected, received, matched: true });
+      rendered.add(n.id); rendered.add(partner.id);
+    } else {
+      // Unmatched — decide which side to show it on
+      if(n.source === 'agent_received' || n.source === 'email_ingest'){
+        pairs.push({ expected: null, received: n, matched: false });
+      } else {
+        pairs.push({ expected: n, received: null, matched: false });
+      }
+      rendered.add(n.id);
+    }
+  }
+
+  // ─── Slick cell renderers ──────────────────────────────────────────
+  const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  // One side of the pair — date + amount + optional source badge + optional ref
+  function _renderSideCell(n, side, overdue){
+    if(!n){
+      // Empty cell — clearly labelled so the row still reads
+      const missingLabel = side === 'expected'
+        ? '<span style="color:#94A3B8; font-size:10.5px;">✗ Not expected</span>'
+        : '<span style="color:#B91C1C; font-size:10.5px;" title="Notice not yet received from agent">⏳ Awaiting agent</span>';
+      return '<td style="padding:5px 8px; background:#FAFAFA; text-align:center;">' + missingLabel + '</td>';
+    }
+    const bg = side === 'expected' ? '#EFF6FF' : '#FDF4FF';
+    const dateHtml = '<div style="font-family:ui-monospace,monospace; font-size:10.5px; color:#374151;">' +
+      escHtml(n.effective_date) + (overdue && side === 'expected' ? ' <span style="color:#DC2626;" title="Past due">⚠</span>' : '') + '</div>';
+    const amtHtml = '<div style="font-variant-numeric:tabular-nums; font-weight:600; color:#1F2937; font-size:11.5px;">' +
+      (n.amount != null ? (n.currency ? escHtml(n.currency) + ' ' : '') + fmtMoney(n.amount) : '—') + '</div>';
+    const refHtml = n.reference
+      ? '<div style="font-family:ui-monospace,monospace; font-size:9.5px; color:#6B7280;" title="Reference: ' + escHtml(n.reference) + '">' + escHtml(n.reference.slice(0, 22)) + '</div>'
+      : '';
+    // Source badge only on Received side (Expected is always system_derived)
+    const srcBadge = side === 'received' && n.source ? (function(){
+      const label = {
+        agent_received: 'PDF', email_ingest: 'Email', manual: 'Manual', system_derived: 'System'
+      }[n.source] || n.source;
+      const clr = n.source === 'agent_received' ? '#7C3AED' : n.source === 'email_ingest' ? '#0891B2' : '#6B7280';
+      return '<span style="margin-top:2px; display:inline-block; padding:0 5px; background:' + clr + '22; color:' + clr + '; border-radius:8px; font-size:9px; font-weight:700;">' + label + '</span>';
+    })() : '';
+    return '<td style="padding:5px 8px; background:' + bg + ';">' + dateHtml + amtHtml + refHtml + srcBadge + '</td>';
+  }
+
+  // Variance chip — clean/minor/major with hover-explain
+  function _renderVarianceCell(pair){
+    if(!pair.matched){
+      if(!pair.expected){
+        return '<td style="padding:5px 8px; text-align:center;">' +
+          '<span style="padding:2px 8px; background:#FEE2E2; color:#991B1B; border-radius:9px; font-size:10px; font-weight:700;" title="Received from agent but no matching expected notice — was there an amendment we don\'t know about?">unmatched</span>' +
+        '</td>';
+      }
+      if(!pair.received){
+        const isPast = pair.expected.effective_date < today;
+        if(isPast) return '<td style="padding:5px 8px; text-align:center;">' +
+          '<span style="padding:2px 8px; background:#FEF3C7; color:#92400E; border-radius:9px; font-size:10px; font-weight:700;" title="Effective date has passed but no notice received from agent">no notice</span>' +
+        '</td>';
+        return '<td style="padding:5px 8px; text-align:center; color:#94A3B8;" title="Awaiting agent notice">—</td>';
+      }
+      return '<td style="padding:5px 8px; text-align:center; color:#94A3B8;">—</td>';
+    }
+    // Matched — show severity chip with reasons
+    const v = (pair.received && pair.received.variance_json) || (pair.expected && pair.expected.variance_json) || {};
+    const severity = v.severity || 'clean';
+    const cfg = {
+      clean: { bg:'#DCFCE7', fg:'#166534', bd:'#86EFAC', icon:'✓', label:'match' },
+      minor: { bg:'#FEF3C7', fg:'#92400E', bd:'#FCD34D', icon:'⚠', label:'variance' },
+      major: { bg:'#FEE2E2', fg:'#991B1B', bd:'#FCA5A5', icon:'✗', label:'mismatch' }
+    }[severity] || { bg:'#F1F5F9', fg:'#64748B', bd:'#CBD5E1', icon:'·', label:'—' };
+    const reasons = Array.isArray(v.reasons) && v.reasons.length ? v.reasons.join('; ') : 'no variance';
+    // Compact summary of the top differences right on the chip
+    const parts = [];
+    if(v.date_diff_days) parts.push((v.date_diff_days > 0 ? '+' : '') + v.date_diff_days + 'd');
+    if(v.amount_diff_pct && v.amount_diff_pct >= 0.001){
+      const sign = v.amount_diff > 0 ? '+' : '';
+      parts.push(sign + (v.amount_diff_pct * 100).toFixed(1) + '%');
+    }
+    const partsHtml = parts.length ? ' <span style="opacity:0.75; font-weight:500;">' + parts.join(' · ') + '</span>' : '';
+    return '<td style="padding:5px 8px; text-align:center;">' +
+      '<span style="padding:2px 8px; background:' + cfg.bg + '; color:' + cfg.fg + '; border:1px solid ' + cfg.bd + '; border-radius:9px; font-size:10px; font-weight:700;" title="' + escHtml(reasons) + '">' +
+        cfg.icon + ' ' + cfg.label + partsHtml +
+      '</span>' +
+    '</td>';
+  }
+
+  document.getElementById('notices-tbody').innerHTML = pairs.map(pair => {
+    // Use the "primary" side for row-level metadata (deal, type, status, actions)
+    const primary = pair.expected || pair.received;
+    const t = typeLabel[primary.notice_type] || { label:primary.notice_type, color:'#6B7280' };
+    const overdue = pair.expected && ['pending','sent','acknowledged'].includes(pair.expected.status) && pair.expected.effective_date < today;
+    // Row highlight when there's a variance or missing side
+    const v = (pair.received && pair.received.variance_json) || (pair.expected && pair.expected.variance_json) || {};
+    const rowBg = pair.matched && v.severity === 'major' ? 'background:#FFF1F2;'
+                : !pair.matched && pair.expected && !pair.received && overdue ? 'background:#FEF2F2;'
+                : '';
+    // Click opens detail for primary notice
+    const clickId = primary.id;
+    return '<tr onclick="window.openNoticeDetail && window.openNoticeDetail(\'' + clickId + '\')" style="border-bottom:1px solid #F1F5F9; cursor:pointer; ' + rowBg + '" onmouseover="if(!this.style.background) this.style.background=\'#F8FAFC\'" onmouseout="this.style.background=\'' + (rowBg.replace('background:','').replace(';','') || '') + '\'">' +
+      '<td style="padding:5px 8px; font-size:11px; font-weight:600; color:#1F2937;">' + escHtml(dealNameById[primary.deal_id] || (primary.deal_id ? primary.deal_id.slice(0,8) : '—')) + '</td>' +
       '<td style="padding:5px 8px;"><span style="background:' + t.color + '22; color:' + t.color + '; padding:2px 7px; border-radius:8px; font-size:10px; font-weight:700;">' + t.label + '</span></td>' +
-      '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + (n.amount != null ? (n.currency ? n.currency + ' ' : '') + fmtMoney(n.amount) : '—') + '</td>' +
-      '<td style="padding:5px 8px; font-family:ui-monospace,monospace; font-size:10px; color:#6B7280;">' + (n.reference || '—') + '</td>' +
-      '<td style="padding:5px 8px;"><span style="color:' + (statusColor[n.status] || '#6B7280') + '; font-weight:600; text-transform:capitalize;">' + n.status + '</span></td>' +
-      '<td style="padding:5px 8px; text-align:center;">' + _renderReconBadge(n) + '</td>' +
-      '<td style="padding:5px 8px;" onclick="event.stopPropagation();">' + _renderNoticeActions(n) + '</td>' +
+      _renderSideCell(pair.expected, 'expected', overdue) +
+      _renderSideCell(pair.received, 'received', overdue) +
+      _renderVarianceCell(pair) +
+      '<td style="padding:5px 8px;"><span style="color:' + (statusColor[primary.status] || '#6B7280') + '; font-weight:600; text-transform:capitalize; font-size:10.5px;">' + escHtml(primary.status) + '</span></td>' +
+      '<td style="padding:5px 8px; text-align:center;">' + _renderReconBadge(primary) + '</td>' +
+      '<td style="padding:5px 8px;" onclick="event.stopPropagation();">' + _renderNoticeActions(primary) + '</td>' +
     '</tr>';
   }).join('');
+  // Count match outcomes across the paired view for a quick summary
+  const matchStats = { pairs: 0, expOnly: 0, recOnly: 0, clean: 0, minor: 0, major: 0 };
+  for(const p of pairs){
+    if(p.matched){
+      matchStats.pairs++;
+      const v = (p.received && p.received.variance_json) || (p.expected && p.expected.variance_json) || {};
+      if(v.severity === 'major') matchStats.major++;
+      else if(v.severity === 'minor') matchStats.minor++;
+      else matchStats.clean++;
+    } else if(p.expected && !p.received) matchStats.expOnly++;
+    else if(!p.expected && p.received) matchStats.recOnly++;
+  }
   document.getElementById('notices-summary').textContent =
-    window._noticesCache.length + ' total · ' + filtered.length + ' shown' +
+    window._noticesCache.length + ' notices · ' + pairs.length + ' rows shown · ' +
+    matchStats.pairs + ' matched (' +
+    (matchStats.clean ? matchStats.clean + ' ✓ clean' : '') +
+    (matchStats.minor ? (matchStats.clean?' · ':'') + matchStats.minor + ' ⚠ minor' : '') +
+    (matchStats.major ? ((matchStats.clean||matchStats.minor)?' · ':'') + matchStats.major + ' ✗ major' : '') +
+    ') · ' + matchStats.expOnly + ' expected-only · ' + matchStats.recOnly + ' unmatched received' +
     (kpiCounts.overdue > 0 ? ' · ⚠ ' + kpiCounts.overdue + ' overdue' : '');
 }
 

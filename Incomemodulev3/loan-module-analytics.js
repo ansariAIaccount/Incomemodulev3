@@ -1312,6 +1312,141 @@
     };
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // Notice matching — pair Expected (system_derived) vs Received (agent)
+  // ═════════════════════════════════════════════════════════════════════════
+  // Fuzzy matcher that scores a candidate notice against a pool of existing
+  // ones. Returns the best match (if any), a score, and a variance report
+  // ready to render in the UI.
+  //
+  // Scoring: mandatory same deal_id + at least one of (type match, amount ~=,
+  // date ~=). Threshold-tuned so a $5M drawdown expected on 06-22 matches a
+  // $5.02M drawdown received on 06-23 as "minor variance".
+  //
+  //   const r = LMA.matchNoticePair(candidate, pool, opts);
+  //   → {
+  //       bestMatch: <existingNotice> | null,
+  //       score: 0..200,
+  //       severity: 'clean' | 'minor' | 'major' | 'unmatched',
+  //       variance: {
+  //         date_diff_days, amount_diff, amount_diff_pct,
+  //         type_mismatch, currency_mismatch, reference_match,
+  //         rate_diff, reasons: [...]
+  //       },
+  //       autoApproveOk: bool   // true if severity==='clean' and score high enough
+  //     }
+  function matchNoticePair(candidate, pool, opts){
+    opts = opts || {};
+    const AUTO_MATCH_SCORE = +opts.autoMatchScore || 130;
+    const AMT_TOL_PCT      = +opts.amountTolerancePct || 0.01;   // 1%
+    const AMT_MINOR_PCT    = +opts.amountMinorPct || 0.05;       // 5% still-minor
+    const DATE_TOL_DAYS    = +opts.dateToleranceDays || 3;
+    const DATE_MINOR_DAYS  = +opts.dateMinorDays || 7;
+    const daysBetween = (a, b) => {
+      if(!a || !b) return null;
+      return Math.round((new Date(b) - new Date(a)) / 86400000);
+    };
+    const norm = s => String(s || '').trim().toLowerCase();
+
+    if(!candidate || !Array.isArray(pool) || !pool.length){
+      return { bestMatch: null, score: 0, severity: 'unmatched', variance: null, autoApproveOk: false };
+    }
+
+    const scored = pool
+      .filter(n => n && n.id !== candidate.id)
+      .filter(n => (n.deal_id || n.dealId) === (candidate.deal_id || candidate.dealId))
+      // Skip already-paired notices (each notice can only match one partner)
+      .filter(n => !n.matched_notice_id)
+      .map(n => {
+        let score = 0;
+        const reasons = [];
+        const candType = norm(candidate.notice_type);
+        const nType    = norm(n.notice_type);
+        const typeMatch = candType && candType === nType;
+        if(typeMatch) score += 50;
+        else if(candType && nType) reasons.push('type mismatch (' + n.notice_type + ' vs ' + candidate.notice_type + ')');
+
+        // Amount comparison — tolerate small differences
+        const cAmt = +candidate.amount || 0;
+        const nAmt = +n.amount || 0;
+        const amtDiff = cAmt - nAmt;
+        const amtBase = Math.max(Math.abs(cAmt), Math.abs(nAmt));
+        const amtDiffPct = amtBase > 0 ? Math.abs(amtDiff) / amtBase : 0;
+        if(amtBase > 0){
+          if(amtDiffPct <= AMT_TOL_PCT)      { score += 30; }
+          else if(amtDiffPct <= AMT_MINOR_PCT){ score += 15; reasons.push('amount differs ' + (amtDiffPct*100).toFixed(1) + '%'); }
+          else                                { reasons.push('amount differs ' + (amtDiffPct*100).toFixed(1) + '% (' + amtDiff.toLocaleString() + ')'); }
+        }
+
+        // Date comparison — days between effective_dates
+        const dDiff = daysBetween(candidate.effective_date, n.effective_date);
+        if(dDiff !== null){
+          const abs = Math.abs(dDiff);
+          if(abs === 0)                       { score += 20; }
+          else if(abs <= DATE_TOL_DAYS)       { score += 15; reasons.push('date off by ' + dDiff + 'd'); }
+          else if(abs <= DATE_MINOR_DAYS)     { score += 5;  reasons.push('date off by ' + dDiff + 'd'); }
+          else                                { reasons.push('date off by ' + dDiff + ' days'); }
+        }
+
+        // Currency mismatch is a hard signal — usually means wrong notice
+        const currencyMismatch = (candidate.currency && n.currency && norm(candidate.currency) !== norm(n.currency));
+        if(currencyMismatch){ score -= 30; reasons.push('currency mismatch (' + n.currency + ' vs ' + candidate.currency + ')'); }
+
+        // Reference number — bonus if identical (agents often echo our ref)
+        const referenceMatch = candidate.reference && n.reference && norm(candidate.reference) === norm(n.reference);
+        if(referenceMatch) score += 5;
+
+        // Rate comparison (interest notices)
+        const cRate = candidate.rate != null ? +candidate.rate : null;
+        const nRate = n.rate != null ? +n.rate : null;
+        const rateDiff = (cRate != null && nRate != null) ? cRate - nRate : null;
+        if(rateDiff != null && Math.abs(rateDiff) > 0.0001){
+          reasons.push('rate differs ' + (rateDiff * 10000).toFixed(1) + 'bps');
+        }
+
+        return {
+          notice: n, score,
+          variance: {
+            date_diff_days: dDiff,
+            amount_diff: amtDiff,
+            amount_diff_pct: amtDiffPct,
+            type_mismatch: !typeMatch,
+            currency_mismatch: currencyMismatch,
+            reference_match: !!referenceMatch,
+            rate_diff: rateDiff,
+            reasons
+          }
+        };
+      })
+      .filter(x => x.score > 0)
+      .sort((a,b) => b.score - a.score);
+
+    if(!scored.length){
+      return { bestMatch: null, score: 0, severity: 'unmatched', variance: null, autoApproveOk: false };
+    }
+    const best = scored[0];
+    // Classify severity: clean (green), minor (amber), major (red)
+    const v = best.variance;
+    let severity;
+    const bigDate = Math.abs(v.date_diff_days || 0) > DATE_MINOR_DAYS;
+    const bigAmt  = (v.amount_diff_pct || 0) > AMT_MINOR_PCT;
+    if(v.type_mismatch || v.currency_mismatch || bigDate || bigAmt){
+      severity = 'major';
+    } else if(Math.abs(v.date_diff_days || 0) > 0 || (v.amount_diff_pct || 0) > 0 || v.rate_diff){
+      severity = 'minor';
+    } else {
+      severity = 'clean';
+    }
+    return {
+      bestMatch: best.notice,
+      score: best.score,
+      severity,
+      variance: v,
+      autoApproveOk: (severity === 'clean' && best.score >= AUTO_MATCH_SCORE),
+      candidates: scored.slice(0, 5).map(x => ({ notice: x.notice, score: x.score }))
+    };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Public API
   // ─────────────────────────────────────────────────────────────────────────
@@ -1322,7 +1457,8 @@
     deriveNotices,
     computeWatchlist,
     computeRegulatoryReports,
-    version: '1.4.2'
+    matchNoticePair,
+    version: '1.5.0'
   };
   if(typeof module !== 'undefined' && module.exports) module.exports = LMA;
   global.LMA = LMA;
