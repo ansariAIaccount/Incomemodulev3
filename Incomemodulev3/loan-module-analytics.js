@@ -845,6 +845,473 @@
     return { rows, kpi };
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // Regulatory Reports — Preview (Tier 1 #4)
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Preview-quality regulator dashboards from data we already have:
+  //   • Form PF (SEC)           — US private-fund adviser filing
+  //   • AIFMD Annex IV (EU)     — EU alternative investment fund manager report
+  //   • FR Y-14Q Schedule H.1   — Fed bank stress-test corporate loan schedule
+  //   • N-PORT (SEC)            — Registered fund quarterly holdings
+  //
+  // Preview scope: we produce the KEY sections of each report as tables, not
+  // the full regulator XML/XBRL/XLSX schema. Numbers are computed from the
+  // loan book; ratings/PD are approximated from ECL stage (labelled as such
+  // in the UI). Real submission still needs human review + regulator schema
+  // conversion — this preview replaces the "which loans have I missed?"
+  // scoping step of prep, not the final filing.
+  //
+  //   const rpt = LMA.computeRegulatoryReports({
+  //     loans: [{ inst, metrics }, ...],   // same shape aggregatePortfolio takes
+  //     deals: [{ key, name, inst }, ...], // for name/covenants pass-through
+  //     notices: [ ... ],                  // for covenant / event flags
+  //     asOf: '2026-07-19',
+  //     fundNAV: 1_000_000_000             // optional; falls back to activeNotional
+  //   });
+  //   → { formPF, aifmd, y14q, nport, meta }
+  //
+  function computeRegulatoryReports(opts){
+    opts = opts || {};
+    const loans   = Array.isArray(opts.loans)   ? opts.loans   : [];
+    const deals   = Array.isArray(opts.deals)   ? opts.deals   : [];
+    const notices = Array.isArray(opts.notices) ? opts.notices : [];
+    const asOf    = opts.asOf || new Date().toISOString().slice(0,10);
+    // Pre-build (or reuse) the portfolio aggregate — many report sections
+    // reproject its concentration output.
+    const agg     = opts.agg || aggregatePortfolio(loans, { asOf });
+    const fundNAV = +opts.fundNAV || agg.activeNotional || agg.totalNotional || 0;
+
+    // Framework filters per report. Fallback path when a deal has NO fund
+    // allocations attached — we approximate scope from accounting framework.
+    // Defaults reflect the most-common pairing (Form PF → US → USGAAP;
+    // AIFMD → EU → IFRS). Users can override per-tab in the UI.
+    const DEFAULT_FRAMEWORK_FILTERS = {
+      formPF: ['USGAAP','ASPE'],
+      aifmd:  ['IFRS','IFRS9'],
+      y14q:   ['USGAAP','ASPE'],
+      nport:  ['USGAAP','ASPE']
+    };
+    const filters = Object.assign({}, DEFAULT_FRAMEWORK_FILTERS, opts.frameworkFilters || {});
+    // Report-key → primary regulator code that MUST be in a fund's scope
+    // for the deal to be included in that report. Preferred filter when
+    // fund allocations exist (proper regulator scoping); falls back to
+    // framework filter when not.
+    const REGULATOR_BY_REPORT = {
+      formPF: 'SEC',
+      aifmd:  'ESMA',
+      y14q:   'Fed',
+      nport:  'SEC'
+    };
+    // Empty array means "no filter — include all frameworks"
+    const framePasses = (fw, key) => {
+      const allowed = filters[key];
+      if(!Array.isArray(allowed) || allowed.length === 0) return true;
+      return allowed.some(a => (a || '').toUpperCase() === (fw || '').toUpperCase());
+    };
+    // Fund-scope filter: does ANY of this deal's fund allocations file with
+    // the target regulator? Returns null (=fall back to framework) when the
+    // deal has no allocations attached.
+    const scopePasses = (allocations, key) => {
+      if(!Array.isArray(allocations) || !allocations.length) return null;
+      const required = REGULATOR_BY_REPORT[key];
+      if(!required) return true;
+      return allocations.some(a =>
+        a && a.fund && Array.isArray(a.fund.regulatorScope) &&
+        a.fund.regulatorScope.includes(required)
+      );
+    };
+
+    // Helper: PD/LGD estimation from ECL stage — Y-14Q requires them, but we
+    // don't run a full IRB model. Approximates for preview only; flagged as
+    // such in the UI. Numbers are illustrative Basel-style buckets.
+    const stagePD = { 1: 0.01,  2: 0.05,  3: 0.50, poci: 0.50 };
+    const stageLGD = { 1: 0.40, 2: 0.45, 3: 0.60, poci: 0.60 };
+    const normStage = (s) => String(s || '1').toLowerCase().replace('stage','').trim();
+
+    // Roll-up deal-level view combining inst + metrics + name for report rows
+    const byKey = new Map();
+    for(const d of deals){
+      const k = d.key || d.dealKey || (d.inst && (d.inst.dealCode || d.inst.instrumentId));
+      if(k) byKey.set(k, d);
+    }
+    const facilities = loans.map(l => {
+      const inst = l.inst || {};
+      const m = l.metrics || {};
+      // Key resolution — builderToInstrument sets inst.id (from B.deal.dealId)
+      // and NOT dealCode/instrumentId. Widen the fallback so DB-saved deals
+      // resolve back into the byKey lookup.
+      const key = inst.dealCode || inst.instrumentId || inst.id || inst.transactionId;
+      const d = byKey.get(key) || {};
+      const st = normStage(inst.eclStage);
+      const commitment = +inst.commitment || +inst.faceValue || +m.notional || 0;
+      const drawn = +m.notional || +inst.faceValue || 0;
+      const covenantBreached = Array.isArray(inst.covenants) && inst.covenants.some(c =>
+        Array.isArray(c.breachLog) && c.breachLog.some(b =>
+          !['cured','waived'].includes((b.status || '').toLowerCase()))
+      );
+      // Fund allocations — carried through so scope filters can use real
+      // regulator scope. Read from inst.fundAllocations (mirrored by the
+      // Builder→Instrument converter) or the deal wrapper.
+      const fundAllocations = Array.isArray(inst.fundAllocations) ? inst.fundAllocations
+        : Array.isArray(d.fundAllocations) ? d.fundAllocations : [];
+      // Name resolution — Builder Def uses `def.deal.name`; builderToInstrument
+      // flattens that to `inst.deal` (a string). Also honour `inst.dealName`
+      // for the older shape.
+      const resolvedName = d.name || inst.dealName || inst.deal || inst.name || key;
+      return {
+        key, name: resolvedName,
+        fundAllocations,
+        borrower:   inst.borrower || resolvedName,
+        industry:   inst.industry || inst.sector || 'Unclassified',
+        geography:  inst.country  || inst.jurisdiction || (inst.currency === 'EUR' ? 'EMEA' : inst.currency === 'GBP' ? 'UK' : 'US'),
+        currency:   inst.currency || 'USD',
+        framework:  inst.accountingFramework || 'IFRS',
+        commitment, drawn,
+        utilization: commitment > 0 ? drawn / commitment : null,
+        coupon:     m.coupon,
+        maturity:   m.maturity || inst.maturityDate,
+        wal:        m.wal,
+        pd:         stagePD[st]  || 0.02,
+        lgd:        stageLGD[st] || 0.40,
+        ead:        drawn + (commitment - drawn) * 0.75,   // Basel CCF 75% on undrawn
+        eclStage:   st,
+        covenantBreached,
+        secured:    inst.secured !== false,
+        seniority:  inst.seniority || 'Senior Secured',
+        rateType:   (inst.rateType || (inst.floatingRate ? 'Float' : 'Fixed')),
+        // For AIFMD principal-exposure lookup: convert to USD-equivalent via
+        // deal.metrics if FX ingest is populated, else 1:1
+        usdEquiv:   drawn
+      };
+    }).filter(f => f.commitment > 0 || f.drawn > 0);
+
+    // ── Concentration helpers used by multiple reports
+    const groupBy = (rows, keyFn, valueFn) => {
+      const m = new Map();
+      for(const r of rows){
+        const k = keyFn(r) || 'Unclassified';
+        const v = valueFn(r);
+        m.set(k, (m.get(k) || 0) + v);
+      }
+      const total = Array.from(m.values()).reduce((s,x) => s+x, 0);
+      return Array.from(m.entries())
+        .map(([label, amount]) => ({ label, amount, pct: total > 0 ? amount/total*100 : 0 }))
+        .sort((a,b) => b.amount - a.amount);
+    };
+    const topN = (arr, n) => arr.slice(0, n);
+    const covenantBreachCount = facilities.filter(f => f.covenantBreached).length;
+    const wtdAvg = (rows, valueFn, weightFn) => {
+      let num = 0, den = 0;
+      for(const r of rows){ const w = weightFn(r); const v = valueFn(r);
+        if(v == null || !isFinite(v)) continue; num += v*w; den += w; }
+      return den > 0 ? num/den : null;
+    };
+
+    // Deals dropped by each report's scope filter — surfaced in meta so the
+    // UI can show "8 of 12 deals in scope; 4 excluded". Uses a two-tier logic:
+    //   Tier 1 (preferred): fund_allocations.fund.regulator_scope contains
+    //                       the target regulator (e.g. SEC for Form PF)
+    //   Tier 2 (fallback):  framework matches DEFAULT_FRAMEWORK_FILTERS
+    // When a deal has no fund allocations, Tier 1 returns null and we fall
+    // through to Tier 2 (the framework filter).
+    const scopedFacilities = (key) => {
+      let scopedByFund = 0, scopedByFramework = 0;
+      const inScope = [], excluded = [];
+      // Deal-level scope report — { name, framework, scopedVia, funds[], reason }
+      // Used by the UI to render "which deals are in / out and why".
+      const inScopeDeals = [], excludedDeals = [];
+      for(const f of facilities){
+        const fundVerdict = scopePasses(f.fundAllocations, key);
+        let inside, scopedVia, reason;
+        if(fundVerdict !== null){
+          inside = fundVerdict;
+          scopedVia = 'fund';
+          if(inside){
+            scopedByFund++;
+            // Which funds put this deal into scope? Show the codes.
+            const hitFunds = (f.fundAllocations || []).filter(a =>
+              a && a.fund && Array.isArray(a.fund.regulatorScope) &&
+              a.fund.regulatorScope.includes(REGULATOR_BY_REPORT[key])
+            ).map(a => a.fund.code || 'Unknown fund');
+            reason = 'Allocated to ' + hitFunds.join(', ') + ' (fund scope includes ' + REGULATOR_BY_REPORT[key] + ')';
+          } else {
+            const funds = (f.fundAllocations || []).map(a => a.fund && a.fund.code || '?').join(', ');
+            reason = 'Allocated only to ' + funds + ' — none includes ' + REGULATOR_BY_REPORT[key];
+          }
+        } else {
+          inside = framePasses(f.framework, key);
+          scopedVia = 'framework';
+          if(inside){
+            scopedByFramework++;
+            reason = 'No fund allocation — framework ' + f.framework + ' passes the ' + key + ' filter';
+          } else {
+            reason = 'No fund allocation — framework ' + f.framework + ' not in ' + (filters[key] || []).join('/');
+          }
+        }
+        const dealEntry = {
+          name: f.name || f.borrower, framework: f.framework, drawn: f.drawn,
+          scopedVia, reason,
+          fundCodes: (f.fundAllocations || []).map(a => a.fund && a.fund.code).filter(Boolean)
+        };
+        if(inside){ inScope.push(f); inScopeDeals.push(dealEntry); }
+        else { excluded.push(f); excludedDeals.push(dealEntry); }
+      }
+      const excludedByFw = {};
+      for(const f of excluded){ excludedByFw[f.framework] = (excludedByFw[f.framework]||0) + 1; }
+      return { inScope, excluded, excludedByFw, scopedByFund, scopedByFramework, inScopeDeals, excludedDeals };
+    };
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Form PF — US SEC (17 CFR 275.204(b)-1)
+    // ═════════════════════════════════════════════════════════════════════
+    const pfScope = scopedFacilities('formPF');
+    const pfFacilities = pfScope.inScope;
+    const byBorrower = groupBy(pfFacilities, f => f.borrower, f => f.drawn);
+    const byIndustry = groupBy(pfFacilities, f => f.industry, f => f.drawn);
+    const byGeo      = groupBy(pfFacilities, f => f.geography, f => f.drawn);
+    const byFramework_pf = groupBy(pfFacilities, f => f.framework, f => f.drawn);
+    const top5Pct    = topN(byBorrower, 5).reduce((s,x) => s+x.pct, 0);
+    const totalCommitment = pfFacilities.reduce((s,f) => s + f.commitment, 0);
+    const totalDrawn      = pfFacilities.reduce((s,f) => s + f.drawn, 0);
+    const unfundedCommit  = totalCommitment - totalDrawn;
+    const pfBreachCount   = pfFacilities.filter(f => f.covenantBreached).length;
+    const formPF = {
+      meta: {
+        asOf, filingType: 'Preview', section: 'Section 1a/1b/4 (Large PE Adviser)',
+        note: 'Preview only — real Form PF submission requires SEC PFRD schema conversion + human review.',
+        frameworkFilter: filters.formPF, inScopeCount: pfFacilities.length,
+        excludedCount: pfScope.excluded.length, excludedByFramework: pfScope.excludedByFw,
+        scopedByFund: pfScope.scopedByFund, scopedByFramework: pfScope.scopedByFramework,
+        inScopeDeals: pfScope.inScopeDeals, excludedDeals: pfScope.excludedDeals,
+        scopeNote: 'Form PF is a US SEC-registered-adviser filing. Deals with fund allocations use fund.regulator_scope (SEC); deals without fall back to framework filter.'
+      },
+      section1a_fundInfo: {
+        totalAUM:        pfFacilities.reduce((s,f) => s + f.drawn, 0),
+        netAUM:          pfFacilities.reduce((s,f) => s + f.drawn, 0),
+        fundType:        'Private Credit / Direct Lending',
+        loanCount:       pfFacilities.length,
+        currency:        (topN(groupBy(pfFacilities, f => f.currency, f => f.drawn), 1)[0] || {label:'USD'}).label,
+        borrowingsPct:   0,   // no leverage tracking yet
+        cashPct:         null,
+        derivativesPct:  0
+      },
+      section1b_concentration: {
+        top5BorrowersPct: top5Pct,
+        byBorrower: topN(byBorrower, 10),
+        byIndustry: topN(byIndustry, 10),
+        byGeography: byGeo,
+        byFramework: byFramework_pf
+      },
+      section4_peAdviser: {
+        // Bridge financings — Form PF Q73: aggregate drawn on unfunded facilities
+        // For preview we flag any facility with utilization < 100% as a candidate
+        bridgeCandidates: pfFacilities.filter(f => f.utilization != null && f.utilization < 1).map(f => ({
+          borrower: f.borrower, framework: f.framework, commitment: f.commitment, drawn: f.drawn,
+          undrawn: f.commitment - f.drawn, maturity: f.maturity
+        })),
+        totalUnfundedCommit: unfundedCommit,
+        commitmentUtilization: totalCommitment > 0 ? totalDrawn/totalCommitment : null,
+        controlledCompaniesCount: 0,   // requires equity-holding data we don't track
+        note: 'Controlled companies count requires equity-holding data outside this module.'
+      },
+      flags: [
+        totalDrawn > 2_000_000_000 ? 'AUM > $2B triggers Section 4 (Large PE Adviser)' : null,
+        top5Pct > 40 ? 'Top-5 borrower concentration ' + top5Pct.toFixed(1) + '% > 40% — regulatory-attention threshold' : null,
+        pfBreachCount > 0 ? pfBreachCount + ' facility(ies) in covenant breach — disclose in Section 4' : null,
+        pfScope.excluded.length > 0 ? pfScope.excluded.length + ' deal(s) excluded by framework filter — held by non-US-adviser fund(s)?' : null
+      ].filter(Boolean)
+    };
+
+    // ═════════════════════════════════════════════════════════════════════
+    // AIFMD Annex IV — EU (Directive 2011/61/EU)
+    // ═════════════════════════════════════════════════════════════════════
+    const aifScope = scopedFacilities('aifmd');
+    const aifFacilities = aifScope.inScope;
+    const aifByBorrower = groupBy(aifFacilities, f => f.borrower, f => f.drawn);
+    const aifByIndustry = groupBy(aifFacilities, f => f.industry, f => f.drawn);
+    const aifByGeo      = groupBy(aifFacilities, f => f.geography, f => f.drawn);
+    const aifByFramework = groupBy(aifFacilities, f => f.framework, f => f.drawn);
+    const aifTop5Pct    = topN(aifByBorrower, 5).reduce((s,x) => s+x.pct, 0);
+    const aifCommitment = aifFacilities.reduce((s,f) => s + f.commitment, 0);
+    const aifDrawn      = aifFacilities.reduce((s,f) => s + f.drawn, 0);
+    // Principal exposures: top 5 by drawn amount (proxy for principal exposure).
+    // Instruments-traded: for a pure credit fund, everything is loans; if
+    // hedges present they'd be classified as derivatives.
+    const instrumentTypes = { Loan: 0, Bond: 0, Equity: 0, Derivative: 0 };
+    for(const f of aifFacilities){
+      const t = (f.rateType === 'Float' || f.rateType === 'Fixed') ? 'Loan' : 'Loan';
+      instrumentTypes[t] += f.drawn;
+    }
+    const grossLeverage = fundNAV > 0 ? aifCommitment / fundNAV : null;
+    const netLeverage   = fundNAV > 0 ? aifDrawn / fundNAV : null;
+    // Liquidity buckets — for illiquid loans, most sits in the >365 day bucket
+    const liquidityBuckets = [
+      { daysUpTo: 1,    pct: 0 },
+      { daysUpTo: 7,    pct: 0 },
+      { daysUpTo: 30,   pct: 0 },
+      { daysUpTo: 90,   pct: 0 },
+      { daysUpTo: 180,  pct: 0 },
+      { daysUpTo: 365,  pct: 0 },
+      { daysUpTo: 999999, pct: 100 }   // private credit is fundamentally illiquid
+    ];
+    // Only include YTM/duration for facilities that survived the aifmd filter
+    const aifLoansScoped = loans.filter(l => framePasses((l.inst && l.inst.accountingFramework) || 'IFRS', 'aifmd'));
+    const aifmd = {
+      meta: {
+        asOf, filingFrequency: 'Quarterly (AUM > €1B)',
+        reportingCurrency: (topN(groupBy(aifFacilities, f => f.currency, f => f.drawn), 1)[0] || {label:'EUR'}).label,
+        note: 'Preview only — ESMA reporting requires XML in the AIFMD data-format schema.',
+        frameworkFilter: filters.aifmd, inScopeCount: aifFacilities.length,
+        excludedCount: aifScope.excluded.length, excludedByFramework: aifScope.excludedByFw,
+        scopedByFund: aifScope.scopedByFund, scopedByFramework: aifScope.scopedByFramework,
+        inScopeDeals: aifScope.inScopeDeals, excludedDeals: aifScope.excludedDeals,
+        scopeNote: 'AIFMD Annex IV is filed by EU-managed alternative funds. Deals with fund allocations use fund.regulator_scope (ESMA); deals without fall back to framework filter.'
+      },
+      principalExposures: {
+        long: topN(aifByBorrower, 5).map(x => ({ instrument: x.label, exposure: x.amount, pct: x.pct, position: 'long' })),
+        short: []
+      },
+      instruments: {
+        byType: Object.entries(instrumentTypes).filter(([, v]) => v > 0)
+          .map(([type, amount]) => ({ type, amount, pct: aifDrawn > 0 ? amount/aifDrawn*100 : 0 }))
+      },
+      concentration: {
+        top5CounterpartiesPct: aifTop5Pct,
+        bySector: topN(aifByIndustry, 10),
+        byGeography: aifByGeo,
+        byFramework: aifByFramework
+      },
+      leverage: {
+        grossMethod:      grossLeverage,
+        commitmentMethod: netLeverage,
+        fundNAV,
+        note: fundNAV === agg.activeNotional
+          ? 'NAV proxy = active notional (no explicit NAV supplied). Provide fundNAV opt for accurate ratios.'
+          : ''
+      },
+      riskProfile: {
+        wtdAvgYield:     wtdAvg(aifLoansScoped.map(l => ({ v: l.metrics && l.metrics.ytm, w: l.metrics && l.metrics.notional })), r => r.v, r => r.w || 0),
+        wtdAvgDuration:  wtdAvg(aifLoansScoped.map(l => ({ v: l.metrics && l.metrics.modifiedDuration, w: l.metrics && l.metrics.notional })), r => r.v, r => r.w || 0),
+        totalDV01:       aifLoansScoped.reduce((s,l) => s + ((l.metrics && +l.metrics.dv01) || 0), 0),
+        currencyMix:     groupBy(aifFacilities, f => f.currency, f => f.drawn).map(x => ({ label: x.label, pct: x.pct, amount: x.amount }))
+      },
+      liquidity: {
+        buckets: liquidityBuckets,
+        note: 'Private-credit loans are fundamentally illiquid — 100% in >365d bucket unless secondary sale is planned.'
+      }
+    };
+
+    // ═════════════════════════════════════════════════════════════════════
+    // FR Y-14Q Schedule H.1 — Fed corporate loan facility schedule
+    // ═════════════════════════════════════════════════════════════════════
+    // Facility-level rows. Full spec has 100+ fields per facility; preview
+    // shows the core stress-test fields.
+    const y14Scope = scopedFacilities('y14q');
+    const y14Facilities = y14Scope.inScope;
+    const y14q_rows = y14Facilities.map(f => ({
+      obligorName:  f.borrower,
+      framework:    f.framework,
+      industry:     f.industry,
+      geography:    f.geography,
+      commitment:   f.commitment,
+      drawn:        f.drawn,
+      utilization:  f.utilization,
+      couponPct:    f.coupon,
+      maturity:     f.maturity,
+      pd:           f.pd,
+      lgd:          f.lgd,
+      ead:          f.ead,
+      secured:      f.secured,
+      seniority:    f.seniority,
+      rateType:     f.rateType,
+      eclStage:     f.eclStage,
+      covenantBreach: f.covenantBreached
+    }));
+    const y14q = {
+      meta: {
+        asOf, reportingPeriod: 'Quarter ending ' + asOf,
+        reporterType: 'Preview — banks with $100B+ assets file this; PE credit funds do not, but the schedule is a useful loan-book scorecard.',
+        note: 'PD/LGD are STAGE-BASED APPROXIMATIONS (Stage 1: 1% / Stage 2: 5% / Stage 3: 50%). Real submission requires IRB or internal-rating-model outputs.',
+        frameworkFilter: filters.y14q, inScopeCount: y14Facilities.length,
+        excludedCount: y14Scope.excluded.length, excludedByFramework: y14Scope.excludedByFw,
+        scopedByFund: y14Scope.scopedByFund, scopedByFramework: y14Scope.scopedByFramework,
+        inScopeDeals: y14Scope.inScopeDeals, excludedDeals: y14Scope.excludedDeals,
+        scopeNote: 'FR Y-14Q is a US bank-holding-company filing. Deals with fund allocations use fund.regulator_scope (Fed); deals without fall back to framework filter.'
+      },
+      rows: y14q_rows,
+      summary: {
+        totalCommitment: y14Facilities.reduce((s,f) => s + f.commitment, 0),
+        totalDrawn:      y14Facilities.reduce((s,f) => s + f.drawn, 0),
+        totalEAD:        y14q_rows.reduce((s,r) => s + (r.ead || 0), 0),
+        totalExpectedLoss: y14q_rows.reduce((s,r) => s + (r.ead * r.pd * r.lgd), 0),
+        wtdAvgPD:        wtdAvg(y14q_rows, r => r.pd, r => r.ead || 0),
+        wtdAvgLGD:       wtdAvg(y14q_rows, r => r.lgd, r => r.ead || 0),
+        breachCount:     y14q_rows.filter(r => r.covenantBreach).length,
+        stage3Count:     y14q_rows.filter(r => r.eclStage === '3').length
+      }
+    };
+
+    // ═════════════════════════════════════════════════════════════════════
+    // N-PORT — SEC registered-fund monthly portfolio (Rule 30b1-9)
+    // ═════════════════════════════════════════════════════════════════════
+    // Item C: portfolio holdings, per instrument. For a private credit fund
+    // this would only file if registered (BDC or interval fund). Preview
+    // shows what the holdings schedule would look like.
+    const npScope = scopedFacilities('nport');
+    const npFacilities = npScope.inScope;
+    const nport_holdings = npFacilities.map(f => {
+      const fairValue = f.drawn;
+      const cost = f.drawn;
+      const unrealPnL = fairValue - cost;
+      return {
+        identifier:  f.key,
+        name:        f.name,
+        framework:   f.framework,
+        principal:   f.drawn,
+        fairValue,
+        cost,
+        unrealizedPnL: unrealPnL,
+        maturity:    f.maturity,
+        couponPct:   f.coupon,
+        secured:     f.secured,
+        seniority:   f.seniority,
+        eclStage:    f.eclStage,
+        liquidityClass: f.covenantBreached ? 'Level 3 — illiquid (breach)' : 'Level 3 — illiquid (private credit)',
+        fairValueLevel: 3
+      };
+    });
+    const npLoansScoped = loans.filter(l => framePasses((l.inst && l.inst.accountingFramework) || 'IFRS', 'nport'));
+    const nport = {
+      meta: {
+        asOf,
+        note: 'Preview — N-PORT is a REGISTERED-FUND filing (BDC / interval fund). Private funds are typically exempt. Shown here as a loan-book QC view.',
+        frameworkFilter: filters.nport, inScopeCount: npFacilities.length,
+        excludedCount: npScope.excluded.length, excludedByFramework: npScope.excludedByFw,
+        scopedByFund: npScope.scopedByFund, scopedByFramework: npScope.scopedByFramework,
+        inScopeDeals: npScope.inScopeDeals, excludedDeals: npScope.excludedDeals,
+        scopeNote: 'N-PORT is a US SEC-registered-fund filing. Deals with fund allocations use fund.regulator_scope (SEC); deals without fall back to framework filter. Most PE credit funds are §3(c)(7)-exempt.'
+      },
+      itemA_summary: {
+        totalAssets:      nport_holdings.reduce((s,h) => s + h.fairValue, 0),
+        totalLiabilities: 0,
+        netAssets:        nport_holdings.reduce((s,h) => s + h.fairValue, 0),
+        holdingsCount:    nport_holdings.length
+      },
+      itemC_holdings: nport_holdings,
+      itemD_riskMetrics: {
+        wtdAvgMaturityYears: wtdAvg(npLoansScoped.map(l => ({ v: l.metrics && l.metrics.wal, w: l.metrics && l.metrics.notional })), r => r.v, r => r.w || 0),
+        illiquidPct: 100,
+        level3AssetsPct: 100
+      }
+    };
+
+    return {
+      meta: { asOf, generatedAt: new Date().toISOString(), facilityCount: facilities.length, fundNAV },
+      formPF, aifmd, y14q, nport
+    };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Public API
   // ─────────────────────────────────────────────────────────────────────────
@@ -854,7 +1321,8 @@
     deriveLoanMetrics, aggregatePortfolio,
     deriveNotices,
     computeWatchlist,
-    version: '1.2.0'
+    computeRegulatoryReports,
+    version: '1.4.2'
   };
   if(typeof module !== 'undefined' && module.exports) module.exports = LMA;
   global.LMA = LMA;

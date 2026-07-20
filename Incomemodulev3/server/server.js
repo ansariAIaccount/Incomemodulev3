@@ -212,6 +212,104 @@ app.get('/api/diu/jobs/:id/processes', async (req, res) => {
   } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+// Notice email delivery (Phase 2A)
+// ═══════════════════════════════════════════════════════════════════════
+// POST /api/notice/send — send a notice email via SMTP (nodemailer).
+//
+// Body: {
+//   to: [{email, name}],  cc: [{email, name}],
+//   subject: 'string',
+//   body: 'plain text',   html: 'optional html body',
+//   attachments: [{ filename, content: 'base64', contentType }]
+// }
+//
+// Env for SMTP (all required to enable this endpoint):
+//   SMTP_HOST, SMTP_PORT, SMTP_SECURE ('true' for 465),
+//   SMTP_USER, SMTP_PASS, SMTP_FROM (default From address)
+//
+// Reply: { ok:true, messageId, accepted:[...], rejected:[...] } on success,
+//        { ok:false, reason } on failure.
+// GET /api/notice/status returns { smtpConfigured: bool } so the client can
+// pick smtp vs mailto fallback without probing.
+const SMTP_HOST   = process.env.SMTP_HOST || '';
+const SMTP_PORT   = parseInt(process.env.SMTP_PORT || '587', 10);
+const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true';
+const SMTP_USER   = process.env.SMTP_USER || '';
+const SMTP_PASS   = process.env.SMTP_PASS || '';
+const SMTP_FROM   = process.env.SMTP_FROM || SMTP_USER;
+const SMTP_CONFIGURED = !!(SMTP_HOST && SMTP_USER && SMTP_PASS && SMTP_FROM);
+
+// Lazy require so the app runs even when nodemailer isn't installed.
+let _nodemailer = null;
+function nm(){
+  if(_nodemailer === null){
+    try { _nodemailer = require('nodemailer'); }
+    catch(err){ console.warn('[email] nodemailer not installed — install with `npm i nodemailer` inside server/'); _nodemailer = false; }
+  }
+  return _nodemailer;
+}
+
+let _transporter = null;
+function transporter(){
+  if(!_transporter && SMTP_CONFIGURED && nm()){
+    _transporter = nm().createTransport({
+      host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_SECURE,
+      auth: { user: SMTP_USER, pass: SMTP_PASS }
+    });
+  }
+  return _transporter;
+}
+
+app.get('/api/notice/status', (req, res) => {
+  res.json({
+    ok: true,
+    smtpConfigured: SMTP_CONFIGURED,
+    smtpHost: SMTP_CONFIGURED ? SMTP_HOST : null,
+    smtpFrom: SMTP_CONFIGURED ? SMTP_FROM : null
+  });
+});
+
+app.post('/api/notice/send', async (req, res) => {
+  try {
+    const { to, cc, subject, body, html, attachments, from } = req.body || {};
+    if(!Array.isArray(to) || !to.length) return res.status(400).json({ ok:false, reason:'to[] required' });
+    if(!subject) return res.status(400).json({ ok:false, reason:'subject required' });
+    if(!SMTP_CONFIGURED){
+      return res.status(503).json({ ok:false, reason:'SMTP not configured — set SMTP_HOST/PORT/USER/PASS/FROM env vars, restart server' });
+    }
+    const t = transporter();
+    if(!t) return res.status(500).json({ ok:false, reason:'nodemailer not available — run `npm i nodemailer` in server/' });
+
+    // Format address for nodemailer: "Name <email>" if name provided
+    const fmt = (r) => r.name ? '"' + String(r.name).replace(/"/g,'') + '" <' + r.email + '>' : r.email;
+    // Decode base64 attachments — nodemailer accepts Buffer directly
+    const nmAttachments = (Array.isArray(attachments) ? attachments : []).map(a => ({
+      filename: a.filename || 'attachment',
+      content: Buffer.from(a.content || '', 'base64'),
+      contentType: a.contentType || 'application/octet-stream'
+    }));
+
+    const info = await t.sendMail({
+      from: from || SMTP_FROM,
+      to: to.map(fmt).join(', '),
+      cc: Array.isArray(cc) && cc.length ? cc.map(fmt).join(', ') : undefined,
+      subject,
+      text: body || '',
+      html: html || undefined,
+      attachments: nmAttachments
+    });
+    res.json({
+      ok: true, messageId: info.messageId,
+      accepted: info.accepted || [], rejected: info.rejected || [],
+      response: info.response
+    });
+  } catch(err){
+    console.error('[email] send failed:', err);
+    res.status(500).json({ ok:false, reason: err.message });
+  }
+});
+
 // ──────── Boot ─────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log('────────────────────────────────────────────');
@@ -220,6 +318,7 @@ app.listen(PORT, () => {
   console.log('  Credentials set:   ', !!(CLIENT_ID && CLIENT_SECRET));
   console.log('  Allowed origins:   ', ALLOWED_ORIGINS.join(', '));
   console.log('  Default template:  ', DEFAULT_TEMPLATE);
+  console.log('  SMTP configured:   ', SMTP_CONFIGURED ? (SMTP_HOST + ':' + SMTP_PORT) : 'no — /api/notice/send disabled');
   console.log('  Health check:      ', 'http://localhost:' + PORT + '/healthz');
   console.log('────────────────────────────────────────────');
   if(!BASE_URL || !CLIENT_ID || !CLIENT_SECRET){

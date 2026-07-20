@@ -473,6 +473,14 @@
         <span class="material-icons-outlined" style="font-size:13px;">insights</span>
         Portfolio
       </button>
+      <!-- Regulatory Reports — Tier 1 #4. Form PF, AIFMD, Y-14Q H.1, N-PORT preview. -->
+      <button id="regulatory-header-btn" onclick="window.openRegulatoryModal && window.openRegulatoryModal()"
+              class="chip"
+              style="font-size:11px; cursor:pointer; background:linear-gradient(135deg,#FDF4FF 0%,#F3E8FF 100%); color:#6B21A8; border:1px solid #D8B4FE; padding:3px 9px; display:inline-flex; align-items:center; gap:5px;"
+              title="Regulatory reports preview — Form PF (SEC), AIFMD Annex IV (EU), FR Y-14Q H.1 (Fed), N-PORT (SEC)">
+        <span class="material-icons-outlined" style="font-size:13px;">gavel</span>
+        Regulatory
+      </button>
       <!-- Watchlist / Early-Warning — Tier 1 #5. Badge shows count of critical deals. -->
       <button id="watchlist-header-btn" onclick="window.openWatchlistModal && window.openWatchlistModal()"
               class="chip"
@@ -892,6 +900,34 @@
       <div class="builder-section-body">
         <div id="covenants-container" style="display:grid; gap:10px;">
           <div id="covenants-empty" class="text-[11px] text-gray-500 italic">No covenants defined for this deal. Click "Add covenant" to capture the first one (typical: Total Leverage, Interest Coverage, DSCR). Once persisted, the Dashboard's Covenants panel will show real data instead of demo placeholders.</div>
+        </div>
+      </div>
+    </details>
+
+    <!-- ─── FUNDS & ALLOCATIONS (Multi-fund Phase 1) ─── -->
+    <details class="builder-section">
+      <summary>
+        <div class="builder-section-icon" style="background:linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%); color:#9d174d;"><span class="material-icons-outlined" style="font-size:20px;">account_balance</span></div>
+        <div style="flex:1;">
+          <div class="builder-section-title">Funds &amp; Allocations
+            <span id="allocations-count-chip" style="font-size:10px; font-weight:600; background:#fce7f3; color:#9d174d; padding:2px 8px; border-radius:10px; margin-left:6px;">0</span>
+            <span id="allocations-sum-chip" style="font-size:10px; font-weight:600; background:#F1F5F9; color:#475569; padding:2px 8px; border-radius:10px; margin-left:4px;">0%</span>
+          </div>
+          <div class="builder-section-subtitle">Split this deal across multiple PE funds. Drives fund-scoped Regulatory reports + fund filter on Portfolio + Watchlist.</div>
+        </div>
+        <div style="display:flex; gap:6px;" onclick="event.stopPropagation()">
+          <button onclick="window.openManageFundsModal && window.openManageFundsModal()"
+                  class="mat-btn outline !py-1 !px-2 text-[11px]" title="Create + edit + delete fund entities">
+            <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">tune</span> Manage funds
+          </button>
+          <button id="btn-add-allocation" class="add-btn-pill" onclick="window.addFundAllocationRow && window.addFundAllocationRow(); event.stopPropagation()">
+            <span class="material-icons-outlined" style="font-size:14px;">add</span>Add allocation
+          </button>
+        </div>
+      </summary>
+      <div class="builder-section-body">
+        <div id="allocations-container" style="display:grid; gap:8px;">
+          <div id="allocations-empty" class="text-[11px] text-gray-500 italic">No fund allocations. Click "Add allocation" to assign this deal to one or more funds (e.g. 60% PCS US Fund I, 40% PCS Cayman III). When empty, the deal is treated as 100% retained.</div>
         </div>
       </div>
     </details>
@@ -3069,6 +3105,10 @@
         <div class="text-[11px] text-gray-500">Cross-loan yield, duration, WAL, DV01 and concentration for every deal you can access.</div>
       </div>
       <div class="flex items-center gap-2">
+        <select id="portfolio-filter-fund" onchange="window.refreshPortfolio && window.refreshPortfolio()"
+                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by fund allocation">
+          <option value="">All funds</option>
+        </select>
         <label style="font-size:11px; color:#4B5563;">Benchmark
           <input id="portfolio-benchmark" type="number" step="0.05" value="4.50" style="width:70px; padding:3px 6px; border:1px solid #d1d5db; border-radius:4px; font-size:11px; margin-left:4px;"/>%
         </label>
@@ -3138,6 +3178,63 @@
   </div>
 </div>
 
+<!-- ═══ Regulatory Reports (Tier 1 #4) ═══
+     4-tab modal with preview-quality dashboards for Form PF, AIFMD Annex IV,
+     FR Y-14Q Schedule H.1, and N-PORT. Data is computed live from the loan
+     book via LMA.computeRegulatoryReports. Numbers are for preview + scoping;
+     actual regulatory submission requires human review + schema conversion. -->
+<div id="regulatory-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeRegulatoryModal && window.closeRegulatoryModal()"></div>
+  <div class="json-modal-pn" style="width:min(1400px,97vw); max-height:94vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#7E22CE">gavel</span>
+          Regulatory Reports &middot; Preview
+        </div>
+        <div class="text-[11px] text-gray-500">Form PF (SEC) &middot; AIFMD Annex IV (EU) &middot; FR Y-14Q H.1 (Fed) &middot; N-PORT (SEC)</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="reg-fund-nav" type="number" placeholder="Fund NAV (opt)"
+               oninput="window.refreshRegulatory && window.refreshRegulatory()"
+               class="border border-gray-300 rounded px-2 py-1 text-[11px] w-32" title="Fund NAV for leverage ratios (defaults to active notional)"/>
+        <button onclick="window.refreshRegulatory && window.refreshRegulatory()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]" title="Recompute from current PRESETS">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Recompute
+        </button>
+        <button onclick="window.exportRegulatoryCsv && window.exportRegulatoryCsv()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]" title="Export the active tab to CSV">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> CSV
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeRegulatoryModal && window.closeRegulatoryModal()" title="Close">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <!-- Tab bar -->
+    <div style="display:flex; gap:2px; padding:0 16px; border-bottom:1px solid #E5E7EB; background:#F8FAFC;">
+      <button id="reg-tab-formPF" class="reg-tab active" data-tab="formPF" onclick="window.switchRegulatoryTab('formPF')"
+              style="padding:8px 14px; font-size:12px; background:white; border:1px solid #E5E7EB; border-bottom:none; border-radius:6px 6px 0 0; cursor:pointer; font-weight:600; color:#1F2937;">Form PF</button>
+      <button id="reg-tab-aifmd" class="reg-tab" data-tab="aifmd" onclick="window.switchRegulatoryTab('aifmd')"
+              style="padding:8px 14px; font-size:12px; background:transparent; border:none; cursor:pointer; color:#6B7280;">AIFMD Annex IV</button>
+      <button id="reg-tab-y14q" class="reg-tab" data-tab="y14q" onclick="window.switchRegulatoryTab('y14q')"
+              style="padding:8px 14px; font-size:12px; background:transparent; border:none; cursor:pointer; color:#6B7280;">FR Y-14Q H.1</button>
+      <button id="reg-tab-nport" class="reg-tab" data-tab="nport" onclick="window.switchRegulatoryTab('nport')"
+              style="padding:8px 14px; font-size:12px; background:transparent; border:none; cursor:pointer; color:#6B7280;">N-PORT</button>
+    </div>
+    <div class="json-modal-b" style="padding:12px 16px 16px 16px;">
+      <div id="regulatory-body" style="max-height:calc(94vh - 200px); overflow:auto;">
+        <div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>
+      </div>
+      <div id="regulatory-error" style="display:none; padding:16px; margin-top:10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:12px;"></div>
+    </div>
+    <div class="json-modal-f">
+      <span id="regulatory-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
+      <button class="mat-btn outline" onclick="window.closeRegulatoryModal && window.closeRegulatoryModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Watchlist / Early-Warning (Tier 1 #5) ═══
      Cross-portfolio scorecard showing every deal that needs attention today.
      Signals: covenant breach + proximity, ECL Stage 2/3, approaching maturity,
@@ -3155,6 +3252,10 @@
         <div class="text-[11px] text-gray-500">Covenants, ECL drift, maturity, overdue notices, default interest — one screen, sorted by risk.</div>
       </div>
       <div class="flex items-center gap-2">
+        <select id="watchlist-filter-fund" onchange="window.refreshWatchlist && window.refreshWatchlist()"
+                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by fund allocation">
+          <option value="">All funds</option>
+        </select>
         <select id="watchlist-filter-severity" onchange="window.renderWatchlist && window.renderWatchlist()"
                 class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by severity">
           <option value="">All severities</option>
@@ -3206,6 +3307,86 @@
     <div class="json-modal-f">
       <span id="watchlist-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
       <button class="mat-btn outline" onclick="window.closeWatchlistModal && window.closeWatchlistModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Manage Funds (Multi-fund Phase 1) ═══
+     CRUD for the fund entity. Funds are shared across teams (RLS: everyone
+     can READ; only owner + admin can UPDATE/DELETE). Domicile + regulator
+     scope drive Regulatory Reports scoping. -->
+<div id="manage-funds-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeManageFundsModal && window.closeManageFundsModal()"></div>
+  <div class="json-modal-pn" style="width:min(1100px,96vw); max-height:92vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#9D174D">account_balance</span>
+          Manage Funds
+        </div>
+        <div class="text-[11px] text-gray-500">Fund entities that hold this firm's loans. Domicile + regulator scope drive Form PF / AIFMD / Y-14Q scoping.</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="window.showNewFundForm && window.showNewFundForm()"
+                class="mat-btn primary !py-1 !px-3 text-[11px]">
+          <span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">add</span> New fund
+        </button>
+        <button onclick="window.refreshManageFunds && window.refreshManageFunds()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]"><span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Reload</button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeManageFundsModal && window.closeManageFundsModal()" title="Close">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" style="padding:12px 16px;">
+      <div id="manage-funds-body" style="max-height:calc(92vh - 160px); overflow:auto;">
+        <div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>
+      </div>
+      <!-- New/Edit fund form — hidden by default, shown by showNewFundForm() -->
+      <div id="fund-edit-form" style="display:none; margin-top:12px; padding:12px; background:#FDF2F8; border:1px solid #F9A8D4; border-radius:6px;">
+        <div class="text-[12px] font-semibold text-pink-900 mb-2" id="fund-edit-form-title">New fund</div>
+        <input type="hidden" id="fund-edit-id" value=""/>
+        <div style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px;">
+          <div><label class="text-[10px] uppercase text-gray-600 block">Code *</label>
+            <input id="fund-edit-code" placeholder="PCS-US-4" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/></div>
+          <div style="grid-column: span 2;"><label class="text-[10px] uppercase text-gray-600 block">Name *</label>
+            <input id="fund-edit-name" placeholder="PCS US Direct Lending IV" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/></div>
+          <div><label class="text-[10px] uppercase text-gray-600 block">Domicile</label>
+            <select id="fund-edit-domicile" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full">
+              <option>US</option><option>EU</option><option>UK</option><option>AU</option>
+              <option>Cayman</option><option>Luxembourg</option><option>Ireland</option><option>Other</option>
+            </select></div>
+          <div><label class="text-[10px] uppercase text-gray-600 block">Base ccy</label>
+            <select id="fund-edit-ccy" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full">
+              <option>USD</option><option>EUR</option><option>GBP</option><option>AUD</option><option>CHF</option><option>JPY</option>
+            </select></div>
+          <div><label class="text-[10px] uppercase text-gray-600 block">NAV</label>
+            <input id="fund-edit-nav" type="number" placeholder="1000000000" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/></div>
+          <div style="grid-column: span 3;"><label class="text-[10px] uppercase text-gray-600 block">Regulator scope (multi)</label>
+            <div id="fund-edit-scope" style="display:flex; gap:6px; flex-wrap:wrap; padding:4px 0;">
+              <label style="font-size:11px;"><input type="checkbox" value="SEC"/> SEC</label>
+              <label style="font-size:11px;"><input type="checkbox" value="ESMA"/> ESMA</label>
+              <label style="font-size:11px;"><input type="checkbox" value="Fed"/> Fed</label>
+              <label style="font-size:11px;"><input type="checkbox" value="APRA"/> APRA</label>
+              <label style="font-size:11px;"><input type="checkbox" value="FCA"/> FCA</label>
+              <label style="font-size:11px;"><input type="checkbox" value="CIMA"/> CIMA</label>
+              <label style="font-size:11px;"><input type="checkbox" value="CSSF"/> CSSF</label>
+              <label style="font-size:11px;"><input type="checkbox" value="None"/> None</label>
+            </div>
+          </div>
+          <div style="grid-column: span 3;"><label class="text-[10px] uppercase text-gray-600 block">Notes</label>
+            <input id="fund-edit-notes" placeholder="e.g. Delaware LP · US-adviser · files Form PF" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/></div>
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end;">
+          <button onclick="window.cancelFundEdit && window.cancelFundEdit()" class="mat-btn outline !py-1 !px-3 text-[11px]">Cancel</button>
+          <button onclick="window.saveFundEdit && window.saveFundEdit()" class="mat-btn primary !py-1 !px-3 text-[11px]">Save fund</button>
+        </div>
+      </div>
+      <div id="manage-funds-error" style="display:none; margin-top:10px; padding:10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:12px;"></div>
+    </div>
+    <div class="json-modal-f">
+      <span id="manage-funds-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
+      <button class="mat-btn outline" onclick="window.closeManageFundsModal && window.closeManageFundsModal()">Close</button>
     </div>
   </div>
 </div>
@@ -3337,6 +3518,11 @@
                 title="Preview this notice as a formal PDF (download from within the preview)">
           <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">picture_as_pdf</span> Preview PDF
         </button>
+        <button onclick="window.openSendNoticeModal && window.openSendNoticeModal()"
+                class="mat-btn primary !py-1 !px-2 text-[11px]"
+                title="Email this notice to the deal's recipients with the PDF attached">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">send</span> Send
+        </button>
         <button onclick="window.openRecipientsForNotice && window.openRecipientsForNotice()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]"
                 title="Manage recipients for this deal">
@@ -3358,6 +3544,83 @@
     <div class="json-modal-f">
       <span id="nd-footer-audit" class="text-[10.5px] text-gray-500 mr-auto"></span>
       <button class="mat-btn outline" onclick="window.closeNoticeDetail && window.closeNoticeDetail()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Send Notice modal (Notice delivery Phase 2A) ═══
+     Nested inside Notice Detail. Prefilled subject + body with token
+     substitution, recipient checkboxes, PDF attached, Send button.
+     If SMTP is configured → server-side send.
+     Otherwise → mailto: link + auto-download PDF for manual attach. -->
+<div id="send-notice-modal" class="json-modal" style="display:none; z-index:10002;">
+  <div class="json-modal-bd" onclick="window.closeSendNoticeModal && window.closeSendNoticeModal()"></div>
+  <div class="json-modal-pn" style="width:min(760px,96vw); max-height:92vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#059669">send</span>
+          Send Notice
+        </div>
+        <div id="send-notice-sub" class="text-[11px] text-gray-500"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeSendNoticeModal && window.closeSendNoticeModal()" title="Close">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" style="padding:12px 16px; font-size:12px;">
+      <!-- SMTP status banner -->
+      <div id="send-smtp-status" style="margin-bottom:10px; padding:8px 10px; border-radius:6px; font-size:11px;"></div>
+
+      <!-- Recipients -->
+      <div style="margin-bottom:10px;">
+        <div style="font-size:10px; text-transform:uppercase; color:#64748B; letter-spacing:0.4px; font-weight:600; margin-bottom:4px;">Recipients</div>
+        <div id="send-recipients-list" style="border:1px solid #E5E7EB; border-radius:6px; padding:8px; max-height:180px; overflow-y:auto; background:white;">
+          <div style="color:#94A3B8; font-size:11px; padding:8px; text-align:center;">Loading recipients…</div>
+        </div>
+        <div id="send-recipients-empty" style="display:none; font-size:10.5px; color:#B91C1C; margin-top:4px;">
+          No recipients defined for this deal. Click <b>Recipients</b> on the Notice Detail modal to add some.
+        </div>
+      </div>
+
+      <!-- Subject + body -->
+      <div style="margin-bottom:10px;">
+        <div style="font-size:10px; text-transform:uppercase; color:#64748B; letter-spacing:0.4px; font-weight:600; margin-bottom:4px;">Subject</div>
+        <input id="send-subject" type="text" style="width:100%; padding:6px 8px; border:1px solid #D1D5DB; border-radius:4px; font-size:12px;"/>
+      </div>
+      <div style="margin-bottom:10px;">
+        <div style="font-size:10px; text-transform:uppercase; color:#64748B; letter-spacing:0.4px; font-weight:600; margin-bottom:4px;">
+          Message body
+          <span style="text-transform:none; letter-spacing:normal; color:#94A3B8; font-weight:400; margin-left:6px;">
+            tokens: {dealName} {reference} {amount} {date} {noticeType}
+          </span>
+        </div>
+        <textarea id="send-body" rows="8" style="width:100%; padding:6px 8px; border:1px solid #D1D5DB; border-radius:4px; font-size:12px; font-family:ui-monospace,monospace;"></textarea>
+      </div>
+
+      <!-- Attachment preview -->
+      <div style="padding:8px 10px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+        <span class="material-icons-outlined" style="font-size:20px; color:#DC2626;">picture_as_pdf</span>
+        <span id="send-attachment-name" style="font-size:11.5px; color:#374151; font-family:ui-monospace,monospace;">notice.pdf</span>
+        <span id="send-attachment-size" style="font-size:10.5px; color:#94A3B8; margin-left:auto;"></span>
+      </div>
+
+      <!-- Delivery history (past sends of THIS notice) -->
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer; font-size:10.5px; color:#374151;"><b>Delivery history</b></summary>
+        <div id="send-history" style="margin-top:6px;"><div style="color:#94A3B8; font-size:11px; padding:8px;">Loading…</div></div>
+      </details>
+
+      <div id="send-notice-error" style="display:none; margin-top:8px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+    </div>
+    <div class="json-modal-f">
+      <span id="send-notice-hint" class="text-[10.5px] text-gray-500 mr-auto"></span>
+      <button class="mat-btn outline" onclick="window.closeSendNoticeModal && window.closeSendNoticeModal()">Cancel</button>
+      <button id="send-notice-btn" onclick="window.confirmSendNotice && window.confirmSendNotice()" class="mat-btn primary">
+        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">send</span> Send now
+      </button>
     </div>
   </div>
 </div>
@@ -4298,6 +4561,227 @@ window.SB = (function(){
     } catch(err){ console.error('[SB] fetchJournalEntriesForDeal threw:', err); return []; }
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Multi-fund allocations (Tier 1 #2 Phase 1)
+  // ═══════════════════════════════════════════════════════════════════
+  // Fund = the PE fund entity that holds loans (US Fund I, EU Fund II, etc).
+  // Allocation = the % of a given deal that sits in a given fund. Sum per
+  // deal ≤ 100% (server-side trigger enforces this).
+  async function fetchFunds(){
+    if(!_client || !_connected) return [];
+    const { data, error } = await _client.from('funds')
+      .select('*').eq('active', true).order('code', { ascending: true });
+    if(error){ console.error('[SB] fetchFunds:', error); return []; }
+    return data || [];
+  }
+  async function upsertFund(fund){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!fund || !fund.code || !fund.name){
+      return { ok:false, reason:'code + name required' };
+    }
+    const row = Object.assign({
+      fund_type: 'Private Credit', domicile: 'US', base_ccy: 'USD',
+      regulator_scope: ['SEC'], active: true,
+      created_by: _currentUser ? _currentUser.id : null,
+      updated_at: new Date().toISOString()
+    }, fund);
+    const { data, error } = await _client.from('funds')
+      .upsert(row, { onConflict: 'id', ignoreDuplicates: false })
+      .select().single();
+    if(error){ console.error('[SB] upsertFund:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, fund: data };
+  }
+  async function deleteFund(fundId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    // Soft-delete via active=false to preserve historical allocations
+    const { error } = await _client.from('funds')
+      .update({ active: false, updated_at: new Date().toISOString() })
+      .eq('id', fundId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+  async function fetchFundAllocations(dealId){
+    if(!_client || !_connected) return [];
+    let q = _client.from('fund_allocations')
+      .select('*, funds(id, code, name, domicile, base_ccy, regulator_scope, nav)')
+      .order('effective_date', { ascending: false });
+    if(dealId) q = q.eq('deal_id', dealId);
+    const { data, error } = await q;
+    if(error){ console.error('[SB] fetchFundAllocations:', error); return []; }
+    return data || [];
+  }
+  async function upsertFundAllocation(alloc){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!alloc || !alloc.deal_id || !alloc.fund_id){
+      return { ok:false, reason:'deal_id + fund_id required' };
+    }
+    if(alloc.allocation_pct == null && alloc.absolute_amount == null){
+      return { ok:false, reason:'allocation_pct or absolute_amount required' };
+    }
+    const row = Object.assign({
+      method: 'pct',
+      effective_date: new Date().toISOString().slice(0,10),
+      created_by: _currentUser ? _currentUser.id : null,
+      updated_at: new Date().toISOString()
+    }, alloc);
+    // Upsert on natural key (deal_id, fund_id, effective_date) so re-saving
+    // the same allocation updates in place rather than the trigger flagging
+    // an over-allocation.
+    const { data, error } = await _client.from('fund_allocations')
+      .upsert(row, { onConflict: 'deal_id,fund_id,effective_date', ignoreDuplicates: false })
+      .select().single();
+    if(error){ console.error('[SB] upsertFundAllocation:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, allocation: data };
+  }
+  async function deleteFundAllocation(allocId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('fund_allocations').delete().eq('id', allocId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+  // Replace ALL allocations for a deal with a new set — used by Save to DB
+  // after the user edits the Funds & Allocations card. Diffs (upsert kept,
+  // delete removed) to avoid unnecessary churn + trigger flap.
+  async function replaceFundAllocationsForDeal(dealId, newAllocs){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!dealId) return { ok:false, reason:'deal_id required' };
+    newAllocs = Array.isArray(newAllocs) ? newAllocs : [];
+    try {
+      // 1. Fetch current allocations for this deal
+      const existing = await fetchFundAllocations(dealId);
+      const existingByKey = new Map(existing.map(a => [a.fund_id + '|' + a.effective_date, a]));
+      const keepKeys = new Set();
+      const stats = { upserted: 0, deleted: 0, errors: [] };
+      // 2. Upsert every new allocation
+      for(const na of newAllocs){
+        const key = na.fund_id + '|' + (na.effective_date || new Date().toISOString().slice(0,10));
+        keepKeys.add(key);
+        const res = await upsertFundAllocation(Object.assign({ deal_id: dealId }, na));
+        if(res.ok) stats.upserted++; else stats.errors.push(res.reason);
+      }
+      // 3. Delete any existing rows that weren't in the new set
+      for(const [key, a] of existingByKey){
+        if(!keepKeys.has(key)){
+          const res = await deleteFundAllocation(a.id);
+          if(res.ok) stats.deleted++; else stats.errors.push(res.reason);
+        }
+      }
+      return { ok: stats.errors.length === 0, ...stats };
+    } catch(err){
+      console.error('[SB] replaceFundAllocationsForDeal threw:', err);
+      return { ok:false, reason: err.message };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Notice email delivery (Phase 2A)
+  // ═══════════════════════════════════════════════════════════════════
+  // Two-tier delivery:
+  //   Tier 1 (preferred): server SMTP via POST /api/notice/send. Uses
+  //                        the same DIU proxy URL configured in Settings.
+  //   Tier 2 (fallback):  mailto: link — opens the user's mail client with
+  //                        subject + body prefilled. Attachment must be
+  //                        added manually since mailto: can't carry files.
+  // Both paths log a row to notice_deliveries + flip notice.status='sent'.
+  async function sendNoticeEmail(payload){
+    // payload: {noticeId, to[{email,name,role}], cc, subject, body, html, pdfBase64, pdfFilename}
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!payload || !payload.noticeId || !Array.isArray(payload.to) || !payload.to.length){
+      return { ok:false, reason:'noticeId + to[] required' };
+    }
+    const proxyUrl = ((typeof localStorage !== 'undefined' && localStorage.getItem('pcs_v3_diu_proxy_url')) || '').trim();
+    let smtpResult = null;
+    if(proxyUrl){
+      // Try SMTP first
+      try {
+        const attachments = payload.pdfBase64 ? [{
+          filename: payload.pdfFilename || 'notice.pdf',
+          content:  payload.pdfBase64,
+          contentType: 'application/pdf'
+        }] : [];
+        const r = await fetch(proxyUrl.replace(/\/$/,'') + '/api/notice/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: payload.to, cc: payload.cc || [],
+            subject: payload.subject, body: payload.body || '', html: payload.html,
+            attachments
+          })
+        });
+        smtpResult = await r.json();
+        if(!r.ok || !smtpResult.ok){
+          console.warn('[email] SMTP send failed:', smtpResult);
+        }
+      } catch(err){
+        console.warn('[email] SMTP fetch threw — proxy unreachable, will fallback to mailto:', err.message);
+      }
+    }
+
+    const method = (smtpResult && smtpResult.ok) ? 'smtp' : 'mailto';
+    const status = (smtpResult && smtpResult.ok) ? 'sent' : 'queued';
+    const sentAt = new Date().toISOString();
+    // Insert one delivery row per recipient for audit granularity
+    const deliveryRows = payload.to.map(r => ({
+      notice_id:       payload.noticeId,
+      recipient_email: r.email,
+      recipient_name:  r.name || null,
+      recipient_role:  r.role || null,
+      method, status,
+      subject:         payload.subject,
+      message_id:      smtpResult && smtpResult.messageId || null,
+      error:           (smtpResult && !smtpResult.ok) ? smtpResult.reason : null,
+      attachment_name: payload.pdfFilename || null,
+      attachment_size: payload.pdfBase64 ? Math.round(payload.pdfBase64.length * 0.75) : null,
+      sent_by:         _currentUser ? _currentUser.id : null,
+      sent_at:         (smtpResult && smtpResult.ok) ? sentAt : null
+    }));
+    const { data: inserted, error: insErr } = await _client.from('notice_deliveries')
+      .insert(deliveryRows).select();
+    if(insErr){ console.error('[email] delivery log insert failed:', insErr); }
+    // Flip notice status to 'sent' when SMTP succeeded (mailto is user-initiated
+    // so we optimistically mark as sent — user cancels mailto = they know they
+    // didn't send)
+    if(smtpResult && smtpResult.ok){
+      await _client.from('loan_notices')
+        .update({ status: 'sent', sent_at: sentAt, sent_by: _currentUser ? _currentUser.id : null })
+        .eq('id', payload.noticeId);
+    }
+    return {
+      ok: true,
+      method,
+      status,
+      smtp: smtpResult,
+      deliveries: inserted || deliveryRows,
+      // The caller handles the mailto fallback UI when method === 'mailto'
+      needsMailtoFallback: method === 'mailto'
+    };
+  }
+
+  async function fetchNoticeDeliveries(noticeId){
+    if(!_client || !_connected || !noticeId) return [];
+    const { data, error } = await _client.from('notice_deliveries')
+      .select('*').eq('notice_id', noticeId).order('sent_at', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false });
+    if(error){ console.error('[SB] fetchNoticeDeliveries:', error); return []; }
+    return data || [];
+  }
+
+  // Check whether server SMTP is available (drives UI hint text + button label)
+  async function checkNoticeDeliveryStatus(){
+    const proxyUrl = ((typeof localStorage !== 'undefined' && localStorage.getItem('pcs_v3_diu_proxy_url')) || '').trim();
+    if(!proxyUrl) return { available: false, reason: 'No DIU proxy URL configured — will fall back to mailto:' };
+    try {
+      const r = await fetch(proxyUrl.replace(/\/$/,'') + '/api/notice/status');
+      const j = await r.json();
+      return {
+        available: !!(j.smtpConfigured),
+        smtpHost: j.smtpHost, smtpFrom: j.smtpFrom,
+        reason: j.smtpConfigured ? null : 'Proxy up but SMTP env vars not set — will fall back to mailto:'
+      };
+    } catch(err){
+      return { available: false, reason: 'Proxy unreachable — will fall back to mailto:' };
+    }
+  }
+
   async function syncBreachLog(dealId, covList, pSched){
     if(!_client || !_connected) return { ok:false, reason:'not connected' };
     if(!dealId || !Array.isArray(covList) || !covList.length){
@@ -5041,6 +5525,32 @@ window.SB = (function(){
         counts.covenants = rows.length;
       }
 
+      // Multi-fund Phase 1 — persist fund allocations for this deal. Uses the
+      // diff-based replace helper so we upsert kept rows and delete removed
+      // rows. Safe on partially-invalid inputs — rows missing fundId are
+      // silently skipped rather than erroring the whole save.
+      if(Array.isArray(B.fundAllocations)){
+        const validAllocs = B.fundAllocations
+          .filter(a => a && a.fundId)   // silently drop unfilled add-rows
+          .map(a => ({
+            fund_id:         a.fundId,
+            allocation_pct:  a.allocationPct != null ? +a.allocationPct : null,
+            absolute_amount: a.absoluteAmount != null ? +a.absoluteAmount : null,
+            method:          a.method || 'pct',
+            effective_date:  a.effectiveDate || new Date().toISOString().slice(0,10),
+            notes:           a.notes || null
+          }));
+        const faRes = await replaceFundAllocationsForDeal(dealId, validAllocs);
+        if(!faRes.ok){
+          // Non-fatal: log + surface as a counts.warning entry, but let the
+          // rest of the save complete. Users can retry via the card.
+          console.warn('[SB] saveDeal: fund allocations partial failure:', faRes);
+          counts.fundAllocationsWarning = faRes.errors ? faRes.errors.join('; ') : faRes.reason;
+        }
+        counts.fundAllocations = faRes.upserted || 0;
+        counts.fundAllocationsDeleted = faRes.deleted || 0;
+      }
+
       console.log('[SB] saveDeal complete:', dealCode, 'deal_id=', dealId, counts);
       return { ok:true, dealId, dealCode, counts };
     } catch(err) {
@@ -5132,7 +5642,10 @@ window.SB = (function(){
           'prepayment_penalty_schedule(*), ' +
           'loan_lifecycle_events(*), ' +
           // Phase B — nested breach log so Dashboard can render history
-          'covenants(*, covenant_breach_log(*))'
+          'covenants(*, covenant_breach_log(*)), ' +
+          // Multi-fund Phase 1 — nested allocations + fund metadata so the
+          // Builder card can render without a second round-trip
+          'fund_allocations(*, funds(id, code, name, domicile, base_ccy, regulator_scope, nav))'
         )
         .eq('is_preset', false)
         .order('updated_at', { ascending: false });
@@ -5383,7 +5896,32 @@ window.SB = (function(){
             allocation:          e.allocation_json,
             notes:               e.notes,
             status:              e.status || 'actual'
-          }))
+          })),
+          // Multi-fund Phase 1 — nested fund allocations for this deal.
+          // Each row includes the nested `funds` object so the UI can render
+          // fund code/name/domicile without a second lookup.
+          fundAllocations: (Array.isArray(row.fund_allocations) ? row.fund_allocations : [])
+            .slice()
+            .sort((a,b) => (b.effective_date || '').localeCompare(a.effective_date || ''))
+            .map(a => ({
+              id:              a.id,
+              fundId:          a.fund_id,
+              allocationPct:   a.allocation_pct != null ? +a.allocation_pct : null,
+              absoluteAmount:  a.absolute_amount != null ? +a.absolute_amount : null,
+              method:          a.method || 'pct',
+              effectiveDate:   a.effective_date,
+              notes:           a.notes,
+              // Denormalized fund metadata for immediate rendering
+              fund: a.funds ? {
+                id:              a.funds.id,
+                code:            a.funds.code,
+                name:            a.funds.name,
+                domicile:        a.funds.domicile,
+                baseCcy:         a.funds.base_ccy,
+                regulatorScope:  Array.isArray(a.funds.regulator_scope) ? a.funds.regulator_scope : [],
+                nav:             a.funds.nav != null ? +a.funds.nav : null
+              } : null
+            }))
         };
         return {
           key:         'db-' + row.deal_code,
@@ -5702,6 +6240,12 @@ window.SB = (function(){
     // Notice Phase 2 — recipients + reconciliation
     fetchRecipients, upsertRecipient, deleteRecipient,
     fetchJournalEntriesForDeal,
+    // Multi-fund (Tier 1 #2 Phase 1)
+    fetchFunds, upsertFund, deleteFund,
+    fetchFundAllocations, upsertFundAllocation, deleteFundAllocation,
+    replaceFundAllocationsForDeal,
+    // Notice email delivery (Phase 2A)
+    sendNoticeEmail, fetchNoticeDeliveries, checkNoticeDeliveryStatus,
     // Approval workflow (#231)
     getRun, approveRun, postRun, reopenRun,
     // Auth
@@ -11630,6 +12174,7 @@ function _portfolioBuilderDefToInst(def){
     modificationEvents: B.modificationEvents, defaultEvents: B.defaultEvents,
     prepaymentPenaltySchedule: B.prepaymentPenaltySchedule,
     covenants: B.covenants, lifecycleEvents: B.lifecycleEvents,
+    fundAllocations: B.fundAllocations,
     _participationPct: B._participationPct, _builderScale: B._builderScale, _viewMode: B._viewMode
   };
   try {
@@ -11645,6 +12190,7 @@ function _portfolioBuilderDefToInst(def){
     B.prepaymentPenaltySchedule = Array.isArray(def.prepaymentPenaltySchedule) ? def.prepaymentPenaltySchedule : [];
     B.covenants                = Array.isArray(def.covenants)          ? def.covenants          : [];
     B.lifecycleEvents          = Array.isArray(def.lifecycleEvents)    ? def.lifecycleEvents    : [];
+    B.fundAllocations          = Array.isArray(def.fundAllocations)    ? def.fundAllocations    : [];
     // Optional participation metadata
     if(def._participationPct != null) B._participationPct = def._participationPct;
     if(def._builderScale     != null) B._builderScale     = def._builderScale;
@@ -11683,12 +12229,27 @@ window.refreshPortfolio = async function(){
   await new Promise(r => setTimeout(r, 50));
   try {
     if(typeof LMA === 'undefined'){ throw new Error('Analytics library (LMA) not loaded'); }
+    // Populate fund picker (idempotent) — reads _fundsCache lazily
+    if(typeof _populateFundDropdown === 'function') await _populateFundDropdown('portfolio-filter-fund');
+    const fundFilterId = (document.getElementById('portfolio-filter-fund') || {}).value || '';
     // Source of loans: window.PRESETS (built via fetchUserDeals + local presets)
-    const presets = Array.isArray(window.PRESETS) ? window.PRESETS : [];
+    let presets = Array.isArray(window.PRESETS) ? window.PRESETS : [];
+    // Fund filter — keep only presets with an allocation to the selected fund
+    if(fundFilterId){
+      presets = presets.filter(p => {
+        try {
+          const def = (typeof p.build === 'function') ? p.build() : p;
+          const allocs = def && def.fundAllocations;
+          return Array.isArray(allocs) && allocs.some(a => a && a.fundId === fundFilterId);
+        } catch(err){ return false; }
+      });
+    }
     if(!presets.length){
       loading.style.display = 'none';
       errBox.style.display = '';
-      errBox.innerHTML = '<b>No deals to analyze.</b> Load or save at least one deal first (Load Active Deal → pick one → Save to DB).';
+      errBox.innerHTML = fundFilterId
+        ? '<b>No deals allocated to the selected fund.</b> Change the fund filter or add an allocation via the Builder.'
+        : '<b>No deals to analyze.</b> Load or save at least one deal first (Load Active Deal → pick one → Save to DB).';
       return;
     }
     // Build instruments + schedules + metrics
@@ -11885,6 +12446,639 @@ window.exportPortfolioCsv = function(){
 };
 
 // ═════════════════════════════════════════════════════════════════════
+// Manage Funds modal (Multi-fund Phase 1)
+// ═════════════════════════════════════════════════════════════════════
+window.openManageFundsModal = async function(){
+  const el = document.getElementById('manage-funds-modal');
+  if(!el){ console.error('[funds] modal element not found'); return; }
+  el.style.display = 'flex';
+  await window.refreshManageFunds();
+};
+window.closeManageFundsModal = function(){
+  const el = document.getElementById('manage-funds-modal');
+  if(el) el.style.display = 'none';
+  window.cancelFundEdit();
+};
+
+window.refreshManageFunds = async function(){
+  const body = document.getElementById('manage-funds-body');
+  const err = document.getElementById('manage-funds-error');
+  const sum = document.getElementById('manage-funds-summary');
+  err.style.display = 'none';
+  body.innerHTML = '<div style="padding:30px; text-align:center; color:#6B7280; font-size:12px;">Loading funds…</div>';
+  if(!window.SB || !window.SB.fetchFunds){
+    err.style.display = ''; err.textContent = 'DB connection not ready. Sign in first.'; body.innerHTML = ''; return;
+  }
+  try {
+    const funds = await window.SB.fetchFunds();
+    window._fundsCache = funds;
+    if(!funds.length){
+      body.innerHTML = '<div style="padding:30px; text-align:center; color:#6B7280; font-size:12px;">No funds yet. Click "New fund" to create one.</div>';
+      sum.textContent = '0 funds';
+      return;
+    }
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    body.innerHTML = '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+      '<thead style="background:#F1F5F9; position:sticky; top:0;"><tr>' +
+        ['Code','Name','Domicile','Ccy','Regulators','NAV','Actions']
+          .map(h => '<th style="text-align:left; padding:6px 10px; font-size:10px; text-transform:uppercase; color:#475569;">' + h + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      funds.map(f => {
+        const scope = Array.isArray(f.regulator_scope) ? f.regulator_scope.join(', ') : '';
+        return '<tr style="border-top:1px solid #E5E7EB;">' +
+          '<td style="padding:6px 10px; font-family:monospace; font-size:11px; font-weight:600;">' + esc(f.code) + '</td>' +
+          '<td style="padding:6px 10px; font-weight:600;">' + esc(f.name) + '</td>' +
+          '<td style="padding:6px 10px;">' + esc(f.domicile) + '</td>' +
+          '<td style="padding:6px 10px;">' + esc(f.base_ccy) + '</td>' +
+          '<td style="padding:6px 10px; font-size:11px;">' + esc(scope) + '</td>' +
+          '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;">' + (f.nav ? (+f.nav).toLocaleString(undefined,{maximumFractionDigits:0}) : '—') + '</td>' +
+          '<td style="padding:6px 10px;">' +
+            '<button onclick="window.editFund(' + JSON.stringify(f.id) + ')" style="padding:2px 8px; margin-right:4px; border:1px solid #C7D2FE; background:#EEF2FF; color:#3730A3; border-radius:4px; font-size:10.5px; cursor:pointer;">Edit</button>' +
+            '<button onclick="window.deleteFundConfirm(' + JSON.stringify(f.id) + ', ' + JSON.stringify(f.name) + ')" style="padding:2px 8px; border:1px solid #FCA5A5; background:white; color:#B91C1C; border-radius:4px; font-size:10.5px; cursor:pointer;">Delete</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>';
+    sum.textContent = funds.length + ' fund' + (funds.length===1?'':'s');
+    // Also refresh allocation card since the fund picker options changed
+    if(typeof window.renderAllocations === 'function') window.renderAllocations();
+  } catch(e){
+    console.error('[funds] refresh failed:', e);
+    body.innerHTML = ''; err.style.display = ''; err.textContent = 'Failed to load funds: ' + e.message;
+  }
+};
+
+window.showNewFundForm = function(){
+  document.getElementById('fund-edit-form').style.display = '';
+  document.getElementById('fund-edit-form-title').textContent = 'New fund';
+  document.getElementById('fund-edit-id').value = '';
+  document.getElementById('fund-edit-code').value = '';
+  document.getElementById('fund-edit-name').value = '';
+  document.getElementById('fund-edit-domicile').value = 'US';
+  document.getElementById('fund-edit-ccy').value = 'USD';
+  document.getElementById('fund-edit-nav').value = '';
+  document.getElementById('fund-edit-notes').value = '';
+  document.querySelectorAll('#fund-edit-scope input[type=checkbox]').forEach(cb => { cb.checked = cb.value === 'SEC'; });
+};
+window.editFund = function(fundId){
+  const f = (window._fundsCache || []).find(x => x.id === fundId);
+  if(!f) return;
+  document.getElementById('fund-edit-form').style.display = '';
+  document.getElementById('fund-edit-form-title').textContent = 'Edit fund: ' + f.code;
+  document.getElementById('fund-edit-id').value = f.id;
+  document.getElementById('fund-edit-code').value = f.code;
+  document.getElementById('fund-edit-name').value = f.name;
+  document.getElementById('fund-edit-domicile').value = f.domicile;
+  document.getElementById('fund-edit-ccy').value = f.base_ccy;
+  document.getElementById('fund-edit-nav').value = f.nav || '';
+  document.getElementById('fund-edit-notes').value = f.notes || '';
+  const scope = new Set(Array.isArray(f.regulator_scope) ? f.regulator_scope : []);
+  document.querySelectorAll('#fund-edit-scope input[type=checkbox]').forEach(cb => { cb.checked = scope.has(cb.value); });
+};
+window.cancelFundEdit = function(){
+  const el = document.getElementById('fund-edit-form'); if(el) el.style.display = 'none';
+};
+window.saveFundEdit = async function(){
+  const err = document.getElementById('manage-funds-error');
+  const scope = Array.from(document.querySelectorAll('#fund-edit-scope input[type=checkbox]:checked')).map(cb => cb.value);
+  const payload = {
+    id: document.getElementById('fund-edit-id').value || undefined,
+    code: document.getElementById('fund-edit-code').value.trim(),
+    name: document.getElementById('fund-edit-name').value.trim(),
+    domicile: document.getElementById('fund-edit-domicile').value,
+    base_ccy: document.getElementById('fund-edit-ccy').value,
+    regulator_scope: scope.length ? scope : ['None'],
+    nav: parseFloat(document.getElementById('fund-edit-nav').value) || null,
+    notes: document.getElementById('fund-edit-notes').value || null
+  };
+  if(!payload.code || !payload.name){
+    err.style.display = ''; err.textContent = 'Code and Name are required.'; return;
+  }
+  const res = await window.SB.upsertFund(payload);
+  if(!res.ok){
+    err.style.display = ''; err.textContent = 'Save failed: ' + res.reason; return;
+  }
+  err.style.display = 'none';
+  if(typeof toast === 'function') toast('Fund saved: ' + payload.code, 2500);
+  window.cancelFundEdit();
+  await window.refreshManageFunds();
+};
+window.deleteFundConfirm = async function(fundId, fundName){
+  if(!window.showAppDialog){
+    if(!confirm('Delete fund "' + fundName + '"? Existing allocations remain but the fund is deactivated.')) return;
+    return _doDeleteFund(fundId);
+  }
+  window.showAppDialog({
+    severity: 'warning', title: 'Deactivate fund?',
+    message: 'This will deactivate "' + fundName + '". Existing allocations remain (soft-delete). To fully purge, use SQL.',
+    buttons: [
+      { label: 'Cancel' },
+      { label: 'Deactivate', variant: 'danger', onClick: () => _doDeleteFund(fundId) }
+    ]
+  });
+};
+async function _doDeleteFund(fundId){
+  const res = await window.SB.deleteFund(fundId);
+  if(!res.ok){ if(typeof toast === 'function') toast('Delete failed: ' + res.reason); return; }
+  if(typeof toast === 'function') toast('Fund deactivated', 2500);
+  await window.refreshManageFunds();
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Regulatory Reports (Tier 1 #4)
+// ═════════════════════════════════════════════════════════════════════
+// Preview-quality regulator dashboards. Builds loans[] the same way
+// Portfolio does, feeds them to LMA.aggregatePortfolio + computeRegulatoryReports.
+// Renders 4 tabs: Form PF, AIFMD, Y-14Q H.1, N-PORT. Each tab reads the
+// same cache and renders on tab switch — no recompute per switch.
+window._regulatoryCache = null;
+window._regulatoryActiveTab = 'formPF';
+// Per-tab framework filters. Mirrors the DEFAULT_FRAMEWORK_FILTERS in
+// analytics.js. Users can flip these via the chip row in each tab.
+// Empty array = no filter (include all frameworks).
+window._regulatoryFilters = {
+  formPF: ['USGAAP','ASPE'],
+  aifmd:  ['IFRS','IFRS9'],
+  y14q:   ['USGAAP','ASPE'],
+  nport:  ['USGAAP','ASPE']
+};
+// Master list of frameworks the app supports — drives the chip row
+window._regulatoryAllFrameworks = ['IFRS','IFRS9','USGAAP','ASPE','AASB'];
+
+window.openRegulatoryModal = function(){
+  const el = document.getElementById('regulatory-modal');
+  if(!el){ console.error('[regulatory] modal element not found'); return; }
+  el.style.display = 'flex';
+  window.refreshRegulatory();
+};
+window.closeRegulatoryModal = function(){
+  const el = document.getElementById('regulatory-modal');
+  if(el) el.style.display = 'none';
+};
+
+// Build loans[] input by walking PRESETS through the Builder-Def→flat
+// converter + engine schedule + LMA.deriveLoanMetrics. Same pipeline as
+// Portfolio.
+function _regulatoryBuildLoans(){
+  const presets = Array.isArray(window.PRESETS) ? window.PRESETS : [];
+  const loans = [];
+  for(const p of presets){
+    let def; try { def = (typeof p.build === 'function') ? p.build() : (p.instrument || p); }
+    catch(err){ continue; }
+    if(!def) continue;
+    const inst = (typeof _portfolioBuilderDefToInst === 'function')
+      ? (_portfolioBuilderDefToInst(def) || def) : def;
+    // Multi-fund Phase 1 — mirror fundAllocations from def onto inst so the
+    // Regulatory engine's scopePasses() can read fund.regulator_scope. The
+    // Builder→Instrument converter doesn't know about this new field yet,
+    // so we copy explicitly. Preserves any pre-existing inst.fundAllocations.
+    if(inst && !inst.fundAllocations){
+      inst.fundAllocations = Array.isArray(def.fundAllocations) ? def.fundAllocations : [];
+    }
+    let schedule = [];
+    try { if(typeof buildSchedule === 'function') schedule = buildSchedule(inst) || []; }
+    catch(err){ schedule = []; }
+    const metrics = (typeof LMA !== 'undefined' && LMA.deriveLoanMetrics)
+      ? LMA.deriveLoanMetrics(inst, schedule) : {};
+    loans.push({ inst, metrics });
+  }
+  return loans;
+}
+
+function _regulatoryBuildDeals(){
+  // Same as _watchlistBuildDeals but named for clarity in stack traces
+  return _watchlistBuildDeals();
+}
+
+window.refreshRegulatory = async function(){
+  const body = document.getElementById('regulatory-body');
+  const errBox = document.getElementById('regulatory-error');
+  const summary = document.getElementById('regulatory-summary');
+  errBox.style.display = 'none';
+  body.innerHTML = '<div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Computing…</div>';
+  summary.textContent = '—';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    if(typeof LMA === 'undefined' || typeof LMA.computeRegulatoryReports !== 'function'){
+      throw new Error('Analytics library missing computeRegulatoryReports. Reload the page.');
+    }
+    const loans = _regulatoryBuildLoans();
+    if(!loans.length){
+      body.innerHTML = '';
+      errBox.style.display = '';
+      errBox.innerHTML = '<b>No deals to report on.</b> Load or save at least one deal first.';
+      return;
+    }
+    const deals = _regulatoryBuildDeals();
+    const notices = Array.isArray(window._noticesCache) ? window._noticesCache : [];
+    const navInput = parseFloat((document.getElementById('reg-fund-nav') || {}).value);
+    const result = LMA.computeRegulatoryReports({
+      loans, deals, notices,
+      fundNAV: isFinite(navInput) && navInput > 0 ? navInput : undefined,
+      frameworkFilters: window._regulatoryFilters
+    });
+    window._regulatoryCache = result;
+    window.renderRegulatory();
+  } catch(err){
+    console.error('[regulatory] refresh failed:', err);
+    body.innerHTML = '';
+    errBox.style.display = '';
+    errBox.textContent = 'Failed to compute reports: ' + (err && err.message ? err.message : err);
+  }
+};
+
+window.switchRegulatoryTab = function(tab){
+  window._regulatoryActiveTab = tab;
+  // Repaint tab buttons — active tab gets card-like styling
+  document.querySelectorAll('.reg-tab').forEach(el => {
+    const active = el.dataset.tab === tab;
+    el.style.background = active ? 'white' : 'transparent';
+    el.style.border     = active ? '1px solid #E5E7EB' : 'none';
+    el.style.borderBottom = active ? 'none' : '';
+    el.style.borderRadius = active ? '6px 6px 0 0' : '';
+    el.style.fontWeight  = active ? '600' : '400';
+    el.style.color       = active ? '#1F2937' : '#6B7280';
+  });
+  window.renderRegulatory();
+};
+
+// ── Rendering helpers ───────────────────────────────────────────────
+const _regFmt = {
+  money: (v, cur) => v == null ? '—' : (cur ? cur+' ' : '') + (+v).toLocaleString(undefined, {maximumFractionDigits: 0}),
+  pct:   (v) => v == null ? '—' : (+v).toFixed(1) + '%',
+  pctRatio: (v) => v == null ? '—' : (+v * 100).toFixed(2) + '%',
+  ratio: (v) => v == null ? '—' : (+v).toFixed(2) + 'x',
+  esc:   (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
+  date:  (s) => s || '—'
+};
+
+function _regSection(title, contentHtml, opts){
+  opts = opts || {};
+  return '<div style="margin-bottom:14px; border:1px solid ' + (opts.border || '#E5E7EB') + '; border-radius:6px; background:white;">' +
+    '<div style="padding:8px 12px; background:' + (opts.headerBg || '#F1F5F9') + '; border-bottom:1px solid ' + (opts.border || '#E5E7EB') + '; border-radius:6px 6px 0 0; font-weight:600; font-size:12px; color:#1F2937;">' +
+      _regFmt.esc(title) + '</div>' +
+    '<div style="padding:10px 12px;">' + contentHtml + '</div>' +
+  '</div>';
+}
+
+function _regKvGrid(kvs){
+  return '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">' +
+    kvs.map(kv =>
+      '<div style="padding:6px 8px; background:#F8FAFC; border-radius:4px;">' +
+        '<div style="font-size:10px; text-transform:uppercase; color:#64748B; letter-spacing:0.4px;">' + _regFmt.esc(kv.label) + '</div>' +
+        '<div style="font-size:14px; font-weight:600; color:#1F2937; font-variant-numeric:tabular-nums;">' + kv.value + '</div>' +
+        (kv.sub ? '<div style="font-size:10px; color:#94A3B8;">' + _regFmt.esc(kv.sub) + '</div>' : '') +
+      '</div>'
+    ).join('') +
+  '</div>';
+}
+
+function _regConcentrationTable(rows, valueLabel){
+  if(!rows || !rows.length) return '<div style="padding:8px; color:#94A3B8; font-size:11px;">No data</div>';
+  return '<table style="width:100%; border-collapse:collapse; font-size:11.5px;">' +
+    '<thead><tr style="background:#F8FAFC;">' +
+      '<th style="text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">Group</th>' +
+      '<th style="text-align:right; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">' + _regFmt.esc(valueLabel || 'Amount') + '</th>' +
+      '<th style="text-align:right; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">%</th>' +
+    '</tr></thead><tbody>' +
+    rows.map(r =>
+      '<tr style="border-top:1px solid #F1F5F9;">' +
+        '<td style="padding:5px 8px;">' + _regFmt.esc(r.label) + '</td>' +
+        '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(r.amount) + '</td>' +
+        '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.pct(r.pct) + '</td>' +
+      '</tr>'
+    ).join('') +
+  '</tbody></table>';
+}
+
+function _regFlagsBanner(flags){
+  if(!flags || !flags.length) return '';
+  return '<div style="margin-bottom:12px; padding:10px 12px; background:#FEF3C7; border:1px solid #FCD34D; border-radius:6px;">' +
+    '<div style="font-size:11px; font-weight:700; color:#92400E; margin-bottom:4px;"><span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">warning</span> Threshold flags</div>' +
+    '<ul style="margin:0; padding-left:18px; font-size:11.5px; color:#78350F;">' +
+      flags.map(f => '<li>' + _regFmt.esc(f) + '</li>').join('') +
+    '</ul>' +
+  '</div>';
+}
+
+// Framework filter chip row. Renders one toggleable chip per known framework
+// showing whether it's currently included in THIS tab's scope. Clicking a chip
+// flips it in window._regulatoryFilters[tabKey] and triggers a recompute.
+function _regFrameworkChips(tabKey, meta){
+  const all = window._regulatoryAllFrameworks || [];
+  const active = new Set((window._regulatoryFilters && window._regulatoryFilters[tabKey]) || []);
+  const excludedByFw = (meta && meta.excludedByFramework) || {};
+  const chipsHtml = all.map(fw => {
+    const on = active.has(fw);
+    const excluded = excludedByFw[fw] || 0;
+    const bg = on ? '#DCFCE7' : '#F1F5F9';
+    const fg = on ? '#166534' : '#64748B';
+    const bd = on ? '#86EFAC' : '#CBD5E1';
+    const badge = (!on && excluded) ? '<span style="margin-left:4px; background:#DC2626; color:white; padding:0 5px; border-radius:9px; font-size:9px; font-weight:700;">' + excluded + '</span>' : '';
+    return '<button onclick="window._toggleRegulatoryFramework(\'' + tabKey + '\', \'' + fw + '\')" ' +
+      'style="padding:3px 8px; border-radius:9px; font-size:10.5px; font-weight:600; background:' + bg + '; color:' + fg + '; border:1px solid ' + bd + '; cursor:pointer;" ' +
+      'title="' + (on ? 'Click to EXCLUDE ' + fw + ' from this report' : 'Click to INCLUDE ' + fw + ' in this report') + '">' +
+      (on ? '✓ ' : '') + _regFmt.esc(fw) + badge +
+    '</button>';
+  }).join(' ');
+  const excludedTotal = (meta && meta.excludedCount) || 0;
+  const excludedNote = excludedTotal > 0
+    ? '<div style="margin-top:6px; font-size:10.5px; color:#7F1D1D;">' +
+        '<span class="material-icons-outlined text-[12px]" style="vertical-align:-2px; color:#DC2626;">filter_alt</span> ' +
+        '<b>' + excludedTotal + '</b> deal(s) excluded by framework filter. Click a chip above to include.' +
+      '</div>'
+    : '';
+  const scopeNote = (meta && meta.scopeNote)
+    ? '<div style="margin-top:4px; font-size:10px; color:#6B7280; font-style:italic;">' + _regFmt.esc(meta.scopeNote) + '</div>'
+    : '';
+  // Deal-list expandable — shows which deals are IN scope and which are OUT,
+  // grouped by how each deal was scoped (fund allocation vs framework fallback).
+  const inScopeDeals = (meta && meta.inScopeDeals) || [];
+  const excludedDeals = (meta && meta.excludedDeals) || [];
+  const scopedByFund = (meta && meta.scopedByFund) || 0;
+  const scopedByFw = (meta && meta.scopedByFramework) || 0;
+  const dealListHtml = (deals, sideLabel, sideColor) => {
+    if(!deals.length) return '';
+    return '<div style="margin-top:6px;">' +
+      '<div style="font-size:10px; text-transform:uppercase; color:' + sideColor + '; font-weight:600; letter-spacing:0.4px; margin-bottom:4px;">' + sideLabel + ' (' + deals.length + ')</div>' +
+      '<table style="width:100%; border-collapse:collapse; font-size:11px; background:white; border:1px solid #E5E7EB; border-radius:4px;">' +
+        '<thead style="background:#F8FAFC;"><tr>' +
+          '<th style="text-align:left; padding:4px 8px; font-size:10px; color:#475569;">Deal</th>' +
+          '<th style="text-align:left; padding:4px 8px; font-size:10px; color:#475569;">Framework</th>' +
+          '<th style="text-align:left; padding:4px 8px; font-size:10px; color:#475569;">Funds</th>' +
+          '<th style="text-align:center; padding:4px 8px; font-size:10px; color:#475569;">Scoped via</th>' +
+          '<th style="text-align:left; padding:4px 8px; font-size:10px; color:#475569;">Reason</th>' +
+        '</tr></thead><tbody>' +
+        deals.map(d => {
+          const viaChip = d.scopedVia === 'fund'
+            ? '<span style="padding:1px 6px; background:#DCFCE7; color:#166534; border-radius:9px; font-size:9.5px; font-weight:700;">FUND</span>'
+            : '<span style="padding:1px 6px; background:#EEF2FF; color:#3730A3; border-radius:9px; font-size:9.5px; font-weight:700;">FRAMEWORK</span>';
+          return '<tr style="border-top:1px solid #F1F5F9;">' +
+            '<td style="padding:3px 8px; font-weight:600;">' + _regFmt.esc(d.name) + '</td>' +
+            '<td style="padding:3px 8px;"><span style="padding:1px 5px; background:#EEF2FF; color:#3730A3; border-radius:3px; font-size:9.5px;">' + _regFmt.esc(d.framework) + '</span></td>' +
+            '<td style="padding:3px 8px; font-family:monospace; font-size:10px; color:#4B5563;">' + _regFmt.esc((d.fundCodes || []).join(', ') || '—') + '</td>' +
+            '<td style="padding:3px 8px; text-align:center;">' + viaChip + '</td>' +
+            '<td style="padding:3px 8px; font-size:10.5px; color:#6B7280;">' + _regFmt.esc(d.reason) + '</td>' +
+          '</tr>';
+        }).join('') +
+      '</tbody></table>' +
+    '</div>';
+  };
+  const dealListSection = (inScopeDeals.length || excludedDeals.length)
+    ? '<details style="margin-top:6px;"><summary style="cursor:pointer; font-size:10.5px; color:#374151; padding:2px 0;">' +
+        '<b>Show deal list</b> · ' + inScopeDeals.length + ' in scope (' + scopedByFund + ' via fund, ' + scopedByFw + ' via framework) · ' + excludedDeals.length + ' excluded' +
+      '</summary>' +
+      dealListHtml(inScopeDeals, 'In scope', '#166534') +
+      dealListHtml(excludedDeals, 'Excluded', '#991B1B') +
+    '</details>'
+    : '';
+  return '<div style="margin-bottom:12px; padding:8px 10px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px;">' +
+    '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+      '<span style="font-size:10.5px; color:#475569; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">Framework scope</span>' +
+      chipsHtml +
+      '<span style="margin-left:auto; font-size:10.5px; color:#374151;"><b>' + ((meta && meta.inScopeCount) || 0) + '</b> in scope' + (excludedTotal ? ' · ' + excludedTotal + ' excluded' : '') + '</span>' +
+    '</div>' +
+    excludedNote +
+    scopeNote +
+    dealListSection +
+  '</div>';
+}
+
+window._toggleRegulatoryFramework = function(tabKey, fw){
+  const cur = window._regulatoryFilters[tabKey] || [];
+  const idx = cur.indexOf(fw);
+  if(idx >= 0) cur.splice(idx, 1); else cur.push(fw);
+  window._regulatoryFilters[tabKey] = cur;
+  window.refreshRegulatory();
+};
+
+// ── Individual tab renderers ────────────────────────────────────────
+function _renderFormPF(r){
+  const s1a = r.section1a_fundInfo, s1b = r.section1b_concentration, s4 = r.section4_peAdviser;
+  const bridgeRows = s4.bridgeCandidates.slice(0, 20);
+  return '' +
+    _regFrameworkChips('formPF', r.meta) +
+    '<div style="font-size:10px; color:#6B7280; margin-bottom:8px; padding:4px 8px; background:#EFF6FF; border-radius:4px;">' +
+      _regFmt.esc(r.meta.note) + '</div>' +
+    _regFlagsBanner(r.flags) +
+    _regSection('Section 1a — Fund information', _regKvGrid([
+      { label: 'Total AUM', value: _regFmt.money(s1a.totalAUM, s1a.currency) },
+      { label: 'Net AUM (active)', value: _regFmt.money(s1a.netAUM, s1a.currency) },
+      { label: 'Fund type', value: _regFmt.esc(s1a.fundType) },
+      { label: 'Loan count', value: s1a.loanCount },
+      { label: 'Base currency', value: _regFmt.esc(s1a.currency) },
+      { label: 'Borrowings %', value: _regFmt.pct(s1a.borrowingsPct) },
+      { label: 'Derivatives %', value: _regFmt.pct(s1a.derivativesPct) }
+    ])) +
+    _regSection('Section 1b — Concentration (top borrowers)', _regConcentrationTable(s1b.byBorrower, 'Drawn') +
+      '<div style="margin-top:6px; font-size:11px; color:#6B7280;">Top-5 borrower concentration: <b>' + _regFmt.pct(s1b.top5BorrowersPct) + '</b></div>') +
+    _regSection('Section 1b — Industry, geography & framework', '<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">' +
+      '<div><div style="font-size:10px; text-transform:uppercase; color:#64748B; margin-bottom:4px;">Industry</div>' + _regConcentrationTable(s1b.byIndustry, 'Drawn') + '</div>' +
+      '<div><div style="font-size:10px; text-transform:uppercase; color:#64748B; margin-bottom:4px;">Geography</div>' + _regConcentrationTable(s1b.byGeography, 'Drawn') + '</div>' +
+      '<div><div style="font-size:10px; text-transform:uppercase; color:#64748B; margin-bottom:4px;">Framework (in scope)</div>' + _regConcentrationTable(s1b.byFramework, 'Drawn') + '</div>' +
+    '</div>') +
+    _regSection('Section 4 — Large PE Adviser', _regKvGrid([
+      { label: 'Total unfunded commitment', value: _regFmt.money(s4.totalUnfundedCommit) },
+      { label: 'Commitment utilization', value: _regFmt.pctRatio(s4.commitmentUtilization) },
+      { label: 'Bridge financing candidates', value: s4.bridgeCandidates.length },
+      { label: 'Controlled companies', value: s4.controlledCompaniesCount, sub: 'requires equity-holding data' }
+    ]) + (bridgeRows.length ? '<div style="margin-top:10px;"><table style="width:100%; border-collapse:collapse; font-size:11.5px;">' +
+      '<thead><tr style="background:#F8FAFC;">' +
+        '<th style="text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">Borrower</th>' +
+        '<th style="text-align:right; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">Commitment</th>' +
+        '<th style="text-align:right; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">Drawn</th>' +
+        '<th style="text-align:right; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">Undrawn</th>' +
+        '<th style="text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">Maturity</th>' +
+      '</tr></thead><tbody>' +
+      bridgeRows.map(b =>
+        '<tr style="border-top:1px solid #F1F5F9;">' +
+          '<td style="padding:5px 8px;">' + _regFmt.esc(b.borrower) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(b.commitment) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(b.drawn) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(b.undrawn) + '</td>' +
+          '<td style="padding:5px 8px;">' + _regFmt.date(b.maturity) + '</td>' +
+        '</tr>'
+      ).join('') +
+    '</tbody></table></div>' : '') +
+    (s4.note ? '<div style="margin-top:6px; font-size:10px; color:#6B7280; font-style:italic;">' + _regFmt.esc(s4.note) + '</div>' : ''));
+}
+
+function _renderAIFMD(r){
+  return '' +
+    _regFrameworkChips('aifmd', r.meta) +
+    '<div style="font-size:10px; color:#6B7280; margin-bottom:8px; padding:4px 8px; background:#EFF6FF; border-radius:4px;">' + _regFmt.esc(r.meta.note) + '</div>' +
+    _regSection('Principal exposures (top 5 long positions)',
+      _regConcentrationTable(r.principalExposures.long.map(x => ({ label: x.instrument, amount: x.exposure, pct: x.pct })), 'Exposure')) +
+    _regSection('Instruments traded (by type)',
+      _regConcentrationTable(r.instruments.byType.map(x => ({ label: x.type, amount: x.amount, pct: x.pct })), 'Notional')) +
+    _regSection('Concentration', '<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">' +
+      '<div><div style="font-size:10px; text-transform:uppercase; color:#64748B; margin-bottom:4px;">By sector</div>' + _regConcentrationTable(r.concentration.bySector, 'Drawn') + '</div>' +
+      '<div><div style="font-size:10px; text-transform:uppercase; color:#64748B; margin-bottom:4px;">By geography</div>' + _regConcentrationTable(r.concentration.byGeography, 'Drawn') + '</div>' +
+      '<div><div style="font-size:10px; text-transform:uppercase; color:#64748B; margin-bottom:4px;">Framework (in scope)</div>' + _regConcentrationTable(r.concentration.byFramework, 'Drawn') + '</div>' +
+    '</div><div style="margin-top:6px; font-size:11px; color:#6B7280;">Top-5 counterparties: <b>' + _regFmt.pct(r.concentration.top5CounterpartiesPct) + '</b></div>') +
+    _regSection('Leverage', _regKvGrid([
+      { label: 'Gross method', value: _regFmt.ratio(r.leverage.grossMethod), sub: 'commitments ÷ NAV' },
+      { label: 'Commitment method', value: _regFmt.ratio(r.leverage.commitmentMethod), sub: 'drawn ÷ NAV' },
+      { label: 'Fund NAV', value: _regFmt.money(r.leverage.fundNAV) }
+    ]) + (r.leverage.note ? '<div style="margin-top:6px; font-size:10px; color:#6B7280; font-style:italic;">' + _regFmt.esc(r.leverage.note) + '</div>' : '')) +
+    _regSection('Risk profile', _regKvGrid([
+      { label: 'Wtd-avg yield', value: _regFmt.pct(r.riskProfile.wtdAvgYield) },
+      { label: 'Wtd-avg mod duration', value: _regFmt.esc(r.riskProfile.wtdAvgDuration == null ? '—' : r.riskProfile.wtdAvgDuration.toFixed(2) + 'y') },
+      { label: 'Total DV01', value: _regFmt.money(r.riskProfile.totalDV01), sub: 'per 1bp rate move' }
+    ])) +
+    _regSection('Liquidity', '<table style="width:100%; border-collapse:collapse; font-size:11.5px;">' +
+      '<thead><tr style="background:#F8FAFC;">' +
+        '<th style="text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">Bucket (days)</th>' +
+        '<th style="text-align:right; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">% of portfolio</th>' +
+      '</tr></thead><tbody>' +
+      r.liquidity.buckets.map(b =>
+        '<tr style="border-top:1px solid #F1F5F9;">' +
+          '<td style="padding:5px 8px;">' + (b.daysUpTo >= 999999 ? '>365' : '≤ ' + b.daysUpTo) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right;">' + _regFmt.pct(b.pct) + '</td>' +
+        '</tr>'
+      ).join('') +
+      '</tbody></table><div style="margin-top:6px; font-size:10px; color:#6B7280; font-style:italic;">' + _regFmt.esc(r.liquidity.note) + '</div>');
+}
+
+function _renderY14Q(r){
+  const rows = r.rows;
+  const s = r.summary;
+  return '' +
+    _regFrameworkChips('y14q', r.meta) +
+    '<div style="font-size:10px; color:#6B7280; margin-bottom:8px; padding:4px 8px; background:#EFF6FF; border-radius:4px;">' + _regFmt.esc(r.meta.note) + '</div>' +
+    _regSection('Summary', _regKvGrid([
+      { label: 'Total commitment', value: _regFmt.money(s.totalCommitment) },
+      { label: 'Total drawn', value: _regFmt.money(s.totalDrawn) },
+      { label: 'Total EAD', value: _regFmt.money(s.totalEAD), sub: 'Basel CCF 75% on undrawn' },
+      { label: 'Expected loss', value: _regFmt.money(s.totalExpectedLoss), sub: 'EAD × PD × LGD' },
+      { label: 'Wtd-avg PD', value: _regFmt.pctRatio(s.wtdAvgPD) },
+      { label: 'Wtd-avg LGD', value: _regFmt.pctRatio(s.wtdAvgLGD) },
+      { label: 'Covenant breaches', value: s.breachCount },
+      { label: 'ECL Stage 3', value: s.stage3Count }
+    ])) +
+    _regSection('Facility schedule (H.1 preview)',
+      '<div style="max-height:420px; overflow:auto;">' +
+      '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+      '<thead style="position:sticky; top:0; background:#F1F5F9;"><tr>' +
+        ['Obligor','Framework','Industry','Geo','Commitment','Drawn','Util%','Coupon%','Maturity','PD','LGD','EAD','Stage','Breach']
+          .map(h => '<th style="text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">' + h + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      rows.map(r0 =>
+        '<tr style="border-top:1px solid #F1F5F9;' + (r0.covenantBreach ? ' background:#FEF2F2;' : '') + '">' +
+          '<td style="padding:5px 8px; font-weight:600;">' + _regFmt.esc(r0.obligorName) + '</td>' +
+          '<td style="padding:5px 8px;"><span style="display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; background:#EEF2FF; color:#3730A3;">' + _regFmt.esc(r0.framework) + '</span></td>' +
+          '<td style="padding:5px 8px;">' + _regFmt.esc(r0.industry) + '</td>' +
+          '<td style="padding:5px 8px;">' + _regFmt.esc(r0.geography) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(r0.commitment) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(r0.drawn) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right;">' + _regFmt.pctRatio(r0.utilization) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right;">' + _regFmt.pct(r0.couponPct) + '</td>' +
+          '<td style="padding:5px 8px;">' + _regFmt.date(r0.maturity) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right;">' + _regFmt.pctRatio(r0.pd) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right;">' + _regFmt.pctRatio(r0.lgd) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(r0.ead) + '</td>' +
+          '<td style="padding:5px 8px; text-align:center;">' + _regFmt.esc('Stage ' + r0.eclStage.toUpperCase()) + '</td>' +
+          '<td style="padding:5px 8px; text-align:center;">' + (r0.covenantBreach ? '<span style="color:#DC2626; font-weight:700;">✕</span>' : '<span style="color:#22C55E;">✓</span>') + '</td>' +
+        '</tr>'
+      ).join('') +
+      '</tbody></table></div>');
+}
+
+function _renderNPORT(r){
+  const holdings = r.itemC_holdings;
+  return '' +
+    _regFrameworkChips('nport', r.meta) +
+    '<div style="font-size:10px; color:#6B7280; margin-bottom:8px; padding:4px 8px; background:#EFF6FF; border-radius:4px;">' + _regFmt.esc(r.meta.note) + '</div>' +
+    _regSection('Item A — Fund summary', _regKvGrid([
+      { label: 'Total assets', value: _regFmt.money(r.itemA_summary.totalAssets) },
+      { label: 'Total liabilities', value: _regFmt.money(r.itemA_summary.totalLiabilities) },
+      { label: 'Net assets', value: _regFmt.money(r.itemA_summary.netAssets) },
+      { label: 'Holdings count', value: r.itemA_summary.holdingsCount }
+    ])) +
+    _regSection('Item D — Risk metrics', _regKvGrid([
+      { label: 'Wtd-avg WAL', value: r.itemD_riskMetrics.wtdAvgMaturityYears == null ? '—' : r.itemD_riskMetrics.wtdAvgMaturityYears.toFixed(2) + 'y' },
+      { label: 'Illiquid %', value: _regFmt.pct(r.itemD_riskMetrics.illiquidPct) },
+      { label: 'Level 3 assets %', value: _regFmt.pct(r.itemD_riskMetrics.level3AssetsPct) }
+    ])) +
+    _regSection('Item C — Portfolio holdings',
+      '<div style="max-height:420px; overflow:auto;">' +
+      '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+      '<thead style="position:sticky; top:0; background:#F1F5F9;"><tr>' +
+        ['Identifier','Name','Framework','Principal','Fair value','Cost','Unrealized PnL','Maturity','Coupon%','FV Level','Liquidity']
+          .map(h => '<th style="text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569;">' + h + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      holdings.map(h =>
+        '<tr style="border-top:1px solid #F1F5F9;">' +
+          '<td style="padding:5px 8px; font-family:monospace; font-size:10px;">' + _regFmt.esc(h.identifier) + '</td>' +
+          '<td style="padding:5px 8px; font-weight:600;">' + _regFmt.esc(h.name) + '</td>' +
+          '<td style="padding:5px 8px;"><span style="display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; background:#EEF2FF; color:#3730A3;">' + _regFmt.esc(h.framework) + '</span></td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(h.principal) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(h.fairValue) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + _regFmt.money(h.cost) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums; color:' + (h.unrealizedPnL >= 0 ? '#166534' : '#991B1B') + ';">' + _regFmt.money(h.unrealizedPnL) + '</td>' +
+          '<td style="padding:5px 8px;">' + _regFmt.date(h.maturity) + '</td>' +
+          '<td style="padding:5px 8px; text-align:right;">' + _regFmt.pct(h.couponPct) + '</td>' +
+          '<td style="padding:5px 8px; text-align:center;">Level ' + h.fairValueLevel + '</td>' +
+          '<td style="padding:5px 8px; font-size:10px; color:#6B7280;">' + _regFmt.esc(h.liquidityClass) + '</td>' +
+        '</tr>'
+      ).join('') +
+      '</tbody></table></div>');
+}
+
+window.renderRegulatory = function(){
+  const cache = window._regulatoryCache; if(!cache) return;
+  const tab = window._regulatoryActiveTab || 'formPF';
+  const body = document.getElementById('regulatory-body');
+  const summary = document.getElementById('regulatory-summary');
+  let html = '';
+  try {
+    if(tab === 'formPF')     html = _renderFormPF(cache.formPF);
+    else if(tab === 'aifmd') html = _renderAIFMD(cache.aifmd);
+    else if(tab === 'y14q')  html = _renderY14Q(cache.y14q);
+    else if(tab === 'nport') html = _renderNPORT(cache.nport);
+    body.innerHTML = html;
+  } catch(err){
+    console.error('[regulatory] render failed:', err);
+    body.innerHTML = '<div style="padding:20px; color:#991B1B;">Render failed: ' + (err && err.message ? err.message : err) + '</div>';
+  }
+  summary.textContent = cache.meta.facilityCount + ' facilities · fund NAV ' +
+    _regFmt.money(cache.meta.fundNAV) + ' · as of ' + cache.meta.asOf;
+};
+
+// CSV export of active tab. Each tab exports the primary table for that tab.
+window.exportRegulatoryCsv = function(){
+  const cache = window._regulatoryCache;
+  if(!cache){ if(typeof toast === 'function') toast('Recompute first'); return; }
+  const tab = window._regulatoryActiveTab || 'formPF';
+  const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+  let hdr = [], rows = [], filename = '';
+  if(tab === 'formPF'){
+    hdr = ['Borrower','Drawn','Pct'];
+    rows = cache.formPF.section1b_concentration.byBorrower.map(x => [x.label, x.amount, x.pct]);
+    filename = 'form-pf-concentration-' + cache.meta.asOf + '.csv';
+  } else if(tab === 'aifmd'){
+    hdr = ['Sector','Drawn','Pct'];
+    rows = cache.aifmd.concentration.bySector.map(x => [x.label, x.amount, x.pct]);
+    filename = 'aifmd-sector-concentration-' + cache.meta.asOf + '.csv';
+  } else if(tab === 'y14q'){
+    hdr = ['Obligor','Industry','Geography','Commitment','Drawn','Utilization','CouponPct','Maturity','PD','LGD','EAD','Stage','Breach'];
+    rows = cache.y14q.rows.map(r => [r.obligorName, r.industry, r.geography, r.commitment, r.drawn, r.utilization, r.couponPct, r.maturity, r.pd, r.lgd, r.ead, r.eclStage, r.covenantBreach]);
+    filename = 'y14q-h1-facilities-' + cache.meta.asOf + '.csv';
+  } else if(tab === 'nport'){
+    hdr = ['Identifier','Name','Principal','FairValue','Cost','UnrealizedPnL','Maturity','CouponPct','FVLevel','Liquidity'];
+    rows = cache.nport.itemC_holdings.map(h => [h.identifier, h.name, h.principal, h.fairValue, h.cost, h.unrealizedPnL, h.maturity, h.couponPct, h.fairValueLevel, h.liquidityClass]);
+    filename = 'nport-holdings-' + cache.meta.asOf + '.csv';
+  }
+  const lines = [hdr.join(','), ...rows.map(r => r.map(esc).join(','))];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+  if(typeof toast === 'function') toast('Downloaded ' + filename, 2500);
+};
+
+// ═════════════════════════════════════════════════════════════════════
 // Watchlist / Early-Warning (Tier 1 #5)
 // ═════════════════════════════════════════════════════════════════════
 // Cross-portfolio scorecard driven by LMA.computeWatchlist. Reuses the
@@ -11904,6 +13098,34 @@ window.closeWatchlistModal = function(){
   const el = document.getElementById('watchlist-modal');
   if(el) el.style.display = 'none';
 };
+
+// Populate a fund <select> element with the current fund cache. Adds an
+// "All funds" default option first. Safe to call before funds are loaded
+// (leaves the dropdown as-is) and idempotent (rebuilds on every call).
+async function _populateFundDropdown(selectId){
+  const el = document.getElementById(selectId);
+  if(!el) return;
+  const prev = el.value;
+  if(window.SB && window.SB.fetchFunds && !(window._fundsCache && window._fundsCache.length)){
+    try { window._fundsCache = await window.SB.fetchFunds(); } catch(err){ /* silent */ }
+  }
+  const funds = window._fundsCache || [];
+  el.innerHTML = '<option value="">All funds</option>' +
+    funds.map(f => '<option value="' + f.id + '">' + f.code + ' — ' + f.name + '</option>').join('');
+  if(prev && funds.some(f => f.id === prev)) el.value = prev;
+}
+
+// Filter [{key,name,inst,...}] by fund id — returns only deals with at
+// least one allocation to the given fund. `null` fundId = no filter.
+function _filterDealsByFund(deals, fundId){
+  if(!fundId) return deals;
+  return deals.filter(d => {
+    const inst = d.inst || {};
+    const allocs = Array.isArray(inst.fundAllocations) ? inst.fundAllocations
+                 : Array.isArray(d.fundAllocations) ? d.fundAllocations : [];
+    return allocs.some(a => a && a.fundId === fundId);
+  });
+}
 
 // Ensure notices cache is populated — the inbox lazy-loads it on first
 // open, and Watchlist should surface overdue-notice signals even if the
@@ -11942,7 +13164,12 @@ function _watchlistBuildDeals(){
     const name = (def.deal && def.deal.name) || p.label || p.key || 'Unnamed deal';
     // Copy team/framework/currency onto the wrapper for scorecard columns
     const team = (def.deal && def.deal.team) || p.team || '';
-    out.push({ key, name, inst, team });
+    // Multi-fund Phase 1 — pull allocations off the def so the engine can
+    // reason about fund/regulator scope. Also mirror onto inst so downstream
+    // consumers (Regulatory) can read them from either shape.
+    const fundAllocations = Array.isArray(def.fundAllocations) ? def.fundAllocations : [];
+    if(inst && !inst.fundAllocations) inst.fundAllocations = fundAllocations;
+    out.push({ key, name, inst, team, fundAllocations });
   }
   return out;
 }
@@ -11959,13 +13186,17 @@ window.refreshWatchlist = async function(){
     if(typeof LMA === 'undefined' || typeof LMA.computeWatchlist !== 'function'){
       throw new Error('Analytics library missing computeWatchlist. Reload the page.');
     }
-    const deals   = _watchlistBuildDeals();
-    if(!deals.length){
+    // Populate fund picker (idempotent) and apply filter
+    await _populateFundDropdown('watchlist-filter-fund');
+    const allDeals = _watchlistBuildDeals();
+    if(!allDeals.length){
       errBox.style.display = '';
       errBox.innerHTML = '<b>No deals to scan.</b> Load or save at least one deal first.';
       body.innerHTML = '';
       return;
     }
+    const fundId = (document.getElementById('watchlist-filter-fund') || {}).value || '';
+    const deals  = _filterDealsByFund(allDeals, fundId);
     const notices = await _watchlistEnsureNotices();
     const result  = LMA.computeWatchlist({ deals, notices });
     window._watchlistCache = result;
@@ -12934,6 +14165,221 @@ window.printCurrentPdf = function(){
   } catch(err){
     console.warn('[pdf] iframe print failed, opening in new tab:', err);
     if(window._currentPdfBlobUrl) window.open(window._currentPdfBlobUrl, '_blank');
+  }
+};
+
+// ═════════════════════════════════════════════════════════════════════
+// Send Notice (Phase 2A — email delivery)
+// ═════════════════════════════════════════════════════════════════════
+// Opens the send modal, populates recipients from deal_recipients +
+// notice.recipients, prefills subject/body with token substitution,
+// attaches the PDF. Send button dispatches via SMTP if available, else
+// mailto: fallback with auto-download of the PDF.
+window._sendNoticeState = null;
+
+// jsPDF Blob → base64 string (strips the "data:...;base64," prefix)
+function _blobToBase64(blob){
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => { const s = r.result; const i = s.indexOf(','); resolve(i >= 0 ? s.slice(i+1) : s); };
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+function _renderTokens(str, tokens){
+  return String(str || '').replace(/\{(\w+)\}/g, (_, k) => tokens[k] != null ? tokens[k] : '{'+k+'}');
+}
+
+window.openSendNoticeModal = async function(){
+  const noticeId = window._currentNoticeId;
+  if(!noticeId){ toast('No notice selected'); return; }
+  const notice = (window._noticesCache || []).find(x => x.id === noticeId);
+  if(!notice){ toast('Notice not found'); return; }
+  // 1. Build PDF (reuses the factory used by preview)
+  const built = _buildNoticePdf(noticeId);
+  if(!built){ return; }
+  const pdfBlob = built.doc.output('blob');
+  const pdfBase64 = await _blobToBase64(pdfBlob);
+  window._sendNoticeState = { noticeId, notice, pdfBase64, pdfFilename: built.filename };
+  // 2. Prefill subject + body with token substitution
+  const dealName = (() => {
+    const p = (window.PRESETS || []).find(x => (x.dbDealId || x._dbDealId || x.dealId) === notice.deal_id);
+    return (p && (p.label || p.name)) || (built.notice && built.notice.deal) || 'the loan';
+  })();
+  const tokens = {
+    dealName,
+    reference: notice.reference || 'N/A',
+    amount: (notice.amount != null) ? (notice.currency || 'USD') + ' ' + (+notice.amount).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : 'see attached',
+    date: notice.effective_date || '',
+    noticeType: (notice.notice_type || '').replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase())
+  };
+  const defaultSubject = '{noticeType} Notice · {dealName} · {reference}';
+  const defaultBody =
+    'Dear Recipient,\n\n' +
+    'Please find attached the {noticeType} notice for {dealName}.\n\n' +
+    'Reference: {reference}\n' +
+    'Effective date: {date}\n' +
+    'Amount: {amount}\n\n' +
+    'This notice is issued in accordance with the Credit Agreement. If you have any questions, please respond to this email.\n\n' +
+    'Kind regards,\n' +
+    'Loan Agent';
+  document.getElementById('send-subject').value = _renderTokens(defaultSubject, tokens);
+  document.getElementById('send-body').value    = _renderTokens(defaultBody, tokens);
+  document.getElementById('send-notice-sub').textContent =
+    tokens.noticeType + ' · ' + tokens.reference + ' · ' + tokens.date;
+  document.getElementById('send-attachment-name').textContent = built.filename;
+  document.getElementById('send-attachment-size').textContent = Math.round(pdfBlob.size / 1024) + ' KB';
+  document.getElementById('send-notice-error').style.display = 'none';
+  document.getElementById('send-notice-modal').style.display = 'flex';
+  // 3. Fetch SMTP status + recipients + delivery history in parallel
+  const [smtpStatus, recipients, history] = await Promise.all([
+    (window.SB.checkNoticeDeliveryStatus ? window.SB.checkNoticeDeliveryStatus() : Promise.resolve({available:false})),
+    (window.SB.fetchRecipients ? window.SB.fetchRecipients(notice.deal_id) : Promise.resolve([])),
+    (window.SB.fetchNoticeDeliveries ? window.SB.fetchNoticeDeliveries(noticeId) : Promise.resolve([]))
+  ]);
+  window._sendNoticeState.recipients = recipients;
+  window._sendNoticeState.smtpAvailable = smtpStatus.available;
+  _renderSendSmtpStatus(smtpStatus);
+  _renderSendRecipients(recipients);
+  _renderSendHistory(history);
+};
+
+window.closeSendNoticeModal = function(){
+  const el = document.getElementById('send-notice-modal');
+  if(el) el.style.display = 'none';
+  window._sendNoticeState = null;
+};
+
+function _renderSendSmtpStatus(status){
+  const el = document.getElementById('send-smtp-status');
+  const btn = document.getElementById('send-notice-btn');
+  const hint = document.getElementById('send-notice-hint');
+  if(status.available){
+    el.style.background = '#DCFCE7'; el.style.border = '1px solid #86EFAC'; el.style.color = '#166534';
+    el.innerHTML = '<span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">check_circle</span> ' +
+      '<b>SMTP ready</b> — will send from <b>' + (status.smtpFrom || '?') + '</b> via <b>' + (status.smtpHost || '?') + '</b>';
+    btn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">send</span> Send via SMTP';
+    hint.textContent = 'Server-side email with PDF attached.';
+  } else {
+    el.style.background = '#FEF3C7'; el.style.border = '1px solid #FCD34D'; el.style.color = '#92400E';
+    el.innerHTML = '<span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">info</span> ' +
+      '<b>SMTP not available</b> — will open your mail client via <code>mailto:</code> and download the PDF for manual attach. ' +
+      '<span style="font-size:10.5px; color:#78350F;">(' + (status.reason || 'reason unknown') + ')</span>';
+    btn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">outgoing_mail</span> Open in mail client';
+    hint.textContent = 'Fallback: mailto: link opens Mail app; you attach the PDF manually.';
+  }
+}
+
+function _renderSendRecipients(recipients){
+  const host = document.getElementById('send-recipients-list');
+  const empty = document.getElementById('send-recipients-empty');
+  if(!recipients.length){
+    host.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  const escHtml = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  host.innerHTML = recipients.map(r => {
+    const primary = r.is_primary;
+    return '<label style="display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:4px; cursor:pointer;" onmouseover="this.style.background=\'#F1F5F9\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<input type="checkbox" class="send-rcpt-cb" ' + (primary ? 'checked' : '') + ' data-email="' + escHtml(r.email) + '" data-name="' + escHtml(r.name || '') + '" data-role="' + escHtml(r.role || '') + '"/>' +
+      '<span style="flex:1;"><b>' + escHtml(r.name || r.email) + '</b>' +
+        '<span style="color:#94A3B8; font-size:10.5px; margin-left:6px;">' + escHtml(r.email) + '</span>' +
+        (r.role ? '<span style="background:#EEF2FF; color:#3730A3; padding:1px 5px; border-radius:9px; font-size:9.5px; margin-left:6px;">' + escHtml(r.role) + '</span>' : '') +
+        (primary ? '<span style="background:#FEF3C7; color:#92400E; padding:1px 5px; border-radius:9px; font-size:9.5px; margin-left:4px;">primary</span>' : '') +
+      '</span>' +
+    '</label>';
+  }).join('');
+}
+
+function _renderSendHistory(history){
+  const host = document.getElementById('send-history');
+  if(!history.length){
+    host.innerHTML = '<div style="color:#94A3B8; font-size:11px; padding:8px;">No prior delivery attempts.</div>';
+    return;
+  }
+  const escHtml = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  host.innerHTML = '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+    '<thead><tr style="background:#F8FAFC;">' +
+      '<th style="text-align:left; padding:4px 6px; font-size:10px; color:#475569;">Sent</th>' +
+      '<th style="text-align:left; padding:4px 6px; font-size:10px; color:#475569;">Recipient</th>' +
+      '<th style="text-align:left; padding:4px 6px; font-size:10px; color:#475569;">Method</th>' +
+      '<th style="text-align:left; padding:4px 6px; font-size:10px; color:#475569;">Status</th>' +
+    '</tr></thead><tbody>' +
+    history.map(d => {
+      const when = d.sent_at ? new Date(d.sent_at).toLocaleString() : '—';
+      const statusColor = d.status === 'sent' ? '#166534' : d.status === 'failed' ? '#991B1B' : '#92400E';
+      return '<tr style="border-top:1px solid #F1F5F9;">' +
+        '<td style="padding:3px 6px; color:#4B5563;">' + escHtml(when) + '</td>' +
+        '<td style="padding:3px 6px;"><b>' + escHtml(d.recipient_name || d.recipient_email) + '</b> ' +
+          '<span style="color:#94A3B8;">' + escHtml(d.recipient_email) + '</span></td>' +
+        '<td style="padding:3px 6px; font-family:monospace;">' + escHtml(d.method) + '</td>' +
+        '<td style="padding:3px 6px; color:' + statusColor + '; font-weight:600;">' + escHtml(d.status) + '</td>' +
+      '</tr>';
+    }).join('') +
+    '</tbody></table>';
+}
+
+window.confirmSendNotice = async function(){
+  const state = window._sendNoticeState;
+  if(!state){ return; }
+  const err = document.getElementById('send-notice-error');
+  err.style.display = 'none';
+  const checked = Array.from(document.querySelectorAll('.send-rcpt-cb:checked')).map(cb => ({
+    email: cb.dataset.email, name: cb.dataset.name, role: cb.dataset.role
+  }));
+  if(!checked.length){
+    err.style.display = ''; err.textContent = 'Select at least one recipient.'; return;
+  }
+  const subject = document.getElementById('send-subject').value.trim();
+  const body    = document.getElementById('send-body').value;
+  if(!subject){ err.style.display = ''; err.textContent = 'Subject cannot be empty.'; return; }
+
+  const btn = document.getElementById('send-notice-btn');
+  const origBtnHtml = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">hourglass_top</span> Sending…';
+
+  try {
+    const res = await window.SB.sendNoticeEmail({
+      noticeId: state.noticeId,
+      to: checked,
+      subject, body,
+      pdfBase64: state.pdfBase64,
+      pdfFilename: state.pdfFilename
+    });
+    if(!res.ok){
+      err.style.display = ''; err.textContent = 'Send failed: ' + (res.reason || 'unknown');
+      btn.disabled = false; btn.innerHTML = origBtnHtml;
+      return;
+    }
+    // If SMTP succeeded, we're done. If it fell back to mailto, open the
+    // mail client + download the PDF so the user can attach it manually.
+    if(res.needsMailtoFallback){
+      // Auto-download PDF
+      const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(state.pdfBase64), c => c.charCodeAt(0))], { type: 'application/pdf' }));
+      const a = document.createElement('a'); a.href = url; a.download = state.pdfFilename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+      // Open mailto with all recipients + subject + body
+      const mailto = 'mailto:' + checked.map(r => encodeURIComponent(r.email)).join(',') +
+        '?subject=' + encodeURIComponent(subject) +
+        '&body=' + encodeURIComponent(body + '\n\n(PDF attached — please attach the downloaded file to this email)');
+      window.location.href = mailto;
+      toast('Mail client opened · PDF downloaded — attach it manually', 5000);
+    } else {
+      toast('Sent to ' + checked.length + ' recipient' + (checked.length===1?'':'s') + ' via SMTP', 3500);
+    }
+    // Refresh notices cache so the inbox reflects new status
+    if(typeof window.refreshNotices === 'function') window.refreshNotices();
+    window.closeSendNoticeModal();
+    if(typeof window.closeNoticeDetail === 'function') window.closeNoticeDetail();
+  } catch(e){
+    console.error('[send-notice] send threw:', e);
+    err.style.display = ''; err.textContent = 'Send failed: ' + e.message;
+  } finally {
+    btn.disabled = false; btn.innerHTML = origBtnHtml;
   }
 };
 
@@ -20055,6 +21501,124 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     });
   }
 
+  // ═════════════════════════════════════════════════════════════════════
+  // Multi-fund allocations — Stage 0 Builder card (Tier 1 #2 Phase 1)
+  // ═════════════════════════════════════════════════════════════════════
+  // window.B.fundAllocations = [ { fundId, allocationPct, method, effectiveDate, notes, fund? } ]
+  // fund is the denormalized fund object (present after fetchUserDeals).
+  // For newly-added rows via the picker, `fund` is populated at add time.
+
+  // In-memory cache of all available funds — populated from SB.fetchFunds().
+  // Refreshed on modal open and after Manage Funds edits.
+  window._fundsCache = [];
+  async function _ensureFundsCache(){
+    if(!window._fundsCache.length && window.SB && window.SB.fetchFunds){
+      try { window._fundsCache = await window.SB.fetchFunds(); }
+      catch(err){ console.warn('[funds] fetchFunds failed:', err); }
+    }
+    return window._fundsCache;
+  }
+
+  function renderAllocations(){
+    const host = $b('allocations-container');
+    const empty = $b('allocations-empty');
+    const chip = $b('allocations-count-chip');
+    const sumChip = $b('allocations-sum-chip');
+    if(!host) return;
+    const list = (B.fundAllocations = B.fundAllocations || []);
+    if(chip) chip.textContent = list.length;
+    // Sum% — green if 100%, amber if <100%, red if >100%
+    const totalPct = list.reduce((s, a) => s + (+a.allocationPct || 0), 0);
+    if(sumChip){
+      sumChip.textContent = (totalPct * 100).toFixed(1) + '%';
+      const bg = Math.abs(totalPct - 1) < 0.0001 ? '#DCFCE7'
+               : totalPct > 1.0001 ? '#FEE2E2' : '#FEF3C7';
+      const fg = Math.abs(totalPct - 1) < 0.0001 ? '#166534'
+               : totalPct > 1.0001 ? '#991B1B' : '#92400E';
+      sumChip.style.background = bg;
+      sumChip.style.color = fg;
+    }
+    [...host.querySelectorAll('[data-fa-row]')].forEach(n => n.remove());
+    if(empty) empty.style.display = list.length ? 'none' : '';
+    if(!list.length) return;
+    const funds = window._fundsCache || [];
+    list.forEach((a, idx) => {
+      const row = document.createElement('div');
+      row.setAttribute('data-fa-row', idx);
+      row.style.cssText = 'border:1px solid #fce7f3; border-radius:8px; padding:8px 10px; background:#FEF7FB; display:grid; grid-template-columns: minmax(220px,1.2fr) 90px 100px 110px 40px; gap:6px; align-items:center;';
+      const fundOptions = funds.map(f =>
+        `<option value="${f.id}" ${a.fundId === f.id ? 'selected' : ''}>${f.code} — ${f.name} (${f.domicile})</option>`
+      ).join('');
+      row.innerHTML = `
+        <select data-fa-field="fundId" data-faidx="${idx}"
+                style="border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11.5px; background:white; font-weight:600;">
+          <option value="">— Select fund —</option>
+          ${fundOptions}
+        </select>
+        <input data-fa-field="allocationPct" data-faidx="${idx}" type="number" step="0.01" min="0" max="100"
+               value="${a.allocationPct != null ? (a.allocationPct * 100) : ''}" placeholder="%"
+               style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11.5px; background:white; text-align:right;"
+               title="Allocation percentage (0–100)"/>
+        <select data-fa-field="method" data-faidx="${idx}"
+                style="border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11px; background:white;">
+          <option value="pct" ${a.method==='pct'?'selected':''}>%</option>
+          <option value="absolute" ${a.method==='absolute'?'selected':''}>Absolute</option>
+          <option value="pro_rata" ${a.method==='pro_rata'?'selected':''}>Pro-rata</option>
+          <option value="side_letter" ${a.method==='side_letter'?'selected':''}>Side letter</option>
+        </select>
+        <input data-fa-field="effectiveDate" data-faidx="${idx}" type="date"
+               value="${a.effectiveDate || new Date().toISOString().slice(0,10)}"
+               style="border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11px; background:white;"/>
+        <button data-fa-remove="${idx}" title="Delete allocation"
+                style="border:1px solid #fecaca; background:white; color:#b91c1c; border-radius:4px; padding:3px 6px; font-size:11px; cursor:pointer;">×</button>
+      `;
+      host.appendChild(row);
+    });
+    // Wire inputs
+    host.querySelectorAll('[data-fa-field]').forEach(el => {
+      el.oninput = el.onchange = () => {
+        const i = +el.getAttribute('data-faidx');
+        const f = el.getAttribute('data-fa-field');
+        const v = el.value;
+        const a = list[i]; if(!a) return;
+        if(f === 'allocationPct'){
+          a.allocationPct = (v === '' || v == null) ? null : (+v) / 100;
+        } else if(f === 'fundId'){
+          a.fundId = v;
+          // Refresh denormalized fund metadata
+          a.fund = (window._fundsCache || []).find(x => x.id === v) || null;
+        } else {
+          a[f] = v;
+        }
+        renderAllocations();   // re-render to update sum chip
+        if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+          window.AutoSave.schedule();
+        }
+      };
+    });
+    host.querySelectorAll('[data-fa-remove]').forEach(btn => {
+      btn.onclick = () => {
+        const i = +btn.getAttribute('data-fa-remove');
+        list.splice(i, 1);
+        renderAllocations();
+        if(typeof window.AutoSave !== 'undefined' && window.AutoSave.isEnabled && window.AutoSave.isEnabled()){
+          window.AutoSave.schedule();
+        }
+      };
+    });
+  }
+
+  window.addFundAllocationRow = async function(){
+    await _ensureFundsCache();
+    B.fundAllocations = B.fundAllocations || [];
+    B.fundAllocations.push({
+      fundId: null, allocationPct: null, method: 'pct',
+      effectiveDate: new Date().toISOString().slice(0,10), notes: null, fund: null
+    });
+    renderAllocations();
+  };
+  window.renderAllocations = renderAllocations;
+
   // ─── Render forward cashflow table ──────────────────────────────────
   let lastCashflows = [];
   // Track the last-rendered framework so we only re-render fees when it
@@ -20750,6 +22314,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // V3 Covenants Small-scope — project so the Dashboard can read them.
     if(Array.isArray(B.covenants) && B.covenants.length){
       inst.covenants = B.covenants.map(c => ({ ...c }));
+    }
+    // Multi-fund Phase 1 — project fund allocations so downstream consumers
+    // (Regulatory scope filter, Portfolio + Watchlist fund pickers) can read
+    // them off inst. Deep-clone so mutations on inst don't leak back to B.
+    if(Array.isArray(B.fundAllocations) && B.fundAllocations.length){
+      inst.fundAllocations = B.fundAllocations.map(a => Object.assign({}, a,
+        a.fund ? { fund: Object.assign({}, a.fund) } : {}));
     }
     // Lifecycle events (#13/#14/#15/#24) — fold into principalSchedule so
     // the engine processes them as events (no separate code path needed).
@@ -21681,6 +23252,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // V3 Covenants Small-scope — expose for external callers (load paths + autosave)
   window.renderCovenants  = renderCovenants;
   window.newCovenant      = newCovenant;
+  // Multi-fund Phase 1 — expose render + add-row for external callers
+  window.renderAllocations = renderAllocations;
   // V3 — expose registerBuilderInstrument + builderToInstrument so the Dashboard
   // self-heal path (renderDashboard fallback) can rebuild INSTRUMENTS from B
   // on demand. Without this, an early registerBuilderInstrument failure inside
@@ -21740,12 +23313,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.prepaymentPenaltySchedule = built.prepaymentPenaltySchedule || [];
     B.lifecycleEvents           = built.lifecycleEvents           || [];
     B.covenants                 = built.covenants                  || [];
+    B.fundAllocations           = built.fundAllocations            || [];
     B.marketData  = { static: [], pricing: {}, ingestedAt: null };
     console.log('[V3] loadPresetByObject: B updated, calling form refresh functions');
     try { populateDealForm(); console.log('[V3]   populateDealForm OK'); } catch(e){ console.error('[V3]   populateDealForm FAILED:', e); }
     try { renderTranches();   console.log('[V3]   renderTranches OK'); }   catch(e){ console.error('[V3]   renderTranches FAILED:', e); }
     try { renderFees();       console.log('[V3]   renderFees OK'); }       catch(e){ console.error('[V3]   renderFees FAILED:', e); }
     try { renderCovenants();  console.log('[V3]   renderCovenants OK'); }  catch(e){ console.error('[V3]   renderCovenants FAILED:', e); }
+    try { renderAllocations(); console.log('[V3]   renderAllocations OK'); } catch(e){ console.error('[V3]   renderAllocations FAILED:', e); }
     try { recompute();        console.log('[V3]   recompute OK'); }        catch(e){ console.error('[V3]   recompute FAILED:', e); }
     if(typeof renderMarketData === 'function') renderMarketData();
     if(typeof toast === 'function'){
