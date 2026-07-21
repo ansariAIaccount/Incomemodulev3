@@ -550,7 +550,7 @@
   </div>
   <!-- Row 2 body: collapsible entry cards -->
   <div id="deal-selection-panel" class="max-w-[1400px] mx-auto px-6 pb-3" style="overflow:hidden; transition:max-height 0.25s ease-out; max-height:400px;">
-    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px;">
       <button id="btn-header-manual" type="button"
               onclick="window.handleHeaderManualClick && window.handleHeaderManualClick()"
               style="background:white; border:2px solid #e5e7eb; border-radius:12px; padding:10px 14px; text-align:left; cursor:pointer; transition:all 0.18s; display:flex; gap:12px; align-items:center;"
@@ -588,6 +588,20 @@
         <div style="flex:1; min-width:0;">
           <div style="font-size:13px; font-weight:700; color:#065f46; letter-spacing:-0.2px;">Load Active Deal</div>
           <div style="font-size:11px; color:#047857; line-height:1.3;">Pick from preset library — simple → complex</div>
+        </div>
+      </button>
+      <button id="btn-header-import-ca" type="button"
+              onclick="window.openCreditAgreementsListModal && window.openCreditAgreementsListModal()"
+              style="background:linear-gradient(135deg, #faf5ff 0%, #e9d5ff 50%, #d8b4fe 100%); border:2px solid #c084fc; border-radius:12px; padding:10px 14px; text-align:left; cursor:pointer; transition:all 0.18s; display:flex; gap:12px; align-items:center;"
+              onmouseover="this.style.borderColor='#7c3aed'; this.style.boxShadow='0 6px 18px rgba(124,58,237,0.20)'; this.style.transform='translateY(-1px)';"
+              onmouseout="this.style.borderColor='#c084fc'; this.style.boxShadow=''; this.style.transform='';"
+              title="Upload a Credit Agreement PDF — AI extracts parties, principal, margin schedule, covenants, mandatory prepay triggers, and populates the Builder">
+        <div style="background:linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); color:white; width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 3px 10px rgba(124,58,237,0.35);">
+          <span class="material-icons-outlined" style="font-size:22px;">auto_awesome</span>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13px; font-weight:700; color:#581c87; letter-spacing:-0.2px;">Credit Agreements</div>
+          <div style="font-size:11px; color:#6b21a8; line-height:1.3;">Browse imported CAs · AI-extract new PDF</div>
         </div>
       </button>
     </div>
@@ -3581,6 +3595,146 @@
   </div>
 </div>
 
+<!-- ═══ Credit Agreements — list view (Phase 2) ═══
+     Landing UI when the user clicks the header "Credit Agreements" tile.
+     Table of all imported CAs with status chips + "Add new" button. -->
+<div id="credit-agreements-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeCreditAgreementsListModal && window.closeCreditAgreementsListModal()"></div>
+  <div class="json-modal-pn" style="width:min(1240px,97vw); max-height:94vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#7c3aed">auto_awesome</span>
+          Credit Agreements
+        </div>
+        <div class="text-[11px] text-gray-500">All AI-extracted credit agreements. Click a row to view the PDF and fields. Rows already saved as Deals are read-only.</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="window.openImportCAModal && window.openImportCAModal()"
+                class="mat-btn !py-1 !px-2 text-[11px]"
+                style="background:linear-gradient(135deg,#7c3aed 0%,#a855f7 100%); color:white; border:none;"
+                title="Upload a new Credit Agreement PDF for AI extraction">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">add</span> Add new CA
+        </button>
+        <button onclick="window.refreshCreditAgreementsList && window.refreshCreditAgreementsList()"
+                class="mat-btn outline !py-1 !px-2 text-[11px]">
+          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Reload
+        </button>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeCreditAgreementsListModal && window.closeCreditAgreementsListModal()">
+          <span class="material-icons-outlined text-[16px]">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="json-modal-b" style="padding:12px 16px; font-size:12px;">
+      <div id="credit-agreements-body" style="max-height:calc(94vh - 180px); overflow:auto;">
+        <div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <span id="credit-agreements-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
+      <button class="mat-btn outline" onclick="window.closeCreditAgreementsListModal && window.closeCreditAgreementsListModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Import Credit Agreement — Phase 2 ═══
+     Upload → AI extract → Review → Create Deal from CA. -->
+<div id="import-ca-modal" class="json-modal" style="display:none; z-index:10001;">
+  <div class="json-modal-bd" onclick="window.closeImportCAModal && window.closeImportCAModal()"></div>
+  <div class="json-modal-pn" style="width:min(560px,94vw); max-height:90vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#7c3aed">auto_awesome</span>
+          Import Credit Agreement
+        </div>
+        <div class="text-[11px] text-gray-500">Drop the CA PDF. AI extracts parties, principal, margin ratchet, covenants, prepay triggers.</div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeImportCAModal && window.closeImportCAModal()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:16px 20px;">
+      <div id="import-ca-ai-status" style="margin-bottom:12px; padding:8px 10px; border-radius:6px; font-size:11px;"></div>
+      <div style="margin-bottom:10px;">
+        <label class="text-[10px] uppercase text-gray-600 block">Borrower hint (optional)</label>
+        <input id="import-ca-borrower-hint" type="text" placeholder="e.g. Cypress Corp"
+               class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/>
+      </div>
+      <label id="import-ca-dropzone" for="import-ca-file-input"
+             style="display:block; padding:24px; border:2px dashed #c4b5fd; border-radius:8px; background:#faf5ff; text-align:center; cursor:pointer; transition:background 120ms, border-color 120ms;">
+        <div style="font-size:32px; color:#7c3aed; margin-bottom:6px;">
+          <span class="material-icons-outlined" style="font-size:32px;">upload_file</span>
+        </div>
+        <div style="font-size:13px; font-weight:600; color:#4c1d95;">Click to pick a CA PDF, or drop it here</div>
+        <div style="font-size:11px; color:#6B7280; margin-top:4px;">Up to 25 MB · Term Loan, Revolver, DDTL, Bridge, etc.</div>
+        <input id="import-ca-file-input" type="file" accept="application/pdf" style="display:none;"
+               onchange="window._onImportCAFilePicked && window._onImportCAFilePicked(this.files[0])"/>
+      </label>
+      <div id="import-ca-file-name" style="display:none; margin-top:8px; padding:6px 10px; background:#F1F5F9; border-radius:4px; font-size:11px; color:#374151;"></div>
+      <div id="import-ca-error" style="display:none; margin-top:8px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+      <div id="import-ca-progress" style="display:none; margin-top:10px; padding:10px; background:#EEF2FF; border:1px solid #C7D2FE; border-radius:6px; font-size:11px; color:#3730A3;">
+        <span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">hourglass_top</span>
+        <span id="import-ca-progress-text">Extracting credit agreement…</span>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <button class="mat-btn outline" onclick="window.closeImportCAModal && window.closeImportCAModal()">Cancel</button>
+      <button id="import-ca-extract-btn" onclick="window.runCAExtraction && window.runCAExtraction()"
+              class="mat-btn primary" style="background:#7c3aed; border-color:#7c3aed; color:#fff;" disabled>
+        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">auto_awesome</span> Extract with AI
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Review + edit extracted Credit Agreement — two-pane -->
+<div id="review-ca-modal" class="json-modal" style="display:none; z-index:10002;">
+  <div class="json-modal-bd" onclick="window.closeReviewCAModal && window.closeReviewCAModal()"></div>
+  <div class="json-modal-pn" style="width:min(1240px,97vw); height:min(94vh, 1200px); display:flex; flex-direction:column;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <span class="material-icons-outlined text-[18px]" style="color:#7c3aed">preview</span>
+          Review Credit Agreement Extraction
+        </div>
+        <div id="review-ca-sub" class="text-[11px] text-gray-500"></div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeReviewCAModal && window.closeReviewCAModal()">
+        <span class="material-icons-outlined text-[16px]">close</span>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:0; flex:1; overflow:hidden; display:flex;">
+      <!-- Left: PDF -->
+      <div style="flex:1; background:#374151; display:flex; flex-direction:column; min-width:0;">
+        <div style="padding:6px 10px; background:#1F2937; color:#F3F4F6; font-size:11px;">
+          <span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">picture_as_pdf</span>
+          <span id="review-ca-pdf-name">Source document</span>
+        </div>
+        <iframe id="review-ca-pdf-frame" style="flex:1; width:100%; border:none;" title="Credit Agreement PDF"></iframe>
+      </div>
+      <!-- Right: editable form -->
+      <div style="flex:1.1; overflow-y:auto; padding:12px 14px; background:#F9FAFB;">
+        <div id="review-ca-header" style="font-size:11px; color:#6B7280; margin-bottom:10px;"></div>
+        <div id="review-ca-summary" style="margin-bottom:12px; padding:10px 12px; background:linear-gradient(135deg,#faf5ff 0%,#ecfdf5 100%); border:1px solid #c4b5fd; border-radius:8px; font-size:11.5px; color:#4c1d95;"></div>
+        <div id="review-ca-sections"></div>
+        <div id="review-ca-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <span id="review-ca-hint" class="text-[10.5px] text-gray-500 mr-auto"></span>
+      <button class="mat-btn outline" onclick="window.closeReviewCAModal && window.closeReviewCAModal()">Close</button>
+      <button id="review-ca-save-btn" onclick="window.saveExtractedCA && window.saveExtractedCA()" class="mat-btn outline">
+        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">save</span> Save CA
+      </button>
+      <button id="review-ca-promote-btn" onclick="window.promoteCAToDeal && window.promoteCAToDeal()"
+              class="mat-btn primary" style="background:#7c3aed; border-color:#7c3aed; color:#fff;">
+        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">rocket_launch</span> Create Deal from CA
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Loan Agent Notices Inbox (Tier 1 #3) ═══ -->
 <div id="notices-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" onclick="window.closeNoticesModal && window.closeNoticesModal()"></div>
@@ -5587,6 +5741,147 @@ window.SB = (function(){
     };
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Credit Agreement extraction + persistence (Phase 2)
+  // ═══════════════════════════════════════════════════════════════════
+  // Mirrors the notice / financials plumbing: POST the PDF to the ingest
+  // microservice, save the extracted JSON, and (later) let the user promote
+  // the CA into a Builder deal via importCAAsDeal().
+
+  async function extractCreditAgreementFromPdf(file, opts){
+    const base = _ingestBaseUrl();
+    if(!base) return { ok:false, reason:'ingest service URL not configured (DB Settings → Ingestion Service URL)' };
+    if(!file) return { ok:false, reason:'file required' };
+    const url = base.replace(/\/$/,'') + '/api/extract/credit-agreement';
+    const form = new FormData();
+    form.append('file', file, file.name || 'credit-agreement.pdf');
+    if(opts && opts.borrowerHint) form.append('borrower_hint', opts.borrowerHint);
+    try {
+      const r = await fetch(url, { method:'POST', body: form });
+      // Detect non-JSON responses (typically a 404 HTML page when the endpoint
+      // isn't wired) and surface a much friendlier message than a raw parse error.
+      const ct = r.headers.get('content-type') || '';
+      if(!ct.includes('application/json')){
+        const text = await r.text();
+        const preview = text.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,120);
+        return { ok:false, reason:
+          'ingest service returned ' + r.status + ' (' + (ct || 'no content-type') + ') from ' + url +
+          '. Preview: "' + preview + '". Likely fix: restart server-ingest so the /api/extract/credit-agreement endpoint loads.' };
+      }
+      const j = await r.json();
+      if(!r.ok) return { ok:false, reason: j.reason || ('ingest server ' + r.status) };
+      return j;
+    } catch(err){
+      console.error('[SB] extractCreditAgreementFromPdf threw:', err);
+      return { ok:false, reason: err.message };
+    }
+  }
+
+  async function fetchCreditAgreements(dealId){
+    if(!_client || !_connected) return [];
+    let q = _client.from('credit_agreements').select('*').order('created_at', { ascending: false });
+    if(dealId) q = q.eq('deal_id', dealId);
+    const { data, error } = await q;
+    if(error){ console.error('[SB] fetchCreditAgreements:', error); return []; }
+    return data || [];
+  }
+
+  async function saveCreditAgreement(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!row) return { ok:false, reason:'row required' };
+    const payload = Object.assign({
+      created_by: _currentUser ? _currentUser.id : null,
+      updated_at: new Date().toISOString()
+    }, row);
+    const { data, error } = await _client.from('credit_agreements')
+      .insert(payload).select().single();
+    if(error){ console.error('[SB] saveCreditAgreement:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, credit_agreement: data };
+  }
+
+  // Take a saved credit_agreements row + editedFields, flatten into the
+  // structured DB columns, upsert. Used by the Review modal's Save action.
+  async function upsertCreditAgreementFromReview(existingId, editedExtraction, sourceExtractionId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!editedExtraction) return { ok:false, reason:'editedExtraction required' };
+    const ex = editedExtraction;
+    const row = {
+      source_extraction_id: sourceExtractionId || null,
+      borrower_name:        ex.borrower_name || null,
+      borrower_entity:      ex.borrower_entity || null,
+      lead_arranger:        ex.lead_arranger || null,
+      administrative_agent: ex.administrative_agent || null,
+      lenders:              ex.lenders || null,
+      guarantors:           ex.guarantors || null,
+      facility_name:        ex.facility_name || null,
+      facility_type:        ex.facility_type || null,
+      principal:            ex.principal != null ? +ex.principal : null,
+      currency:             ex.currency || 'USD',
+      effective_date:       ex.effective_date || null,
+      maturity_date:        ex.maturity_date || null,
+      purpose:              ex.purpose || null,
+      base_rate:            ex.base_rate || null,
+      base_rate_tenor:      ex.base_rate_tenor || null,
+      margin_bps:           ex.margin_bps != null ? +ex.margin_bps : null,
+      margin_ratchet:       ex.margin_ratchet || null,
+      day_count:            ex.day_count || null,
+      rate_floor_bps:       ex.rate_floor_bps != null ? +ex.rate_floor_bps : null,
+      amort_type:           ex.amort_type || null,
+      amort_schedule:       ex.amort_schedule || null,
+      fees:                 ex.fees || null,
+      covenants:            ex.covenants || null,
+      prepay_triggers:      ex.prepay_triggers || null,
+      events_of_default:    ex.events_of_default || null,
+      governing_law:        ex.governing_law || null,
+      raw_extraction_json:  ex,
+      confidence:           ex.confidence != null ? +ex.confidence : null,
+      notes:                ex.notes || null,
+      created_by:           _currentUser ? _currentUser.id : null,
+      updated_at:           new Date().toISOString()
+    };
+    let res;
+    if(existingId){
+      const { data, error } = await _client.from('credit_agreements')
+        .update(row).eq('id', existingId).select().single();
+      res = { data, error };
+    } else {
+      const { data, error } = await _client.from('credit_agreements')
+        .insert(row).select().single();
+      res = { data, error };
+    }
+    if(res.error){ console.error('[SB] upsertCreditAgreementFromReview:', res.error); return { ok:false, reason: res.error.message }; }
+    // Link source extraction back to CA + flip review_status
+    if(sourceExtractionId){
+      await _client.from('document_extractions')
+        .update({
+          review_status: 'imported',
+          reviewed_by:   _currentUser ? _currentUser.id : null,
+          reviewed_at:   new Date().toISOString(),
+          extracted_json: ex
+        })
+        .eq('id', sourceExtractionId);
+    }
+    return { ok:true, credit_agreement: res.data };
+  }
+
+  // Stamp the CA row with the promoted deal_id + timestamp.
+  async function linkCAToDeal(caId, dealId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!caId || !dealId) return { ok:false, reason:'caId + dealId required' };
+    const { error } = await _client.from('credit_agreements')
+      .update({ deal_id: dealId, imported_as_deal_at: new Date().toISOString() })
+      .eq('id', caId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  async function deleteCreditAgreement(caId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('credit_agreements').delete().eq('id', caId);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
   async function syncBreachLog(dealId, covList, pSched){
     if(!_client || !_connected) return { ok:false, reason:'not connected' };
     if(!dealId || !Array.isArray(covList) || !covList.length){
@@ -7060,6 +7355,9 @@ window.SB = (function(){
     // Borrower Financials (Phase 1)
     extractFinancialsFromPdf, fetchBorrowerFinancials, saveBorrowerFinancials, importFinancialsAsRecord,
     getSignedDocUrl, getExtractionById, deleteBorrowerFinancials,
+    // Credit Agreement (Phase 2)
+    extractCreditAgreementFromPdf, fetchCreditAgreements, saveCreditAgreement,
+    upsertCreditAgreementFromReview, linkCAToDeal, deleteCreditAgreement,
     fetchCovenantsForDeal,
     // Approval workflow (#231)
     getRun, approveRun, postRun, reopenRun,
@@ -16544,6 +16842,955 @@ window.discardFinancialsExtraction = async function(){
   window.closeReviewFinancialsModal();
   toast('Financials discarded', 2500);
 };
+
+// ═════════════════════════════════════════════════════════════════════
+// Credit Agreement Import — Phase 2
+// ═════════════════════════════════════════════════════════════════════
+// Upload → AI extract → Review two-pane → Create Deal from CA.
+window._caState       = null;   // upload state
+window._reviewCAState = null;   // review-modal state
+window._caListCache   = [];     // last-fetched list of CA rows, for row-click resolution
+
+// ─── List modal (landing UI) ───────────────────────────────────
+window.openCreditAgreementsListModal = async function(){
+  const modal = document.getElementById('credit-agreements-modal');
+  if(!modal){ console.error('[CA-list] modal not found'); return; }
+  modal.style.display = 'flex';
+  await window.refreshCreditAgreementsList();
+};
+window.closeCreditAgreementsListModal = function(){
+  const modal = document.getElementById('credit-agreements-modal');
+  if(modal) modal.style.display = 'none';
+};
+
+window.refreshCreditAgreementsList = async function(){
+  const body = document.getElementById('credit-agreements-body');
+  const sum  = document.getElementById('credit-agreements-summary');
+  body.innerHTML = '<div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>';
+  if(!window.SB || !window.SB.fetchCreditAgreements){
+    body.innerHTML = '<div style="padding:20px; color:#B91C1C;">DB not connected.</div>'; return;
+  }
+  const rows = await window.SB.fetchCreditAgreements(null);
+  window._caListCache = rows;
+  const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const money = (v, ccy) => v == null ? '—' : (ccy ? ccy + ' ' : '') + (+v).toLocaleString(undefined,{maximumFractionDigits:0});
+
+  if(!rows.length){
+    body.innerHTML = '<div style="padding:44px; text-align:center; color:#6B7280;">' +
+      '<div style="font-size:32px; margin-bottom:10px;">📄</div>' +
+      '<div style="font-weight:600; margin-bottom:4px;">No credit agreements imported yet</div>' +
+      '<div style="font-size:11.5px; margin-bottom:14px;">Click <b>Add new CA</b> in the header to upload your first Credit Agreement PDF. AI extracts parties, principal, margin ratchet, covenants, and prepay triggers.</div>' +
+    '</div>';
+    sum.textContent = '0 credit agreements';
+    return;
+  }
+
+  // Deal-name lookup so we can show it inline when the CA has been promoted
+  const dealNameById = {};
+  for(const p of (window.PRESETS || [])){
+    const uuid = p.dealId || p._dbDealId || p.dbDealId;
+    if(uuid) dealNameById[uuid] = p.label || p.dealCode || uuid;
+  }
+
+  body.innerHTML = '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+    '<thead style="background:#F1F5F9; position:sticky; top:0;"><tr>' +
+      ['Borrower','Facility','Principal','Framework','Confidence','Status','']
+        .map(h => '<th style="text-align:left; padding:6px 10px; font-size:10px; text-transform:uppercase; color:#475569;">' + h + '</th>').join('') +
+    '</tr></thead><tbody>' +
+    rows.map((r, i) => {
+      const conf = r.confidence != null ? Math.round(+r.confidence * 100) : null;
+      const confColor = conf == null ? '#94A3B8' : conf >= 80 ? '#166534' : conf >= 50 ? '#92400E' : '#991B1B';
+      const isDeal = !!r.deal_id;
+      const statusChip = isDeal
+        ? '<span style="padding:2px 8px; background:#DCFCE7; color:#166534; border:1px solid #86EFAC; border-radius:12px; font-size:10px; font-weight:700;">' +
+            '<span class="material-icons-outlined" style="font-size:11px; vertical-align:-2px;">check_circle</span> Saved as Deal</span>' +
+            (dealNameById[r.deal_id] ? '<div style="font-size:9.5px; color:#166534; margin-top:2px;">→ ' + escHtml(dealNameById[r.deal_id]) + '</div>' : '')
+        : '<span style="padding:2px 8px; background:#FEF3C7; color:#92400E; border:1px solid #FCD34D; border-radius:12px; font-size:10px; font-weight:700;">' +
+            '<span class="material-icons-outlined" style="font-size:11px; vertical-align:-2px;">edit</span> Extracted (CA only)</span>' +
+            '<div style="font-size:9.5px; color:#92400E; margin-top:2px;">Click to review & promote</div>';
+      const clickHint = isDeal
+        ? '<span class="material-icons-outlined text-[14px]" title="View PDF + fields (read-only)" style="color:#166534;">visibility</span>'
+        : '<span class="material-icons-outlined text-[14px]" title="Edit fields + Create Deal" style="color:#7c3aed;">edit_note</span>';
+      return '<tr data-ca-idx="' + i + '" class="ca-row" ' +
+             'style="border-top:1px solid #F1F5F9; cursor:pointer;" ' +
+             'onmouseover="this.style.background=\'#faf5ff\'" onmouseout="this.style.background=\'\'">' +
+        '<td style="padding:8px 10px; font-weight:600;">' + escHtml(r.borrower_name || '—') +
+          (r.borrower_entity ? '<div style="font-size:9.5px; color:#6B7280;">' + escHtml(r.borrower_entity) + '</div>' : '') + '</td>' +
+        '<td style="padding:8px 10px;">' + escHtml(r.facility_name || r.facility_type || '—') +
+          (r.maturity_date ? '<div style="font-size:9.5px; color:#6B7280;">matures ' + escHtml(r.maturity_date) + '</div>' : '') + '</td>' +
+        '<td style="padding:8px 10px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600;">' + money(r.principal, r.currency) + '</td>' +
+        '<td style="padding:8px 10px;"><span style="padding:1px 6px; background:#EEF2FF; color:#3730A3; border-radius:9px; font-size:9.5px;">' + escHtml(r.governing_law || '—') + '</span></td>' +
+        '<td style="padding:8px 10px; color:' + confColor + '; font-weight:600;">' + (conf != null ? conf + '%' : '—') + '</td>' +
+        '<td style="padding:8px 10px;">' + statusChip + '</td>' +
+        '<td style="padding:8px 10px; text-align:right;">' + clickHint + ' <span class="material-icons-outlined text-[15px]" style="color:#7c3aed; vertical-align:-3px;">chevron_right</span></td>' +
+      '</tr>';
+    }).join('') +
+    '</tbody></table>';
+  // Row click → delegated handler
+  const tb = body.querySelector('tbody');
+  if(tb){
+    tb.addEventListener('click', function(e){
+      const tr = e.target.closest('tr.ca-row');
+      if(!tr) return;
+      const idx = +tr.getAttribute('data-ca-idx');
+      const row = (window._caListCache || [])[idx];
+      if(row && typeof window.openSavedCARow === 'function') window.openSavedCARow(row);
+    });
+  }
+  const deals = rows.filter(r => r.deal_id).length;
+  sum.textContent = rows.length + ' credit agreement' + (rows.length===1?'':'s') +
+    ' · ' + deals + ' promoted to Deal · ' + (rows.length - deals) + ' extracted only';
+};
+
+// Open a saved credit_agreements row in the Review modal.
+// If deal_id is set → read-only mode (already promoted).
+// If deal_id is null → editable mode (user can still promote).
+window.openSavedCARow = async function(caRow){
+  if(!caRow) return;
+  // Resolve source PDF via extraction row
+  let pdfUrl = null; let sourceExt = null; let fileName = null;
+  if(caRow.source_extraction_id && window.SB && window.SB.getExtractionById){
+    const r = await window.SB.getExtractionById(caRow.source_extraction_id);
+    if(r.ok && r.extraction){
+      sourceExt = r.extraction;
+      fileName = sourceExt.source_file_name;
+      if(sourceExt.source_file_path && window.SB.getSignedDocUrl){
+        const s = await window.SB.getSignedDocUrl(sourceExt.source_file_path, 600);
+        if(s.ok) pdfUrl = s.url;
+      }
+    }
+  }
+  // Build a synthetic extraction row so _openReviewCAModal works uniformly
+  const fakeExtraction = {
+    id: caRow.source_extraction_id || null,
+    extracted_json: caRow.raw_extraction_json || {},
+    model_used: (sourceExt && sourceExt.model_used) || '(saved CA)',
+    processing_ms: (sourceExt && sourceExt.processing_ms) || null,
+    confidence: (sourceExt && sourceExt.confidence) || caRow.confidence
+  };
+  // Close the list first so the review is the top modal
+  window.closeCreditAgreementsListModal();
+  _openReviewCAModal(fakeExtraction, pdfUrl, {
+    savedRowId: caRow.id,
+    readOnly: !!caRow.deal_id,
+    fileName: fileName || (caRow.borrower_name || 'Credit Agreement') + '.pdf',
+    linkedDealId: caRow.deal_id || null
+  });
+};
+
+function _wireCADropzone(){
+  const dz = document.getElementById('import-ca-dropzone');
+  if(!dz || dz.__dndWired) return;
+  dz.__dndWired = true;
+  const paint = active => {
+    dz.style.borderColor = active ? '#7c3aed' : '#c4b5fd';
+    dz.style.background  = active ? '#ede9fe' : '#faf5ff';
+  };
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    if(e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    paint(true);
+  }));
+  ['dragleave','dragend'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); paint(false);
+  }));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); e.stopPropagation(); paint(false);
+    const dt = e.dataTransfer;
+    if(!dt || !dt.files || !dt.files.length) return;
+    const file = dt.files[0];
+    try {
+      const input = document.getElementById('import-ca-file-input');
+      if(input && typeof DataTransfer !== 'undefined'){
+        const t = new DataTransfer(); t.items.add(file); input.files = t.files;
+      }
+    } catch(_){}
+    if(typeof window._onImportCAFilePicked === 'function') window._onImportCAFilePicked(file);
+  });
+}
+
+window.openImportCAModal = async function(){
+  const modal = document.getElementById('import-ca-modal');
+  if(!modal) return;
+  window._caState = { file: null, borrowerHint: null };
+  document.getElementById('import-ca-file-input').value = '';
+  document.getElementById('import-ca-file-name').style.display = 'none';
+  document.getElementById('import-ca-error').style.display = 'none';
+  document.getElementById('import-ca-progress').style.display = 'none';
+  document.getElementById('import-ca-extract-btn').disabled = true;
+  document.getElementById('import-ca-borrower-hint').value = '';
+  _wireCADropzone();
+  modal.style.display = 'flex';
+  if(window.SB && window.SB.checkAiExtractStatus){
+    const status = await window.SB.checkAiExtractStatus();
+    const el = document.getElementById('import-ca-ai-status');
+    if(status.available){
+      el.style.background = '#DCFCE7'; el.style.border = '1px solid #86EFAC'; el.style.color = '#166534';
+      el.innerHTML = '<span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">check_circle</span> <b>AI ready</b> — ' + (status.model || 'Claude') + ' will parse this credit agreement.';
+    } else {
+      el.style.background = '#FEF3C7'; el.style.border = '1px solid #FCD34D'; el.style.color = '#92400E';
+      el.innerHTML = '<span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">info</span> <b>Mock mode</b> — ' + (status.reason || 'no key') + '. Extraction returns a realistic Term Loan B placeholder.';
+    }
+  }
+};
+window.closeImportCAModal = function(){
+  const el = document.getElementById('import-ca-modal');
+  if(el) el.style.display = 'none';
+  window._caState = null;
+};
+
+window._onImportCAFilePicked = function(file){
+  if(!file) return;
+  if(file.type && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || '')){
+    const err = document.getElementById('import-ca-error');
+    err.style.display = ''; err.textContent = 'Only PDF files are supported.'; return;
+  }
+  if(file.size > 25 * 1024 * 1024){
+    const err = document.getElementById('import-ca-error');
+    err.style.display = ''; err.textContent = 'File too large: ' + Math.round(file.size/1024/1024) + ' MB (max 25 MB).'; return;
+  }
+  window._caState = window._caState || {};
+  window._caState.file = file;
+  window._caState.borrowerHint = (document.getElementById('import-ca-borrower-hint').value || '').trim() || null;
+  const el = document.getElementById('import-ca-file-name');
+  el.style.display = '';
+  el.innerHTML = '<span class="material-icons-outlined text-[14px]" style="vertical-align:-2px; color:#7c3aed;">picture_as_pdf</span> <b>' +
+    (file.name || 'credit-agreement.pdf') + '</b> <span style="color:#94A3B8;">· ' + Math.round(file.size/1024) + ' KB</span>';
+  document.getElementById('import-ca-error').style.display = 'none';
+  document.getElementById('import-ca-extract-btn').disabled = false;
+};
+
+window.runCAExtraction = async function(){
+  const state = window._caState;
+  if(!state || !state.file) return;
+  const err = document.getElementById('import-ca-error'); err.style.display = 'none';
+  const prog = document.getElementById('import-ca-progress'); prog.style.display = '';
+  const btn = document.getElementById('import-ca-extract-btn'); btn.disabled = true;
+  try {
+    document.getElementById('import-ca-progress-text').textContent = 'Uploading PDF…';
+    // Upload to Storage — reuse the notice-docs bucket
+    // CA is not deal-scoped, so pass a synthetic deal_id placeholder (null works
+    // for the upload path since it's just used for folder naming).
+    const up = await window.SB.uploadNoticeDoc(state.file, 'ca-imports');
+    if(!up.ok) throw new Error('Upload failed: ' + up.reason);
+    document.getElementById('import-ca-progress-text').textContent = 'Extracting credit agreement with AI (this can take 20-30s)…';
+    const borrowerHint = (document.getElementById('import-ca-borrower-hint').value || '').trim() || null;
+    const ex = await window.SB.extractCreditAgreementFromPdf(state.file, { borrowerHint });
+    if(!ex.ok) throw new Error('Extract failed: ' + ex.reason);
+    // Save extraction row for provenance
+    const save = await window.SB.saveDocumentExtraction({
+      deal_id: null,            // CA is pre-deal
+      source_file_path: up.path,
+      source_file_name: state.file.name,
+      source_file_size: state.file.size,
+      extraction_type: 'credit_agreement',
+      model_used: ex.model || (ex.mock ? 'mock' : null),
+      extracted_json: ex.extraction,
+      confidence: ex.extraction && ex.extraction.confidence != null ? ex.extraction.confidence : null,
+      processing_ms: ex.elapsed_ms || null,
+      review_status: 'pending'
+    });
+    if(!save.ok) throw new Error('Save failed: ' + save.reason);
+    prog.style.display = 'none';
+    btn.disabled = false;
+    window.closeImportCAModal();
+    _openReviewCAModal(save.extraction, state.file);
+  } catch(e){
+    console.error('[ca-import] failed:', e);
+    prog.style.display = 'none';
+    err.style.display = ''; err.textContent = e.message;
+    btn.disabled = false;
+  }
+};
+
+// ─── Review + Edit + Promote to Deal ───────────────────────
+// opts.savedRowId  → CA row id (edit-existing / read-only modes)
+// opts.readOnly    → lock all fields, hide Save+Create buttons (deal already promoted)
+// opts.fileName    → label for PDF pane when sourceFile is a URL string
+// opts.linkedDealId → shown in the hint when the CA is already a Deal
+function _openReviewCAModal(extractionRow, sourceFileOrUrl, opts){
+  opts = opts || {};
+  window._reviewCAState = {
+    extraction: extractionRow,
+    sourceFile: sourceFileOrUrl,
+    editedFields: JSON.parse(JSON.stringify(extractionRow.extracted_json || {})),
+    savedRowId: opts.savedRowId || null,
+    readOnly:   !!opts.readOnly,
+    linkedDealId: opts.linkedDealId || null
+  };
+  const modal = document.getElementById('review-ca-modal');
+  const iframe = document.getElementById('review-ca-pdf-frame');
+  const nameEl = document.getElementById('review-ca-pdf-name');
+  if(window._reviewCAPdfUrl){ URL.revokeObjectURL(window._reviewCAPdfUrl); window._reviewCAPdfUrl = null; }
+  if(sourceFileOrUrl){
+    if(typeof sourceFileOrUrl === 'string'){
+      iframe.src = sourceFileOrUrl + (sourceFileOrUrl.includes('#')?'&':'#') + 'toolbar=1&navpanes=0';
+      nameEl.textContent = opts.fileName || 'Source document';
+    } else {
+      window._reviewCAPdfUrl = URL.createObjectURL(sourceFileOrUrl);
+      iframe.src = window._reviewCAPdfUrl + '#toolbar=1&navpanes=0';
+      nameEl.textContent = sourceFileOrUrl.name || 'credit-agreement.pdf';
+    }
+  } else {
+    iframe.removeAttribute('src');
+    nameEl.textContent = 'Source PDF unavailable';
+  }
+  const ex = extractionRow.extracted_json || {};
+  const conf = ex.confidence != null ? Math.round(+ex.confidence * 100) : null;
+  document.getElementById('review-ca-sub').textContent =
+    (ex.borrower_name || '—') + ' · ' + (ex.facility_type || '—') + ' · ' + (ex.currency || 'USD') + ' ' + (ex.principal ? (+ex.principal).toLocaleString() : '?') + ' · confidence ' + (conf != null ? conf + '%' : 'n/a');
+  document.getElementById('review-ca-header').textContent =
+    'Model: ' + (extractionRow.model_used || 'n/a') + ' · Processing: ' + (extractionRow.processing_ms || 0) + 'ms · Extraction ID ' + String(extractionRow.id || '').slice(0,8);
+  document.getElementById('review-ca-error').style.display = 'none';
+  const hint = document.getElementById('review-ca-hint');
+  if(window._reviewCAState.readOnly){
+    hint.innerHTML = '<span style="color:#166534; font-weight:600;"><span class="material-icons-outlined" style="font-size:13px; vertical-align:-3px;">lock</span> Read-only — this CA has been promoted to a Deal.</span>';
+  } else {
+    hint.textContent = 'Review & edit fields. "Save CA" persists the extraction. "Create Deal from CA" populates the Builder + saves to DB.';
+  }
+  _renderCASummary();
+  _renderCASections();
+  _applyCAReviewMode();
+  modal.style.display = 'flex';
+}
+
+// Toggle read-only vs editable on the review modal footer + all form inputs.
+function _applyCAReviewMode(){
+  const s = window._reviewCAState; if(!s) return;
+  const saveBtn    = document.getElementById('review-ca-save-btn');
+  const promoteBtn = document.getElementById('review-ca-promote-btn');
+  if(s.readOnly){
+    if(saveBtn)    saveBtn.style.display    = 'none';
+    if(promoteBtn) promoteBtn.style.display = 'none';
+    // Disable every input/select/textarea inside the sections + summary panels
+    const scopes = ['review-ca-sections','review-ca-summary'];
+    for(const id of scopes){
+      const el = document.getElementById(id); if(!el) continue;
+      el.querySelectorAll('input, select, textarea, button').forEach(inp => {
+        // Preserve add/remove buttons rendering but disable them
+        inp.disabled = true;
+        if(inp.tagName === 'BUTTON') inp.style.opacity = '0.4', inp.style.cursor = 'not-allowed';
+        else inp.style.background = '#F1F5F9';
+      });
+    }
+  } else {
+    if(saveBtn)    saveBtn.style.display    = '';
+    if(promoteBtn) promoteBtn.style.display = '';
+  }
+}
+
+window.closeReviewCAModal = function(){
+  const modal = document.getElementById('review-ca-modal');
+  if(modal) modal.style.display = 'none';
+  if(window._reviewCAPdfUrl){ URL.revokeObjectURL(window._reviewCAPdfUrl); window._reviewCAPdfUrl = null; }
+  window._reviewCAState = null;
+};
+
+function _renderCASummary(){
+  const s = window._reviewCAState; if(!s) return;
+  const ex = s.editedFields;
+  const summ = document.getElementById('review-ca-summary');
+  const escHtml = v => String(v == null ? '' : v).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const money = v => v == null ? '—' : (+v).toLocaleString();
+  summ.innerHTML =
+    '<div style="font-size:10.5px; text-transform:uppercase; color:#4c1d95; font-weight:700; letter-spacing:0.4px; margin-bottom:6px;">Summary</div>' +
+    '<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:11.5px;">' +
+      '<div><b>' + escHtml(ex.borrower_name || '—') + '</b><br/><span style="color:#6b21a8; font-size:10.5px;">' + escHtml(ex.borrower_entity || '') + '</span></div>' +
+      '<div style="text-align:right;"><b>' + escHtml(ex.currency || 'USD') + ' ' + money(ex.principal) + '</b><br/><span style="color:#6b21a8; font-size:10.5px;">' + escHtml((ex.facility_name || ex.facility_type || '')) + '</span></div>' +
+      '<div>Base rate: <b>' + escHtml(ex.base_rate || '?') + ' ' + escHtml(ex.base_rate_tenor || '') + '</b> + <b>' + (ex.margin_bps != null ? ex.margin_bps + 'bps' : '?') + '</b></div>' +
+      '<div style="text-align:right;">Maturity: <b>' + escHtml(ex.maturity_date || '—') + '</b></div>' +
+      '<div>Amort: <b>' + escHtml(ex.amort_type || '?') + '</b> · ' + escHtml(ex.day_count || '?') + '</div>' +
+      '<div style="text-align:right;">Covenants: <b>' + ((ex.covenants || []).length) + '</b> · Prepay triggers: <b>' + ((ex.prepay_triggers || []).length) + '</b></div>' +
+    '</div>';
+}
+
+// ─── Enums used by the CA review UI ──────────────────────────────
+const _CA_ENUMS = {
+  facilityType:   ['term_loan_a','term_loan_b','revolver','delayed_draw_tl','bridge','second_lien','other'],
+  rateBase:       ['SOFR','TERM_SOFR','SONIA','EURIBOR','FIXED','PRIME'],
+  dayCount:       ['30/360','ACT/365','ACT/360'],
+  tenor:          ['','1M','3M','6M'],
+  amortType:      ['bullet','straight_line','custom','none'],
+  feeMode:        ['flat','rate_of_principal','rate_of_commitment'],
+  feeFreq:        ['one_time','monthly','quarterly','semi_annual','annual'],
+  feeTreatment:   ['eir_amortised','immediate_income','capitalised'],
+  kpiMetric:      ['leverageRatio','netLeverageRatio','interestCoverage','dscr','fccr','minLiquidity','esgScore','none'],
+  covDirection:   ['min','max','gte','lte'],
+  covTestFreq:    ['quarterly','semi_annual','annual'],
+  prepayType:     ['change_of_control','asset_sale','insurance_proceeds','debt_incurrence','excess_cash_flow','ipo','other']
+};
+
+function _caEsc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _caConfBadge(key){
+  const s = window._reviewCAState; if(!s) return '';
+  const fc = (s.editedFields && s.editedFields.field_confidence) || {};
+  const c = fc[key]; if(c == null) return '';
+  const pct = Math.round(c * 100);
+  const bg = c >= 0.8 ? '#DCFCE7' : c >= 0.5 ? '#FEF3C7' : '#FEE2E2';
+  const fg = c >= 0.8 ? '#166534' : c >= 0.5 ? '#92400E' : '#991B1B';
+  return '<span style="padding:0 5px; border-radius:9px; font-size:9px; font-weight:700; background:' + bg + '; color:' + fg + '; margin-left:5px;">AI ' + pct + '%</span>';
+}
+function _caField(path, key, label, val, opts){
+  opts = opts || {};
+  const attrs = 'data-ca-path="' + _caEsc(path) + '" data-ca-key="' + _caEsc(key) + '" ' +
+    'onchange="window._onCAFieldEdit && window._onCAFieldEdit(this)" ' +
+    'oninput="window._onCAFieldEdit && window._onCAFieldEdit(this)"';
+  let input;
+  if(opts.type === 'select'){
+    input = '<select ' + attrs + ' style="width:100%; padding:4px 6px; border:1px solid #D1D5DB; border-radius:4px; font-size:11.5px; background:#fff;">' +
+      (opts.options || []).map(o => '<option value="' + _caEsc(o) + '"' + (val === o ? ' selected' : '') + '>' + _caEsc(o || '—') + '</option>').join('') +
+    '</select>';
+  } else if(opts.type === 'textarea'){
+    input = '<textarea ' + attrs + ' rows="2" style="width:100%; padding:4px 6px; border:1px solid #D1D5DB; border-radius:4px; font-size:11.5px; resize:vertical;">' + _caEsc(val || '') + '</textarea>';
+  } else {
+    const t = opts.type || 'text';
+    const step = t === 'number' ? ' step="any"' : '';
+    input = '<input type="' + t + '"' + step + ' ' + attrs + ' value="' + _caEsc(val != null ? val : '') + '" style="width:100%; padding:4px 6px; border:1px solid #D1D5DB; border-radius:4px; font-size:11.5px; font-variant-numeric:tabular-nums;"/>';
+  }
+  const fkey = path ? path + '.' + key : key;
+  return '<div><label style="font-size:9.5px; color:#475569; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; display:block; margin-bottom:2px;">' + label + _caConfBadge(fkey) + '</label>' + input + '</div>';
+}
+// Small inline input for array rows (no label / no gap)
+function _caArrField(arrayKey, index, field, val, opts){
+  opts = opts || {};
+  const attrs = 'data-ca-arr="' + _caEsc(arrayKey) + '" data-ca-idx="' + index + '" data-ca-field="' + _caEsc(field) + '" ' +
+    'onchange="window._onCAArrayEdit && window._onCAArrayEdit(this)" ' +
+    'oninput="window._onCAArrayEdit && window._onCAArrayEdit(this)"';
+  if(opts.type === 'select'){
+    return '<select ' + attrs + ' style="width:100%; padding:3px 5px; border:1px solid #D1D5DB; border-radius:4px; font-size:11px; background:#fff;">' +
+      (opts.options || []).map(o => '<option value="' + _caEsc(o) + '"' + (val === o ? ' selected' : '') + '>' + _caEsc(o || '—') + '</option>').join('') +
+    '</select>';
+  }
+  const t = opts.type || 'text';
+  const step = t === 'number' ? ' step="any"' : '';
+  const ph = opts.placeholder ? ' placeholder="' + _caEsc(opts.placeholder) + '"' : '';
+  return '<input type="' + t + '"' + step + ph + ' ' + attrs +
+    ' value="' + _caEsc(val != null ? val : '') + '" ' +
+    'style="width:100%; padding:3px 5px; border:1px solid #D1D5DB; border-radius:4px; font-size:11px; font-variant-numeric:tabular-nums;"/>';
+}
+function _caRemoveBtn(arrayKey, index){
+  return '<button onclick="window._removeCARow && window._removeCARow(\'' + arrayKey + '\',' + index + ')" ' +
+    'style="background:#FEE2E2; color:#991B1B; border:1px solid #FCA5A5; border-radius:4px; padding:2px 6px; font-size:11px; cursor:pointer;" ' +
+    'title="Remove this row"><span class="material-icons-outlined" style="font-size:12px; vertical-align:-2px;">delete</span></button>';
+}
+function _caAddBtn(arrayKey, label){
+  return '<button onclick="window._addCARow && window._addCARow(\'' + arrayKey + '\')" ' +
+    'style="background:#EDE9FE; color:#5b21b6; border:1px solid #c4b5fd; border-radius:4px; padding:3px 8px; font-size:11px; font-weight:600; cursor:pointer;">' +
+    '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">add</span> ' + label + '</button>';
+}
+
+function _renderCASections(){
+  const s = window._reviewCAState; if(!s) return;
+  const ex = s.editedFields;
+  // Seed a display Deal Name from the borrower / facility if not already set
+  if(!ex.deal_name){
+    ex.deal_name = ex.borrower_name
+      ? ex.borrower_name + (ex.facility_name ? ' — ' + ex.facility_name : '')
+      : (ex.facility_name || '');
+  }
+  const host = document.getElementById('review-ca-sections');
+
+  // ── Deal Identity (top, prominent) ─────────────────────────────
+  const dealIdentity =
+    '<div style="padding:10px 12px; margin-bottom:10px; background:linear-gradient(135deg,#fef3c7 0%,#fef9c3 100%); border:1.5px solid #facc15; border-radius:8px;">' +
+      '<div style="font-size:10.5px; text-transform:uppercase; color:#92400e; font-weight:700; letter-spacing:0.4px; margin-bottom:6px;">Deal identity (required)</div>' +
+      '<div style="display:grid; grid-template-columns:2fr 1fr; gap:6px;">' +
+        '<div><label style="font-size:9.5px; color:#78350f; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; display:block; margin-bottom:2px;">Deal name <span style="color:#dc2626;">*</span></label>' +
+          '<input type="text" data-ca-path="" data-ca-key="deal_name" ' +
+          'onchange="window._onCAFieldEdit && window._onCAFieldEdit(this)" ' +
+          'oninput="window._onCAFieldEdit && window._onCAFieldEdit(this)" ' +
+          'value="' + _caEsc(ex.deal_name || '') + '" ' +
+          'style="width:100%; padding:5px 7px; border:1px solid #eab308; border-radius:4px; font-size:12.5px; font-weight:600; background:#fff;"/>' +
+        '</div>' +
+        '<div><label style="font-size:9.5px; color:#78350f; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; display:block; margin-bottom:2px;">Framework</label>' +
+          '<select data-ca-path="" data-ca-key="framework" ' +
+          'onchange="window._onCAFieldEdit && window._onCAFieldEdit(this)" ' +
+          'style="width:100%; padding:5px 7px; border:1px solid #eab308; border-radius:4px; font-size:12px; background:#fff;">' +
+            ['IFRS9','USGAAP','AASB','ASPE'].map(o => '<option value="' + o + '"' + ((ex.framework || (ex.governing_law && /new york|us/i.test(ex.governing_law) ? "USGAAP" : "IFRS9")) === o ? ' selected' : '') + '>' + o + '</option>').join('') +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:10.5px; color:#78350f; margin-top:6px;">This becomes the deal name in the Load Active Deal picker after "Create Deal".</div>' +
+    '</div>';
+
+  // ── Parties ────────────────────────────────────────────────────
+  const parties =
+    '<details open style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">Parties</summary>' +
+      '<div style="padding:8px 10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">' +
+        _caField('', 'borrower_name',       'Borrower',            ex.borrower_name) +
+        _caField('', 'borrower_entity',     'Borrower entity',     ex.borrower_entity) +
+        _caField('', 'lead_arranger',       'Lead arranger',       ex.lead_arranger) +
+        _caField('', 'administrative_agent','Administrative agent',ex.administrative_agent) +
+      '</div>' +
+    '</details>';
+
+  // ── Facility ───────────────────────────────────────────────────
+  const facility =
+    '<details open style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">Facility</summary>' +
+      '<div style="padding:8px 10px; display:grid; grid-template-columns:2fr 1fr; gap:6px;">' +
+        _caField('', 'facility_name', 'Facility name', ex.facility_name) +
+        _caField('', 'facility_type', 'Facility type', ex.facility_type, { type:'select', options: _CA_ENUMS.facilityType }) +
+        _caField('', 'principal',      'Principal',    ex.principal,     { type:'number' }) +
+        _caField('', 'currency',       'Currency',     ex.currency) +
+        _caField('', 'effective_date', 'Effective',    ex.effective_date, { type:'date' }) +
+        _caField('', 'maturity_date',  'Maturity',     ex.maturity_date,  { type:'date' }) +
+        _caField('', 'purpose',        'Purpose',      ex.purpose,        { type:'textarea' }) +
+        _caField('', 'governing_law',  'Governing law',ex.governing_law) +
+      '</div>' +
+    '</details>';
+
+  // ── Interest ───────────────────────────────────────────────────
+  const interest =
+    '<details open style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">Interest</summary>' +
+      '<div style="padding:8px 10px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">' +
+        _caField('', 'base_rate',       'Base rate',            ex.base_rate,       { type:'select', options: _CA_ENUMS.rateBase }) +
+        _caField('', 'base_rate_tenor', 'Tenor',                ex.base_rate_tenor, { type:'select', options: _CA_ENUMS.tenor }) +
+        _caField('', 'day_count',       'Day count',            ex.day_count,       { type:'select', options: _CA_ENUMS.dayCount }) +
+        _caField('', 'margin_bps',      'Initial margin (bps)', ex.margin_bps,      { type:'number' }) +
+        _caField('', 'rate_floor_bps',  'Floor (bps)',          ex.rate_floor_bps,  { type:'number' }) +
+        _caField('', 'amort_type',      'Amortisation',         ex.amort_type,      { type:'select', options: _CA_ENUMS.amortType }) +
+      '</div>' +
+    '</details>';
+
+  // ── Margin ratchet — mini-table (Test / Threshold / Margin bps) ─
+  const ratchet = Array.isArray(ex.margin_ratchet) ? ex.margin_ratchet : [];
+  const ratchetHeader = '<div style="display:grid; grid-template-columns:2fr 1fr 1fr 34px; gap:6px; padding:0 2px 4px; font-size:9.5px; text-transform:uppercase; color:#475569; font-weight:600; letter-spacing:0.3px;">' +
+    '<div>Test (leverage band or description)</div><div style="text-align:center;">Threshold</div><div style="text-align:center;">Margin (bps)</div><div></div></div>';
+  const ratchetRows = ratchet.map((r, i) => {
+    // Prefer explicit leverage bounds if present; fall back to test string
+    const threshold = r.leverage_lte != null ? r.leverage_lte
+                    : r.leverage_gt  != null ? r.leverage_gt
+                    : r.leverage_lt  != null ? r.leverage_lt
+                    : r.leverage_gte != null ? r.leverage_gte
+                    : (typeof r.threshold === 'number' ? r.threshold : null);
+    return '<div style="display:grid; grid-template-columns:2fr 1fr 1fr 34px; gap:6px; padding:3px 2px;">' +
+      _caArrField('margin_ratchet', i, 'test',       r.test) +
+      _caArrField('margin_ratchet', i, 'threshold',  threshold, { type:'number', placeholder:'e.g. 4.5' }) +
+      _caArrField('margin_ratchet', i, 'margin_bps', r.margin_bps, { type:'number' }) +
+      '<div style="text-align:right;">' + _caRemoveBtn('margin_ratchet', i) + '</div>' +
+    '</div>';
+  }).join('');
+  const ratchetSec =
+    '<details open style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">Margin Ratchet (' + ratchet.length + ')' + _caConfBadge('margin_ratchet') + '</summary>' +
+      '<div style="padding:8px 10px;">' +
+        (ratchet.length ? ratchetHeader + ratchetRows : '<div style="font-size:11px; color:#94a3b8; padding:4px 2px; font-style:italic;">No ratchet steps — flat margin.</div>') +
+        '<div style="margin-top:6px;">' + _caAddBtn('margin_ratchet', 'Add step') + '</div>' +
+      '</div>' +
+    '</details>';
+
+  // ── Fees — repeater cards ────────────────────────────────────
+  const fees = Array.isArray(ex.fees) ? ex.fees : [];
+  const feeRows = fees.map((f, i) =>
+    '<div style="padding:8px; border:1px solid #E5E7EB; border-radius:6px; background:#fff; margin-bottom:6px;">' +
+      '<div style="display:grid; grid-template-columns:2fr 1fr 34px; gap:6px; margin-bottom:6px;">' +
+        '<div>' +
+          '<label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600; letter-spacing:0.3px;">Fee name</label>' +
+          _caArrField('fees', i, 'name', f.name) +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600; letter-spacing:0.3px;">Mode</label>' +
+          _caArrField('fees', i, 'mode', f.mode, { type:'select', options: _CA_ENUMS.feeMode }) +
+        '</div>' +
+        '<div style="text-align:right; padding-top:14px;">' + _caRemoveBtn('fees', i) + '</div>' +
+      '</div>' +
+      '<div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px;">' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">Amount</label>' +
+          _caArrField('fees', i, 'amount', f.amount, { type:'number' }) + '</div>' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">bps</label>' +
+          _caArrField('fees', i, 'bps', f.bps, { type:'number' }) + '</div>' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">Frequency</label>' +
+          _caArrField('fees', i, 'frequency', f.frequency, { type:'select', options: _CA_ENUMS.feeFreq }) + '</div>' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">Treatment</label>' +
+          _caArrField('fees', i, 'treatment', f.treatment, { type:'select', options: _CA_ENUMS.feeTreatment }) + '</div>' +
+      '</div>' +
+    '</div>').join('');
+  const feesSec =
+    '<details open style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">Fees (' + fees.length + ')' + _caConfBadge('fees') + '</summary>' +
+      '<div style="padding:8px 10px;">' +
+        (fees.length ? feeRows : '<div style="font-size:11px; color:#94a3b8; padding:4px 2px; font-style:italic;">No fees extracted.</div>') +
+        '<div style="margin-top:6px;">' + _caAddBtn('fees', 'Add fee') + '</div>' +
+      '</div>' +
+    '</details>';
+
+  // ── Covenants — repeater cards with step-downs sub-table ─────
+  const covs = Array.isArray(ex.covenants) ? ex.covenants : [];
+  const covRows = covs.map((c, i) => {
+    const stepDowns = Array.isArray(c.step_downs) ? c.step_downs : [];
+    const conseqStr = Array.isArray(c.consequences) ? c.consequences.join(', ') : (c.consequences || '');
+    const stepRows = stepDowns.map((sd, j) =>
+      '<div style="display:grid; grid-template-columns:1fr 1fr 30px; gap:4px; padding:2px 0;">' +
+        _caArrField('covenants.' + i + '.step_downs', j, 'effective', sd.effective, { type:'date' }) +
+        _caArrField('covenants.' + i + '.step_downs', j, 'threshold', sd.threshold, { type:'number' }) +
+        '<div style="text-align:right;">' + _caRemoveBtn('covenants.' + i + '.step_downs', j) + '</div>' +
+      '</div>').join('');
+    return '<div style="padding:8px; border:1px solid #E5E7EB; border-radius:6px; background:#fff; margin-bottom:6px;">' +
+      '<div style="display:grid; grid-template-columns:2fr 1fr 34px; gap:6px; margin-bottom:6px;">' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">Covenant name</label>' +
+          _caArrField('covenants', i, 'name', c.name) + '</div>' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">KPI metric</label>' +
+          _caArrField('covenants', i, 'kpi_metric', c.kpi_metric, { type:'select', options: _CA_ENUMS.kpiMetric }) + '</div>' +
+        '<div style="text-align:right; padding-top:14px;">' + _caRemoveBtn('covenants', i) + '</div>' +
+      '</div>' +
+      '<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:6px;">' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">Direction</label>' +
+          _caArrField('covenants', i, 'direction', c.direction, { type:'select', options: _CA_ENUMS.covDirection }) + '</div>' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">Threshold</label>' +
+          _caArrField('covenants', i, 'threshold', c.threshold, { type:'number' }) + '</div>' +
+        '<div><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">Test freq</label>' +
+          _caArrField('covenants', i, 'test_frequency', c.test_frequency, { type:'select', options: _CA_ENUMS.covTestFreq }) + '</div>' +
+      '</div>' +
+      '<div style="margin-bottom:6px;"><label style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600;">Consequences (comma-separated)</label>' +
+        _caArrField('covenants', i, 'consequences', conseqStr, { placeholder:'margin_stepup:+50bps, SICR, mandatoryPrepayment' }) +
+      '</div>' +
+      // Step-downs sub-panel
+      '<div style="border-top:1px dashed #e5e7eb; padding-top:6px;">' +
+        '<div style="font-size:9px; text-transform:uppercase; color:#475569; font-weight:600; letter-spacing:0.3px; margin-bottom:4px;">Step-downs (' + stepDowns.length + ')</div>' +
+        (stepDowns.length
+          ? '<div style="display:grid; grid-template-columns:1fr 1fr 30px; gap:4px; padding:0 0 2px; font-size:9px; color:#64748b;"><div>Effective</div><div>Threshold</div><div></div></div>' + stepRows
+          : '<div style="font-size:10.5px; color:#94a3b8; font-style:italic;">None</div>') +
+        '<div style="margin-top:4px;">' + _caAddBtn('covenants.' + i + '.step_downs', 'Add step-down') + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  const covSec =
+    '<details open style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">Financial Covenants (' + covs.length + ')' + _caConfBadge('covenants') + '</summary>' +
+      '<div style="padding:8px 10px;">' +
+        (covs.length ? covRows : '<div style="font-size:11px; color:#94a3b8; padding:4px 2px; font-style:italic;">No covenants extracted.</div>') +
+        '<div style="margin-top:6px;">' + _caAddBtn('covenants', 'Add covenant') + '</div>' +
+      '</div>' +
+    '</details>';
+
+  // ── Prepay triggers — repeater rows ──────────────────────────
+  const triggers = Array.isArray(ex.prepay_triggers) ? ex.prepay_triggers : [];
+  const trigHeader = '<div style="display:grid; grid-template-columns:1fr 90px 3fr 34px; gap:6px; padding:0 2px 4px; font-size:9.5px; text-transform:uppercase; color:#475569; font-weight:600; letter-spacing:0.3px;">' +
+    '<div>Type</div><div style="text-align:center;">Sweep %</div><div>Description</div><div></div></div>';
+  const trigRows = triggers.map((t, i) =>
+    '<div style="display:grid; grid-template-columns:1fr 90px 3fr 34px; gap:6px; padding:3px 2px;">' +
+      _caArrField('prepay_triggers', i, 'type', t.type, { type:'select', options: _CA_ENUMS.prepayType }) +
+      _caArrField('prepay_triggers', i, 'threshold_pct', t.threshold_pct, { type:'number' }) +
+      _caArrField('prepay_triggers', i, 'description', t.description) +
+      '<div style="text-align:right;">' + _caRemoveBtn('prepay_triggers', i) + '</div>' +
+    '</div>').join('');
+  const trigSec =
+    '<details open style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">Mandatory Prepay Triggers (' + triggers.length + ')' + _caConfBadge('prepay_triggers') + '</summary>' +
+      '<div style="padding:8px 10px;">' +
+        (triggers.length ? trigHeader + trigRows : '<div style="font-size:11px; color:#94a3b8; padding:4px 2px; font-style:italic;">No triggers extracted.</div>') +
+        '<div style="margin-top:6px;">' + _caAddBtn('prepay_triggers', 'Add trigger') + '</div>' +
+      '</div>' +
+    '</details>';
+
+  // ── Events of default — list of text rows ─────────────────────
+  const eods = Array.isArray(ex.events_of_default) ? ex.events_of_default : [];
+  const eodRows = eods.map((ed, i) => {
+    // events_of_default supports either "string" or { category, description }
+    const isObj = ed && typeof ed === 'object';
+    const val = isObj ? (ed.description || ed.category || '') : (ed || '');
+    return '<div style="display:grid; grid-template-columns:1fr 34px; gap:6px; padding:3px 2px;">' +
+      _caArrField('events_of_default', i, '_scalar', val) +
+      '<div style="text-align:right;">' + _caRemoveBtn('events_of_default', i) + '</div>' +
+    '</div>';
+  }).join('');
+  const eodSec =
+    '<details style="margin-bottom:8px; border:1px solid #E5E7EB; border-radius:6px;">' +
+      '<summary style="cursor:pointer; padding:6px 10px; background:#F8FAFC; font-weight:600; font-size:11.5px;">Events of Default (' + eods.length + ')' + _caConfBadge('events_of_default') + '</summary>' +
+      '<div style="padding:8px 10px;">' +
+        (eods.length ? eodRows : '<div style="font-size:11px; color:#94a3b8; padding:4px 2px; font-style:italic;">None extracted.</div>') +
+        '<div style="margin-top:6px;">' + _caAddBtn('events_of_default', 'Add event') + '</div>' +
+      '</div>' +
+    '</details>';
+
+  host.innerHTML = dealIdentity + parties + facility + interest + ratchetSec + feesSec + covSec + trigSec + eodSec;
+  // Preserve read-only lock across re-renders (add/remove row)
+  if(s.readOnly && typeof _applyCAReviewMode === 'function') _applyCAReviewMode();
+}
+
+// Scalar field handler — same as before, but simpler now that arrays are handled separately.
+window._onCAFieldEdit = function(el){
+  const s = window._reviewCAState; if(!s) return;
+  const path = el.getAttribute('data-ca-path');
+  const key = el.getAttribute('data-ca-key');
+  let v = el.value;
+  if(v === '') v = null;
+  else if(el.type === 'number' && v !== null) v = +v;
+  if(path){
+    s.editedFields[path] = s.editedFields[path] || {};
+    s.editedFields[path][key] = v;
+  } else {
+    s.editedFields[key] = v;
+  }
+  _renderCASummary();
+};
+
+// Array-cell handler — arrayKey may be nested via dots (e.g. "covenants.0.step_downs").
+window._onCAArrayEdit = function(el){
+  const s = window._reviewCAState; if(!s) return;
+  const arrayKey = el.getAttribute('data-ca-arr');
+  const idx      = +el.getAttribute('data-ca-idx');
+  const field    = el.getAttribute('data-ca-field');
+  const arr = _caResolveArray(s.editedFields, arrayKey, true);
+  if(!Array.isArray(arr)) return;
+  if(!arr[idx]) arr[idx] = (field === '_scalar') ? '' : {};
+  let v = el.value;
+  if(v === '') v = null;
+  else if(el.type === 'number' && v != null) v = +v;
+  // Comma-separated → array (for covenant.consequences)
+  if(field === 'consequences' && typeof v === 'string'){
+    v = v.split(',').map(x => x.trim()).filter(Boolean);
+  }
+  // "test" free-text + numeric "threshold" combined → keep both; downstream code
+  // (engine + Builder mapper) tolerates either shape.
+  if(field === '_scalar'){
+    arr[idx] = (v == null ? '' : v);
+  } else {
+    if(typeof arr[idx] !== 'object' || Array.isArray(arr[idx])) arr[idx] = {};
+    arr[idx][field] = v;
+  }
+  _renderCASummary();
+};
+
+// Add / remove for arrays (with nested-path support).
+window._addCARow = function(arrayKey){
+  const s = window._reviewCAState; if(!s) return;
+  const arr = _caResolveArray(s.editedFields, arrayKey, true);
+  if(!Array.isArray(arr)) return;
+  arr.push(_caDefaultRow(arrayKey));
+  _renderCASections();
+  _renderCASummary();
+};
+window._removeCARow = function(arrayKey, index){
+  const s = window._reviewCAState; if(!s) return;
+  const arr = _caResolveArray(s.editedFields, arrayKey, false);
+  if(!Array.isArray(arr) || index < 0 || index >= arr.length) return;
+  arr.splice(index, 1);
+  _renderCASections();
+  _renderCASummary();
+};
+
+function _caResolveArray(root, dotted, createMissing){
+  const parts = dotted.split('.');
+  let obj = root;
+  for(let i = 0; i < parts.length - 1; i++){
+    const p = parts[i];
+    const nextP = parts[i+1];
+    const nextIsIndex = /^\d+$/.test(nextP);
+    if(obj[p] == null){
+      if(!createMissing) return null;
+      obj[p] = nextIsIndex ? [] : {};
+    }
+    obj = obj[p];
+  }
+  const leaf = parts[parts.length - 1];
+  if(obj[leaf] == null){
+    if(!createMissing) return null;
+    obj[leaf] = [];
+  }
+  return obj[leaf];
+}
+
+function _caDefaultRow(arrayKey){
+  const leaf = arrayKey.split('.').pop();
+  switch(leaf){
+    case 'margin_ratchet':    return { test: '', threshold: null, margin_bps: null };
+    case 'fees':              return { name: '', mode: 'flat', amount: null, bps: null, frequency: 'one_time', treatment: 'eir_amortised' };
+    case 'covenants':         return { name: '', kpi_metric: 'leverageRatio', direction: 'max', threshold: null, test_frequency: 'quarterly', step_downs: [], consequences: [] };
+    case 'step_downs':        return { effective: null, threshold: null };
+    case 'prepay_triggers':   return { type: 'other', threshold_pct: 100, description: '' };
+    case 'events_of_default': return '';
+    default:                  return {};
+  }
+}
+
+window.saveExtractedCA = async function(){
+  const s = window._reviewCAState; if(!s || s.readOnly) return;
+  const err = document.getElementById('review-ca-error'); err.style.display = 'none';
+  const btn = document.getElementById('review-ca-save-btn');
+  const orig = btn.innerHTML; btn.disabled = true;
+  btn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">hourglass_top</span> Saving…';
+  try {
+    const existingId = s.savedRowId || null;
+    const res = await window.SB.upsertCreditAgreementFromReview(existingId, s.editedFields, s.extraction && s.extraction.id);
+    if(!res.ok) throw new Error(res.reason);
+    s.savedRowId = res.credit_agreement.id;
+    toast('Credit Agreement saved · appears in Credit Agreements list', 3000);
+    btn.disabled = false; btn.innerHTML = orig;
+    // Refresh the list in the background so a subsequent open shows the new row
+    if(typeof window.refreshCreditAgreementsList === 'function'){
+      try { window.refreshCreditAgreementsList(); } catch(_){}
+    }
+  } catch(e){
+    console.error('[ca-review] save failed:', e);
+    err.style.display = ''; err.textContent = 'Save failed: ' + e.message;
+    btn.disabled = false; btn.innerHTML = orig;
+  }
+};
+
+// ─── Promote CA → Builder deal + Save to DB ───────────────────
+// Full one-click flow: save CA extraction → populate Builder → save Deal
+// to DB → refresh PRESETS so it appears in the Load Active Deal picker.
+window.promoteCAToDeal = async function(){
+  const s = window._reviewCAState; if(!s) return;
+  const err = document.getElementById('review-ca-error'); err.style.display = 'none';
+  const btn = document.getElementById('review-ca-promote-btn');
+  const orig = btn.innerHTML; btn.disabled = true;
+  const setLbl = t => btn.innerHTML = '<span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">hourglass_top</span> ' + t;
+  try {
+    const ex = s.editedFields;
+
+    // 1. Validate: deal_name is required (that's what saveDeal keys on)
+    if(!ex.deal_name || !ex.deal_name.trim()){
+      throw new Error('Deal name is required — fill in the yellow "Deal identity" panel at the top.');
+    }
+
+    // 2. Persist the CA extraction (or re-save if user edited more since first Save CA)
+    setLbl('Saving CA extraction…');
+    const savRes = await window.SB.upsertCreditAgreementFromReview(s.savedRowId, s.editedFields, s.extraction && s.extraction.id);
+    if(!savRes.ok) throw new Error('CA save failed: ' + savRes.reason);
+    s.savedRowId = savRes.credit_agreement.id;
+
+    // 3. Populate window.B (Builder in-memory state) from the CA extraction
+    setLbl('Populating Builder…');
+    if(typeof window.startNewBlankDeal === 'function') window.startNewBlankDeal();
+    if(!window.B) window.B = {};
+    _applyCAToBuilder(ex, s.savedRowId);
+
+    // 4. Save the Deal to the DB via the existing SB.saveDeal path
+    setLbl('Saving Deal to DB…');
+    const dealRes = await window.SB.saveDeal(window.B);
+    if(!dealRes || !dealRes.ok) throw new Error('Deal save failed: ' + (dealRes && dealRes.reason || 'unknown'));
+    const newDealId = dealRes.dealId || dealRes.deal_id || (dealRes.deal && dealRes.deal.id);
+
+    // 5. Link the CA back to the newly-minted deal so future edits stay in sync
+    if(newDealId && window.SB.linkCAToDeal){
+      try { await window.SB.linkCAToDeal(s.savedRowId, newDealId); }
+      catch(linkErr){ console.warn('[ca-promote] linkCAToDeal failed (non-fatal):', linkErr); }
+    }
+
+    // 6. Refresh PRESETS so the new deal appears in Load Active Deal picker.
+    setLbl('Refreshing deal list…');
+    try {
+      if(window.SB && window.SB.fetchUserDeals && Array.isArray(window.PRESETS)){
+        const saved = await window.SB.fetchUserDeals();
+        for(let i = window.PRESETS.length - 1; i >= 0; i--){
+          if(window.PRESETS[i] && window.PRESETS[i].source === 'db') window.PRESETS.splice(i, 1);
+        }
+        if(saved && saved.length) window.PRESETS.unshift.apply(window.PRESETS, saved);
+        console.log('[CA] refreshed PRESETS — DB deal count:', saved.length);
+      }
+    } catch(refErr){ console.warn('[ca-promote] PRESETS refresh failed:', refErr); }
+
+    // 7. Snap to Stage 0 Builder so the user sees the populated + saved deal
+    if(typeof window.switchTab === 'function') { try { window.switchTab('builder'); } catch(_){} }
+    if(typeof window.refreshBuilderUI === 'function') { try { window.refreshBuilderUI(); } catch(_){} }
+    else if(typeof window.renderBuilderCards === 'function') { try { window.renderBuilderCards(); } catch(_){} }
+
+    toast('✓ Deal "' + ex.deal_name + '" saved — now in Load Active Deal picker', 5000);
+    window.closeReviewCAModal();
+    // Also refresh the Credit Agreements list so the CA row shows "Saved as Deal" chip
+    if(typeof window.refreshCreditAgreementsList === 'function'){
+      try { window.refreshCreditAgreementsList(); } catch(_){}
+    }
+  } catch(e){
+    console.error('[ca-promote] failed:', e);
+    err.style.display = ''; err.textContent = e.message;
+    btn.disabled = false; btn.innerHTML = orig;
+  }
+};
+
+// Map a Credit Agreement extraction JSON onto the Builder's window.B shape.
+// The Builder is deliberately liberal — anything set here gets picked up by
+// builderToInstrument + saveDeal downstream.
+function _applyCAToBuilder(ex, caRowId){
+  const B = window.B = window.B || {};
+  B.deal = B.deal || {};
+  B.facility = B.facility || {};
+  B.tranches = B.tranches || [];
+  B.fees = [];
+  B.covenants = [];
+
+  // Framework: prefer user-selected value in the review form; else guess from governing law.
+  const framework = ex.framework
+    || (ex.governing_law && /new york|new-york|us/i.test(ex.governing_law) ? 'USGAAP' : 'IFRS9');
+
+  B.deal.name         = ex.deal_name || ex.borrower_name || ex.facility_name || 'Untitled CA Deal';
+  B.deal.counterparty = ex.borrower_name || ex.borrower_entity || null;
+  B.deal.le           = ex.borrower_entity || null;
+  B.deal.currency     = ex.currency || 'USD';
+  B.deal.framework    = framework;
+  B.deal.settle       = ex.effective_date || null;
+  B.deal.maturity     = ex.maturity_date  || null;
+  B.deal.participationPct = 100;
+  B.deal.dealId       = 'CA_' + (ex.borrower_name || 'Deal').replace(/\W+/g,'_').slice(0,40) + '_' + Date.now().toString(36).toUpperCase();
+  B._caProvenance     = caRowId || null;
+
+  const facTypeMap = {
+    term_loan_a: 'term', term_loan_b: 'term', term_loan: 'term',
+    revolver: 'revolver', delayed_draw_tl: 'delayed_draw', bridge: 'bridge', second_lien: 'term', other: 'term'
+  };
+  B.facility.type       = facTypeMap[ex.facility_type] || 'term';
+  B.facility.commitment = +ex.principal || 0;
+  B.facility.availEnd   = ex.effective_date || null;
+  B.facility.repayment  = ex.amort_type === 'straight_line' ? 'straight_line'
+                        : ex.amort_type === 'custom'        ? 'custom'
+                        : 'bullet';
+  B.facility.dayBasis   = ex.day_count === '30/360' ? '30_360'
+                        : ex.day_count === 'ACT/365' ? 'act_365'
+                        : 'act_360';
+  B.facility.holiday    = 'us';
+
+  // Single tranche mirroring the whole facility
+  B.tranches = [{
+    name: ex.facility_name || 'Tranche 1',
+    currency: ex.currency || 'USD',
+    face: +ex.principal || 0,
+    drawnInitially: +ex.principal || 0,
+    isPikToggle: false,
+    interest: {
+      baseRate: (ex.base_rate || 'FIXED').toString().toUpperCase(),
+      tenor: ex.base_rate_tenor || '3M',
+      marginBps: ex.margin_bps != null ? +ex.margin_bps : 0,
+      floorBps: ex.rate_floor_bps != null ? +ex.rate_floor_bps : 0,
+      dayBasis: ex.day_count || 'ACT/360',
+      ratchet: Array.isArray(ex.margin_ratchet) ? ex.margin_ratchet : []
+    },
+    repayments: [] // paydowns — CAs are typically bullet so this stays empty; user can add via Stage 2
+  }];
+
+  // Fees — pass-through with a light normalisation
+  if(Array.isArray(ex.fees)){
+    B.fees = ex.fees.map((f, i) => ({
+      name:      f.name || ('Fee ' + (i+1)),
+      mode:      f.mode || 'flat',
+      amount:    f.amount != null ? +f.amount : (f.bps != null ? null : 0),
+      bps:       f.bps != null ? +f.bps : null,
+      frequency: f.frequency || 'one_time',
+      treatment: f.treatment || 'eir_amortised'
+    }));
+  }
+
+  // Covenants — map CA covenant shape → Builder covenant shape
+  if(Array.isArray(ex.covenants)){
+    B.covenants = ex.covenants.map((c, i) => ({
+      name:         c.name || 'Covenant ' + (i+1),
+      kpiMetric:    c.kpi_metric || 'none',
+      direction:    c.direction || 'max',
+      threshold:    c.threshold != null ? +c.threshold : null,
+      testFrequency: c.test_frequency || 'quarterly',
+      stepDowns:    Array.isArray(c.step_downs) ? c.step_downs : [],
+      consequenceList: Array.isArray(c.consequences) ? c.consequences : []
+    }));
+  }
+
+  // Stash the raw CA on B for later reference (audit / debug)
+  B._caExtract = ex;
+}
+window._applyCAToBuilder = _applyCAToBuilder;
 
 // ─── Notice Reconciliation (Phase 2) ───────────────────────
 // Fetch journal_entries for each visible deal and match against interest/
