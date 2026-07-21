@@ -948,8 +948,23 @@ function buildSchedule(instr){
   let drawnBalance  = balance;
   const commitment  = instr.commitment ?? instr.faceValue;
 
-  // Carrying value start = purchase price if given, else face
-  let carryingValue = (instr.purchasePrice ?? instr.faceValue) || 0;
+  // Carrying value start — mirror the balance-init logic so partially-drawn
+  // facilities don't seed carrying at face while balance starts at drawn.
+  // Historically this was `purchasePrice ?? faceValue` on the assumption that
+  // the loan was fully funded at close (buyer paid purchasePrice for the
+  // whole face). For deals with drawn_initially < face + post-close drawdowns,
+  // that seeded carrying at face and then the daily loop added each drawdown
+  // again → carrying peaked at face + Σdrawdowns instead of tracking balance.
+  // Precedence:
+  //   1. explicit purchasePrice (secondary purchase / debt-for-equity acquisition)
+  //   2. actual initialDraw amount (funded-at-close portion)
+  //   3. 0 (deferred-draw facility, no initial funding)
+  //   4. faceValue (legacy default when the caller doesn't hand us any draw events)
+  let carryingValue;
+  if(instr.purchasePrice != null)  carryingValue = +instr.purchasePrice;
+  else if(initialDraw)             carryingValue = initialDraw.amount;
+  else if(hasFutureDraws)          carryingValue = 0;
+  else                             carryingValue = instr.faceValue || 0;
 
   // Precompute total life (years) and a rough cashflow set for IRR methods.
   // For SONIA / CompoundedRFR coupons the fixedRate is 0 — derive an

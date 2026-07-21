@@ -3,55 +3,118 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V3 (Supabase Backend)</title>
+<title>PCS Loan Module · V4</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
+     Tabler because ~300 existing markup instances still reference
+     material-icons-outlined; we swap them incrementally in later steps. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons|Material+Icons+Outlined" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono&display=swap" rel="stylesheet"/>
 <style>
-  :root { --brand:#2940f5; --brand-50:#f0f3ff; --brand-200:#c7d2fe; --brand-600:#2940f5; --brand-800:#1a2390; }
-  body { font-family:'Roboto', system-ui, sans-serif; background:#f6f8fc; color:#1f2330; }
-  .stage-card { background:white; border:1px solid #e3e6ee; border-radius:12px; box-shadow:0 1px 3px rgba(15,20,40,.05); }
-  .stage-card.active { border-color:var(--brand); box-shadow:0 4px 14px rgba(41,64,245,.15); }
-  .stage-card.done { border-color:#0f8a4d; background:#f0fdf4; }
-  .stage-num { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:var(--brand); color:white; font-weight:700; font-size:13px; }
-  .stage-card.done .stage-num { background:#0f8a4d; }
-  .stage-arrow { display:none; }   /* arrows hidden — tab nav replaces vertical flow */
+  /* ─── V4 palette ── single indigo accent, softer neutrals, cleaner ramps.
+     Kept legacy --brand aliases (same names, new values) so every existing
+     class that reads var(--brand) picks up the new tone with zero markup edits. */
+  :root {
+    /* Accent (indigo) */
+    --brand:    #6366F1;
+    --brand-50: #EEF2FF;
+    --brand-100:#E0E7FF;
+    --brand-200:#C7D2FE;
+    --brand-500:#6366F1;
+    --brand-600:#4F46E5;
+    --brand-700:#4338CA;
+    --brand-800:#3730A3;
+    /* Neutrals — Zinc scale, slightly warmer than pure gray */
+    --n-0:  #FFFFFF;
+    --n-50: #FAFAFA;
+    --n-100:#F4F4F5;
+    --n-200:#E4E4E7;
+    --n-300:#D4D4D8;
+    --n-400:#A1A1AA;
+    --n-500:#71717A;
+    --n-600:#52525B;
+    --n-700:#3F3F46;
+    --n-800:#27272A;
+    --n-900:#18181B;
+    /* FIS brand green — matches the logo wordmark colour (#4cd964).
+       Used for the primary action tier throughout v4. */
+    --fis-green:       #22C55E;
+    --fis-green-50:    #F0FDF4;
+    --fis-green-100:   #DCFCE7;
+    --fis-green-600:   #16A34A;
+    --fis-green-700:   #15803D;
+    /* Semantic */
+    --success:#22C55E;
+    --warning:#F59E0B;
+    --danger: #EF4444;
+    --info:   #06B6D4;
+    /* Radii */
+    --r-sm: 6px;
+    --r-md: 8px;
+    --r-lg: 10px;
+    --r-xl: 12px;
+  }
+  /* Global font + tabular numerics so every table / KPI aligns on the decimal.
+     font-feature-settings: 'cv11' turns on Inter's more legible single-storey
+     lowercase 'a' — a subtle but material readability boost. */
+  body {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    background: var(--n-50);
+    color: var(--n-900);
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.01em;
+  }
+  /* Right-align every numeric-looking cell without touching each td. */
+  td, th, input[type="number"], .num, .tabular { font-variant-numeric: tabular-nums; }
+  /* Code / mono uses JetBrains Mono — same weight family as Inter. */
+  code, pre, .mono, .font-mono { font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+  /* Subtle title-case correction for the ubiquitous ALL-CAPS labels: keep the
+     letter-spacing but soften the weight so they read as sub-heads, not screams. */
+  .text-\[10px\].uppercase, .text-\[11px\].uppercase { font-weight: 500; letter-spacing: 0.06em; color: var(--n-500); }
+  /* ─── V4 stage cards ─── indigo accent, softer surface, thinner border. */
+  .stage-card { background:var(--n-0); border:0.5px solid var(--n-200); border-radius:var(--r-xl); box-shadow:0 1px 2px rgba(24,24,27,.04); }
+  .stage-card.active { border-color:var(--brand); box-shadow:0 4px 14px rgba(99,102,241,.15); }
+  .stage-card.done { border-color:var(--success); background:#F0FDF4; }
+  .stage-num { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:var(--brand); color:var(--n-0); font-weight:600; font-size:13px; }
+  .stage-card.done .stage-num { background:var(--success); }
+  .stage-arrow { display:none; }
 
-  /* ─── Tab navigation (sticky top) ────────────────────────────────────── */
-  /* Stage tab strip — lives inside the sticky <header>, so no own position:sticky.
-     Parent header already handles pinning + shadow + backdrop. */
+  /* ─── V4 tab navigation ── clean bar, no gradient wash, indigo active state. */
   .tab-nav {
-    background: linear-gradient(to bottom, #FFFFFF 0%, #FAFBFD 100%);
-    border-top: 1px solid #E1E5EE;
-    padding: 8px 0 6px;
+    background: var(--n-0);
+    border-top: 0.5px solid var(--n-200);
+    padding: 10px 0 8px;
     display: flex; gap: 6px; overflow-x: auto;
     scrollbar-width: thin;
   }
   .tab-nav::-webkit-scrollbar { height: 4px; }
-  .tab-nav::-webkit-scrollbar-thumb { background: #D4DAE3; border-radius: 2px; }
+  .tab-nav::-webkit-scrollbar-thumb { background: var(--n-300); border-radius: 2px; }
 
   .tab-btn {
     flex: 1 1 0;
     display: flex; flex-direction: row; gap: 12px; align-items: center;
-    padding: 12px 18px;
-    border-radius: 12px;
+    padding: 12px 16px;
+    border-radius: var(--r-lg);
     background: transparent;
-    border: 1.5px solid #E1E5EE;
+    border: 0.5px solid var(--n-200);
     cursor: pointer;
-    transition: all .18s ease;
+    transition: background .15s ease, border-color .15s ease, transform .15s ease;
     min-width: 0; text-align: left;
     position: relative;
+    color: var(--n-700);
   }
-  .tab-btn:hover { background: #F0F4FA; border-color: #C7D2FE; transform: translateY(-1px); }
+  .tab-btn:hover { background: var(--n-100); border-color: var(--n-300); }
   .tab-btn.active {
-    background: linear-gradient(135deg, #21295C 0%, #2E3A7B 100%);
-    color: white;
-    border-color: #21295C;
-    box-shadow: 0 6px 18px rgba(33,41,92,0.28);
-    transform: translateY(-1px);
+    background: var(--brand-800);
+    color: var(--n-0);
+    border-color: var(--brand-800);
+    box-shadow: 0 4px 14px rgba(67,56,202,0.24);
   }
   /* Chevron under the active tab pointing into the content */
   .tab-btn.active::after {
@@ -60,16 +123,16 @@
     left: 50%; bottom: -8px;
     transform: translateX(-50%);
     width: 0; height: 0;
-    border-left: 8px solid transparent;
-    border-right: 8px solid transparent;
-    border-top: 8px solid #21295C;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 7px solid var(--brand-800);
   }
   .tab-btn.done {
-    background: linear-gradient(135deg, #0F8A4D 0%, #0AA85C 100%);
-    color: white;
-    border-color: #0F8A4D;
+    background: var(--success);
+    color: var(--n-0);
+    border-color: var(--success);
   }
-  .tab-btn.active.done { background: linear-gradient(135deg, #21295C 0%, #2E3A7B 100%); border-color: #21295C; }
+  .tab-btn.active.done { background: var(--brand-800); border-color: var(--brand-800); }
 
   /* When Stages 3-5 are hidden, we only render Builder + 1 + 2 (they stretch)
      and Dashboard (which uses margin-left:auto). We DON'T want Dashboard to
@@ -78,44 +141,43 @@
   /* When advanced stages are visible, revert to the old compact sizing. */
   body.show-advanced-stages .tab-btn { flex: 0 0 auto; }
 
-  /* Big circular icon-tile on the left of each tab button */
+  /* V4 tab icon tile — flat indigo tint, no gradient. */
   .tab-icon {
     flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
-    width: 40px; height: 40px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
-    color: #21295C;
-    box-shadow: inset 0 0 0 1px rgba(33,41,92,0.08);
-    transition: all .18s ease;
+    width: 38px; height: 38px;
+    border-radius: var(--r-md);
+    background: var(--brand-50);
+    color: var(--brand-700);
+    transition: background .15s ease, color .15s ease;
   }
-  .tab-icon .material-icons-outlined { font-size: 22px; }
+  .tab-icon .material-icons-outlined { font-size: 20px; }
+  .tab-icon i.ti { font-size: 20px; }
   .tab-btn.active .tab-icon {
-    background: rgba(255,255,255,0.15);
-    color: white;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.14);
+    color: var(--n-0);
   }
   .tab-btn.done .tab-icon {
-    background: rgba(255,255,255,0.2);
-    color: white;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.18);
+    color: var(--n-0);
   }
   .tab-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex:1; }
 
   .tab-num {
     display: inline-flex; align-items: center; justify-content: center;
     padding: 1px 6px;
-    border-radius: 8px;
-    background: rgba(33,41,92,0.08); color: #21295C;
-    font-weight: 700; font-size: 9.5px; letter-spacing: 0.5px;
+    border-radius: 6px;
+    background: var(--brand-100);
+    color: var(--brand-700);
+    font-weight: 600; font-size: 9.5px; letter-spacing: 0.4px;
     margin-right: 4px;
     text-transform: uppercase;
   }
   .tab-btn.active .tab-num,
-  .tab-btn.done .tab-num { background: rgba(255,255,255,0.22); color: white; }
+  .tab-btn.done .tab-num { background: rgba(255,255,255,0.22); color: var(--n-0); }
 
-  .tab-label { font-size: 13.5px; font-weight: 700; letter-spacing: -0.1px; line-height: 1.15; }
-  .tab-sub   { font-size: 10.5px; opacity: 0.72; line-height: 1.2; }
+  .tab-label { font-size: 13px; font-weight: 600; letter-spacing: -0.15px; line-height: 1.2; }
+  .tab-sub   { font-size: 11px; opacity: 0.72; line-height: 1.25; font-weight: 400; }
   .tab-btn.active .tab-sub,
   .tab-btn.done   .tab-sub { opacity: 0.9; }
 
@@ -123,24 +185,52 @@
   .stage-tab-content { display: none; }
   .stage-tab-content.tab-visible { display: block; }
 
-  /* ─── "Step N of 5" banner at the top of every panel ──────────── */
+  /* ─── V4 "Step N of 5" banner — light + flat.
+     Was heavy indigo-800 gradient; now white with a thin indigo bar and
+     a small numbered chip. Reads as a subtle contextual heading instead of
+     a screaming section break. */
   .step-indicator {
     display: flex; align-items: center; gap: 14px;
-    padding: 14px 18px;
-    margin: 14px 0 16px;
-    background: linear-gradient(135deg, #21295C 0%, #2E3A7B 100%);
-    color: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 14px rgba(33,41,92,0.18);
+    padding: 12px 16px;
+    margin: 8px 0 18px;
+    background: var(--n-0);
+    color: var(--n-900);
+    border: 0.5px solid var(--n-200);
+    border-left: 3px solid var(--fis-green);
+    border-radius: 10px;
+    box-shadow: none;
   }
+  .step-indicator.dash { border-left-color: #0E7490; }
   .step-indicator .step-num-big {
     flex: 0 0 auto;
-    width: 48px; height: 48px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.18);
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--fis-green-50);
+    color: var(--fis-green-700);
     display: inline-flex; align-items: center; justify-content: center;
-    font-size: 22px; font-weight: 700;
-    border: 2px solid rgba(255,255,255,0.4);
+    font-size: 14px; font-weight: 600;
+    border: none;
+  }
+  .step-indicator.dash .step-num-big { background: #ECFEFF; color: #0E7490; }
+  .step-indicator .step-of {
+    font-size: 10.5px; color: var(--n-500); font-weight: 500;
+    letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 1px;
+    opacity: 1;
+  }
+  .step-indicator .step-name {
+    font-size: 15px; font-weight: 600; color: var(--n-900);
+    letter-spacing: -0.25px; line-height: 1.2;
+  }
+  .step-indicator .step-hint {
+    font-size: 11.5px; color: var(--n-500); margin-top: 2px; opacity: 1;
+  }
+  .step-indicator .step-state-chip {
+    flex: 0 0 auto;
+    background: var(--n-100); color: var(--n-700);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px; font-weight: 500;
+    border: 0.5px solid var(--n-200);
   }
   .step-indicator .step-text {
     flex: 1; min-width: 0;
@@ -164,29 +254,29 @@
     border: 1px solid rgba(255,255,255,0.25);
   }
 
-  /* Dashboard step indicator — different colour scheme */
+  /* Dashboard step indicator — teal accent so it reads distinct from the pipeline banner */
   .step-indicator.dash {
-    background: linear-gradient(135deg, #065A82 0%, #1C7293 100%);
+    background: #0E7490;
   }
 
-  /* ─── Progress bar below tab nav ─────────────────────────────── */
+  /* ─── Progress bar below tab nav ── V4: indigo active, softer track. */
   .pipeline-progress {
     display: flex;
-    height: 4px;
-    background: #EAEEF5;
-    border-radius: 0 0 8px 8px;
+    height: 3px;
+    background: var(--n-200);
+    border-radius: 0 0 6px 6px;
     overflow: hidden;
     margin-bottom: 8px;
   }
   .pipeline-progress-seg {
     flex: 1;
-    background: #EAEEF5;
+    background: var(--n-200);
     transition: background .3s ease;
     position: relative;
   }
   .pipeline-progress-seg + .pipeline-progress-seg { margin-left: 2px; }
-  .pipeline-progress-seg.done    { background: #0F8A4D; }
-  .pipeline-progress-seg.active  { background: #21295C; animation: pulseProgress 1.8s ease-in-out infinite; }
+  .pipeline-progress-seg.done    { background: var(--success); }
+  .pipeline-progress-seg.active  { background: var(--brand); animation: pulseProgress 1.8s ease-in-out infinite; }
   @keyframes pulseProgress {
     0%, 100% { opacity: 1; }
     50%      { opacity: 0.5; }
@@ -195,71 +285,72 @@
   .stage-tab-content.tab-visible { animation: tabFadeIn .25s ease both; }
   @keyframes tabFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-  /* ─── Dashboard styles ───────────────────────────────────────────────── */
+  /* ─── V4 Dashboard styles ── flat cards, indigo accent, tabular numerics. */
   .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
   .dash-card {
-    background: white;
-    border: 1px solid #E1E5EE;
-    border-radius: 12px;
+    background: var(--n-0);
+    border: 0.5px solid var(--n-200);
+    border-radius: var(--r-xl);
     padding: 16px;
-    transition: all .18s ease;
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
   }
-  .dash-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(33,41,92,0.08); border-color: #C2CCE0; }
-  .dash-card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6A7591; font-weight: 600; margin-bottom: 6px; }
-  .dash-card-value { font-size: 22px; font-weight: 700; color: #21295C; line-height: 1.15; }
-  .dash-card-sub   { font-size: 11px; color: #6A7591; margin-top: 4px; }
+  .dash-card:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(24,24,27,0.06); border-color: var(--n-300); }
+  .dash-card-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--n-500); font-weight: 500; margin-bottom: 6px; }
+  .dash-card-value { font-size: 22px; font-weight: 600; color: var(--n-900); line-height: 1.15; letter-spacing: -0.4px; font-variant-numeric: tabular-nums; }
+  .dash-card-sub   { font-size: 11px; color: var(--n-500); margin-top: 4px; }
 
   .dash-section-header {
-    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
-    color: #21295C; margin: 24px 0 10px;
-    padding-bottom: 6px; border-bottom: 2px solid #E1E5EE;
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--n-600); margin: 24px 0 10px;
+    padding-bottom: 6px; border-bottom: 0.5px solid var(--n-200);
     display: flex; align-items: center; gap: 8px;
   }
 
   .dash-timeline { position: relative; padding-left: 20px; margin-top: 12px; }
   .dash-timeline::before {
     content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px;
-    width: 2px; background: linear-gradient(to bottom, #21295C 0%, #4ECDC4 100%);
+    width: 1.5px; background: var(--brand-200);
   }
   .dash-timeline-item {
     position: relative; padding: 6px 0 10px 16px;
-    border-bottom: 1px dashed #E5E9F0;
+    border-bottom: 0.5px dashed var(--n-200);
   }
   .dash-timeline-item:last-child { border-bottom: none; }
   .dash-timeline-item::before {
     content: ''; position: absolute; left: -18px; top: 10px;
     width: 10px; height: 10px; border-radius: 50%;
-    background: white; border: 2px solid #21295C;
+    background: var(--n-0); border: 2px solid var(--brand);
   }
-  .dash-timeline-item.event-prepay::before  { border-color: #F4A261; background: #FFF4E6; }
-  .dash-timeline-item.event-default::before { border-color: #E76F51; background: #FFE9E4; }
-  .dash-timeline-item.event-writeoff::before{ border-color: #C44536; background: #FFD9D6; }
-  .dash-timeline-item.event-recovery::before{ border-color: #0F8A4D; background: #DFF5E8; }
-  .dash-timeline-item.event-cure::before    { border-color: #4ECDC4; background: #E0F7F5; }
-  .dash-timeline-item.event-drawdown::before{ border-color: #21295C; background: #DDE3F2; }
-  .dash-timeline-item.event-maturity::before{ border-color: #6A7591; background: #E5E9F0; }
-  .dash-timeline-date { font-size: 11px; font-weight: 600; color: #6A7591; }
-  .dash-timeline-title { font-size: 13px; font-weight: 600; color: #21295C; margin-top: 1px; }
-  .dash-timeline-detail { font-size: 11.5px; color: #4B5563; margin-top: 2px; }
+  .dash-timeline-item.event-prepay::before  { border-color: var(--warning); background: #FEF3C7; }
+  .dash-timeline-item.event-default::before { border-color: var(--danger);  background: #FEE2E2; }
+  .dash-timeline-item.event-writeoff::before{ border-color: #B91C1C;       background: #FEE2E2; }
+  .dash-timeline-item.event-recovery::before{ border-color: var(--success); background: #DCFCE7; }
+  .dash-timeline-item.event-cure::before    { border-color: #14B8A6;       background: #CCFBF1; }
+  .dash-timeline-item.event-drawdown::before{ border-color: var(--brand);   background: var(--brand-100); }
+  .dash-timeline-item.event-maturity::before{ border-color: var(--n-500);   background: var(--n-200); }
+  .dash-timeline-date  { font-size: 10.5px; font-weight: 500; color: var(--n-500); letter-spacing: 0.2px; text-transform: uppercase; }
+  .dash-timeline-title { font-size: 13px; font-weight: 500; color: var(--n-900); margin-top: 2px; letter-spacing: -0.1px; }
+  .dash-timeline-detail { font-size: 11.5px; color: var(--n-600); margin-top: 2px; }
 
-  /* ─── Covenants panel ─────────────────────────────────────────────── */
+  /* ─── V4 Covenants panel ── flat, thin left-border accent, tabular values. */
   .cov-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-top:12px; }
   .cov-card {
-    background:white; border-radius:12px; padding:14px 16px;
-    border-left:4px solid #C2CCE0; border-top:1px solid #E1E5EE; border-right:1px solid #E1E5EE; border-bottom:1px solid #E1E5EE;
-    transition:all .18s ease;
+    background: var(--n-0); border-radius: var(--r-xl); padding: 14px 16px;
+    border: 0.5px solid var(--n-200); border-left-width: 3px; border-left-color: var(--n-300);
+    transition: box-shadow .15s ease, transform .15s ease;
   }
-  .cov-card:hover { box-shadow:0 6px 18px rgba(33,41,92,0.07); }
-  .cov-card.status-green  { border-left-color:#0F8A4D; background:linear-gradient(to right, #F1FBF5 0%, #FFFFFF 60%); }
-  .cov-card.status-amber  { border-left-color:#D97706; background:linear-gradient(to right, #FFFBEB 0%, #FFFFFF 60%); }
-  .cov-card.status-red    { border-left-color:#DC2626; background:linear-gradient(to right, #FEF2F2 0%, #FFFFFF 60%); }
+  .cov-card:hover { box-shadow: 0 4px 14px rgba(24,24,27,0.05); transform: translateY(-1px); }
+  .cov-card.status-green { border-left-color: var(--success); }
+  .cov-card.status-amber { border-left-color: var(--warning); }
+  .cov-card.status-red   { border-left-color: var(--danger);  }
   .cov-card-head { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-  .cov-card-name { font-size:12.5px; font-weight:700; color:#21295C; line-height:1.25; }
-  .cov-card-kpi  { font-size:10.5px; color:#6A7591; margin-top:2px; }
+  .cov-card-name { font-size: 13px; font-weight: 600; color: var(--n-900); line-height: 1.25; letter-spacing: -0.15px; }
+  .cov-card-kpi  { font-size: 11px; color: var(--n-500); margin-top: 2px; }
   .cov-status-chip {
-    font-size:10px; font-weight:700; padding:2px 8px; border-radius:8px; text-transform:uppercase; letter-spacing:0.5px; white-space:nowrap;
+    font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px;
+    text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap;
   }
-  .cov-status-chip.status-green { background:#DFF5E8; color:#065F46; }
+  .cov-status-chip.status-green { background:#DCFCE7; color:#065F46; }
   .cov-status-chip.status-amber { background:#FEF3C7; color:#92400E; }
   .cov-status-chip.status-red   { background:#FEE2E2; color:#991B1B; }
   .cov-card-vals { display:flex; gap:14px; margin-top:8px; align-items:baseline; }
@@ -459,9 +550,1100 @@
     /* Comfortable margins for A4/Letter */
     @page { margin:14mm 12mm; size:auto; }
   }
+
+  /* ════════════════════════════════════════════════════════════════
+     V4 STEP 6 — POLISH PASS
+     Universal focus rings, scrollbars, selection, button + chip normalization,
+     smoother tab transition, toast styling, empty-state utility.
+     ════════════════════════════════════════════════════════════════ */
+
+  /* ── Focus rings — subtle green halo (matches FIS accent).
+     Was two-layer box-shadow that combined into a dark ring on coloured
+     backgrounds; now a single outline offset from the button so it never
+     touches the button's own border. ── */
+  *:focus { outline: none; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none;
+    border-color: var(--fis-green) !important;
+    box-shadow: 0 0 0 3px rgba(34,197,94,0.15);
+  }
+  button:focus-visible, .mat-btn:focus-visible, .v4-sb-item:focus-visible, a:focus-visible {
+    outline: 2px solid var(--fis-green) !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
+  }
+
+  /* ── Selection — indigo tint instead of default blue. ── */
+  ::selection { background: rgba(99,102,241,0.22); color: var(--n-900); }
+
+  /* ── Custom scrollbars — thin, quiet, matches neutral palette. ── */
+  * { scrollbar-width: thin; scrollbar-color: var(--n-300) transparent; }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--n-300); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+  *::-webkit-scrollbar-thumb:hover { background-color: var(--n-400); background-clip: content-box; }
+
+  /* ── V4 buttons — flat, modern, no gradients, no lift.
+     Tight corners (6px), 1px borders, hover changes color/bg only, no scale.
+     Solid backgrounds only; the previous `.primary` used indigo-800 gradient —
+     we now use a solid indigo-900 → indigo-800 hover. Height standardises at
+     32px (28px for compact `.text-[10px]` variants that many toolbar buttons use). */
+  /* ── V4 unified button system — ALL variants use a 1px dashed border.
+     Same "create-new-row" affordance from Linear/Notion applied consistently
+     across primary CTAs, outline actions, ghost buttons, and destructive ones.
+     Border-color varies per variant so intent is still readable. ── */
+  .mat-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 6px 12px;
+    min-height: 30px;
+    border-radius: 6px;
+    border: 1px dashed var(--n-300);
+    background: var(--n-0);
+    color: var(--n-900);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: -0.1px;
+    cursor: pointer;
+    transition: background .1s ease, border-color .1s ease, color .1s ease, border-style .1s ease;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+  .mat-btn:hover  { background: var(--n-50); border-color: var(--n-400); }
+  .mat-btn:active { background: var(--n-100); }
+  .mat-btn:disabled { color: var(--n-400); cursor: not-allowed; background: var(--n-50); border-color: var(--n-200); }
+
+  .mat-btn.primary {
+    background: var(--fis-green); border: 1px dashed rgba(255,255,255,0.55); color: var(--n-0);
+  }
+  .mat-btn.primary:hover  { background: var(--fis-green-600); border-color: rgba(255,255,255,0.75); }
+  .mat-btn.primary:active { background: var(--fis-green-700); }
+
+  .mat-btn.outline {
+    background: transparent; border: 1px dashed var(--n-300); color: var(--n-800);
+  }
+  .mat-btn.outline:hover  { background: var(--n-50); border-color: var(--fis-green); color: var(--n-900); }
+
+  .mat-btn.ghost {
+    background: transparent; border: 1px dashed transparent; color: var(--n-700);
+  }
+  .mat-btn.ghost:hover  { background: var(--n-100); border-color: var(--n-300); color: var(--n-900); }
+
+  .mat-btn.danger {
+    background: var(--danger); border: 1px dashed rgba(255,255,255,0.55); color: var(--n-0);
+  }
+  .mat-btn.danger:hover { background: #DC2626; border-color: rgba(255,255,255,0.75); }
+
+  /* Compact variant (used with `!py-0.5` / `!py-1` Tailwind overrides). */
+  .mat-btn.\!py-0\.5, .mat-btn.\!py-1 { min-height: 26px; padding: 4px 10px; font-size: 11.5px; }
+  .mat-btn .material-icons-outlined,
+  .mat-btn i.ti { font-size: 15px; }
+
+  /* ── Any plain <button> without a class picks up the same modern base. ── */
+  body.v4-sidebar button:not(.mat-btn):not(.tab-btn):not(.chip):not([class*="v4-"]):not([class*="tools-"]):not([class*="dash-"]):not([class*="side-"]):not([class*="cov-"]):not(#btn-add-tranche):not([id^="tab-"]):not([id^="btn-header-"]) {
+    /* Only nudge stray <button>s that don't already have their own styling. */
+    font-family: inherit;
+  }
+
+  /* ── Chip variants — flat pastels with matching text tone. ── */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 500; letter-spacing: 0.2px;
+    background: var(--n-100); color: var(--n-700); border: 0.5px solid transparent;
+  }
+  .chip.blue    { background: var(--brand-50);  color: var(--brand-700); }
+  .chip.green   { background: #DCFCE7; color: #065F46; }
+  .chip.amber   { background: #FEF3C7; color: #92400E; }
+  .chip.red     { background: #FEE2E2; color: #991B1B; }
+  .chip.violet  { background: #F3E8FF; color: #6B21A8; }
+  .chip.teal    { background: #CCFBF1; color: #115E59; }
+  .chip.gray    { background: var(--n-100); color: var(--n-600); }
+  .chip-green   { background: #DCFCE7; color: #065F46; }
+  .chip-amber   { background: #FEF3C7; color: #92400E; }
+  .chip-red     { background: #FEE2E2; color: #991B1B; }
+
+  /* ── Smoother tab-content transition (was tabFadeIn already; refine). ── */
+  .stage-tab-content { display: none; }
+  .stage-tab-content.tab-visible {
+    display: block;
+    animation: v4TabIn .28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes v4TabIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Toast — restyle to match indigo palette + subtle rise. ── */
+  .toast, #toast, .toast-notification {
+    background: var(--n-900) !important;
+    color: var(--n-0) !important;
+    border-radius: var(--r-lg) !important;
+    padding: 10px 14px !important;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.20) !important;
+    font-family: inherit !important;
+    font-size: 12.5px !important;
+    font-weight: 500 !important;
+    letter-spacing: -0.1px !important;
+    border: 0.5px solid var(--n-700) !important;
+  }
+
+  /* ── Empty state utility — use anywhere for "no data" placeholders. ── */
+  .v4-empty {
+    text-align: center; padding: 44px 20px; color: var(--n-500);
+  }
+  .v4-empty .v4-empty-icon {
+    width: 52px; height: 52px; margin: 0 auto 12px;
+    border-radius: 12px;
+    background: var(--brand-50); color: var(--brand-600);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .v4-empty .v4-empty-icon i.ti { font-size: 26px; }
+  .v4-empty .v4-empty-title { font-size: 14px; font-weight: 500; color: var(--n-900); margin-bottom: 4px; letter-spacing: -0.15px; }
+  .v4-empty .v4-empty-body  { font-size: 12px; max-width: 340px; margin: 0 auto; line-height: 1.55; }
+
+  /* ── Table polish — quiet stripes + tight vertical rhythm. ── */
+  table { border-collapse: collapse; }
+  table thead tr { border-bottom: 0.5px solid var(--n-200); }
+  table tbody tr + tr { border-top: 0.5px solid var(--n-100); }
+  table td, table th { font-variant-numeric: tabular-nums; }
+
+  /* ── Subtle animated indicator when the deal-menu / cmdk opens. ── */
+  @keyframes v4MenuPop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  #v4-deal-menu[style*="display: block"],
+  #v4-load-deal-menu[style*="display: block"],
+  #tools-menu-panel[style*="display: block"] { animation: v4MenuPop .18s ease both; }
+
+  /* ── Cmd+K palette — refined entrance. ── */
+  @keyframes v4OverlayIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes v4PaletteIn { from { opacity: 0; transform: translate(-50%, -20px) scale(0.98); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+  #v4-cmdk-overlay[style*="display: block"] { animation: v4OverlayIn .18s ease both; }
+  #v4-cmdk-overlay[style*="display: block"] #v4-cmdk-panel { animation: v4PaletteIn .22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+  /* ════════════════════════════════════════════════════════════════
+     V4 STEP 8 — Stage 2 Treatment Overrides polish
+     The entire panel was bg-indigo-50 + text-indigo-900 + border-indigo-200
+     with hardcoded #4338ca icons and heavy indigo section dividers.
+     Overriding all that to the flat FIS-green + zinc-neutral system so it
+     matches the rest of v4 without editing the markup.
+     ════════════════════════════════════════════════════════════════ */
+  body.v4-sidebar #s2-treatment-panel {
+    background: var(--n-0) !important;
+    border: 0.5px solid var(--n-200) !important;
+    border-radius: 12px !important;
+    padding: 16px !important;
+  }
+  body.v4-sidebar #s2-treatment-panel h3.text-indigo-900,
+  body.v4-sidebar #s2-treatment-panel h4.text-indigo-900,
+  body.v4-sidebar #s2-treatment-panel [class*="text-indigo-900"] {
+    color: var(--n-900) !important;
+    font-size: 13px !important; font-weight: 600 !important; letter-spacing: -0.15px !important;
+  }
+  body.v4-sidebar #s2-treatment-panel .text-indigo-700,
+  body.v4-sidebar #s2-treatment-panel [class*="text-indigo-700"] {
+    color: var(--n-500) !important;
+    font-weight: 400 !important;
+  }
+  body.v4-sidebar #s2-treatment-panel .border-indigo-200,
+  body.v4-sidebar #s2-treatment-panel [class*="border-indigo-200"],
+  body.v4-sidebar #s2-treatment-panel [class*="border-indigo-100"] {
+    border-color: var(--n-200) !important;
+  }
+  body.v4-sidebar #s2-treatment-panel .bg-white {
+    background: var(--n-50) !important;
+    border-radius: 10px !important;
+  }
+  /* The section-header icons all use inline style="color:#4338ca" */
+  body.v4-sidebar #s2-treatment-panel .material-icons-outlined[style*="4338ca"],
+  body.v4-sidebar #s2-treatment-panel [style*="color:#4338ca"],
+  body.v4-sidebar #s2-treatment-panel [style*="color: #4338ca"] {
+    color: var(--fis-green-600) !important;
+  }
+  /* Card containers inside — soften the borders + upgrade dividers. */
+  body.v4-sidebar #s2-treatment-panel > div.mt-3.pt-3 {
+    margin-top: 18px !important; padding-top: 16px !important;
+    border-top: 0.5px solid var(--n-200) !important;
+  }
+  /* AASB extras — amber tint kept but softened. */
+  body.v4-sidebar #aasb-extras-panel { background: #FFFBEB !important; border-color: #FCD34D !important; border-radius: 10px !important; }
+  /* Turn the "add mod / add clear" buttons into the same dashed style as add-btn-pill. */
+  body.v4-sidebar #s2-treatment-panel #btn-mod-add-nonsub,
+  body.v4-sidebar #s2-treatment-panel #btn-mod-add-sub,
+  body.v4-sidebar #s2-treatment-panel #btn-mod-clear,
+  body.v4-sidebar #s2-treatment-panel button[title*="modification"],
+  body.v4-sidebar #s2-treatment-panel button.mat-btn.outline[title*="modification"] {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 10px !important;
+    background: transparent !important;
+    color: var(--n-700) !important;
+    border: 1px dashed var(--n-300) !important;
+    border-radius: 6px !important;
+    font-size: 11.5px !important; font-weight: 500 !important;
+    box-shadow: none !important;
+    min-height: 0 !important;
+    transition: background .12s ease, border-color .12s ease, color .12s ease !important;
+  }
+  body.v4-sidebar #s2-treatment-panel #btn-mod-add-nonsub:hover,
+  body.v4-sidebar #s2-treatment-panel #btn-mod-add-sub:hover {
+    background: var(--fis-green-50) !important;
+    border-color: var(--fis-green) !important;
+    border-style: solid !important;
+    color: var(--fis-green-700) !important;
+  }
+  body.v4-sidebar #s2-treatment-panel #btn-mod-add-nonsub .material-icons-outlined,
+  body.v4-sidebar #s2-treatment-panel #btn-mod-add-sub .material-icons-outlined {
+    color: var(--fis-green) !important;
+    font-size: 15px !important;
+  }
+  body.v4-sidebar #s2-treatment-panel #btn-mod-add-nonsub:hover .material-icons-outlined,
+  body.v4-sidebar #s2-treatment-panel #btn-mod-add-sub:hover .material-icons-outlined {
+    color: var(--fis-green-700) !important;
+  }
+  /* Clear button is a destructive action — subtle red on hover, not green. */
+  body.v4-sidebar #s2-treatment-panel #btn-mod-clear:hover {
+    background: #FEF2F2 !important;
+    border-color: var(--danger) !important;
+    border-style: solid !important;
+    color: #991B1B !important;
+  }
+  body.v4-sidebar #s2-treatment-panel #btn-mod-clear .material-icons-outlined {
+    color: var(--n-500) !important;
+    font-size: 15px !important;
+  }
+  body.v4-sidebar #s2-treatment-panel #btn-mod-clear:hover .material-icons-outlined {
+    color: #991B1B !important;
+  }
+  /* Section-header material icon in the treatment panel (tune / health / edit_note). */
+  body.v4-sidebar #s2-treatment-panel > .flex.items-center.gap-2 > .material-icons-outlined {
+    color: var(--fis-green-600) !important;
+  }
+
+  /* ════════════════════════════════════════════════════════════════
+     V4 STEP 7 — Universal element sharpening
+     Applies to bare tags + common Tailwind class patterns. Every input,
+     table, chip, panel and section heading picks up v4 without needing
+     markup changes.
+     ════════════════════════════════════════════════════════════════ */
+
+  /* ── Universal form controls ── every input/select/textarea in the app,
+     regardless of Tailwind classes or inline styles. Overrides via
+     high-specificity because most controls stack Tailwind utilities. */
+  body.v4-sidebar input[type="text"],
+  body.v4-sidebar input[type="number"],
+  body.v4-sidebar input[type="date"],
+  body.v4-sidebar input[type="email"],
+  body.v4-sidebar input[type="password"],
+  body.v4-sidebar input[type="search"],
+  body.v4-sidebar input[type="tel"],
+  body.v4-sidebar select,
+  body.v4-sidebar textarea {
+    background: var(--n-0);
+    border: 0.5px solid var(--n-300);
+    border-radius: 7px;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 12.5px;
+    color: var(--n-900);
+    letter-spacing: -0.05px;
+    transition: border-color .12s ease, box-shadow .12s ease;
+    line-height: 1.4;
+  }
+  body.v4-sidebar input:focus, body.v4-sidebar input:focus-visible,
+  body.v4-sidebar select:focus, body.v4-sidebar select:focus-visible,
+  body.v4-sidebar textarea:focus, body.v4-sidebar textarea:focus-visible {
+    outline: none;
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+  }
+  body.v4-sidebar input::placeholder,
+  body.v4-sidebar textarea::placeholder { color: var(--n-400); }
+  body.v4-sidebar input:disabled, body.v4-sidebar select:disabled, body.v4-sidebar textarea:disabled {
+    background: var(--n-100); color: var(--n-500); cursor: not-allowed;
+  }
+  body.v4-sidebar select {
+    padding-right: 26px;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' fill='none'%3e%3cpath d='M2 3.5L5 6.5L8 3.5' stroke='%2371717A' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  /* ── Universal tables ── quiet dividers, header tint, row hover, monospace numbers. */
+  body.v4-sidebar table { border-collapse: separate; border-spacing: 0; width: 100%; }
+  body.v4-sidebar table thead th {
+    background: var(--n-50);
+    color: var(--n-500);
+    font-size: 10.5px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 8px 12px;
+    border-bottom: 0.5px solid var(--n-200);
+    text-align: left;
+  }
+  body.v4-sidebar table tbody tr { transition: background .1s ease; }
+  body.v4-sidebar table tbody tr:hover { background: var(--n-50); }
+  body.v4-sidebar table tbody td {
+    padding: 8px 12px;
+    border-bottom: 0.5px solid var(--n-100);
+    font-size: 12.5px;
+    color: var(--n-900);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.05px;
+  }
+  body.v4-sidebar table tbody tr:last-child td { border-bottom: none; }
+  /* Nested tables in modal bodies get a soft container. */
+  body.v4-sidebar .json-modal-b > table,
+  body.v4-sidebar .json-modal-b > div > table {
+    border: 0.5px solid var(--n-200); border-radius: 10px; overflow: hidden;
+  }
+
+  /* ── Tighten Tailwind muted-text tokens onto v4 zinc scale. ── */
+  body.v4-sidebar .text-gray-400 { color: var(--n-400) !important; }
+  body.v4-sidebar .text-gray-500 { color: var(--n-500) !important; }
+  body.v4-sidebar .text-gray-600 { color: var(--n-500) !important; }
+  body.v4-sidebar .text-gray-700 { color: var(--n-700) !important; }
+  body.v4-sidebar .text-gray-800 { color: var(--n-800) !important; }
+  body.v4-sidebar .text-gray-900 { color: var(--n-900) !important; }
+  body.v4-sidebar .bg-gray-50    { background-color: var(--n-50) !important; }
+  body.v4-sidebar .bg-gray-100   { background-color: var(--n-100) !important; }
+  body.v4-sidebar .bg-white      { background-color: var(--n-0) !important; }
+  body.v4-sidebar .border-gray-200 { border-color: var(--n-200) !important; }
+  body.v4-sidebar .border-gray-300 { border-color: var(--n-300) !important; }
+
+  /* ── Sharper modal chrome ── modernize inside-modal headings + counters. */
+  body.v4-sidebar .json-modal-h .font-semibold { font-weight: 600; letter-spacing: -0.2px; color: var(--n-900); }
+  body.v4-sidebar .json-modal-b { color: var(--n-800); font-size: 12.5px; }
+  body.v4-sidebar .json-modal-b h1, body.v4-sidebar .json-modal-b h2, body.v4-sidebar .json-modal-b h3 {
+    color: var(--n-900); letter-spacing: -0.2px; font-weight: 600;
+  }
+  body.v4-sidebar .json-modal-b .text-\[11px\], body.v4-sidebar .json-modal-b .text-\[10px\] { color: var(--n-500); }
+
+  /* ── Cards inside modals (list rows, tile pickers) get zinc border. ── */
+  body.v4-sidebar .json-modal-b > div[style*="border"]:not([style*="border-left"]) {
+    border-color: var(--n-200) !important;
+  }
+
+  /* ── Sharpen section headers wherever they render. ── */
+  body.v4-sidebar .dash-section-header,
+  body.v4-sidebar h2.section-title, body.v4-sidebar h3.section-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11.5px; font-weight: 500;
+    letter-spacing: 0.5px; text-transform: uppercase;
+    color: var(--n-500);
+    margin: 24px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 0.5px solid var(--n-200);
+  }
+  body.v4-sidebar .dash-section-header .material-icons-outlined,
+  body.v4-sidebar .dash-section-header i.ti { color: var(--brand-600); font-size: 16px; }
+
+  /* ── Buttons that use raw Tailwind classes (bg-white + border-gray-300)
+     should still look like `.mat-btn.outline`. ── */
+  body.v4-sidebar button.bg-white.border {
+    background: var(--n-0);
+    border: 0.5px solid var(--n-300);
+    border-radius: var(--r-md);
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--n-700);
+    transition: background .12s ease, border-color .12s ease;
+  }
+  body.v4-sidebar button.bg-white.border:hover { background: var(--n-100); border-color: var(--n-400); }
+
+  /* ── Common inline-hex overrides that leaked from JS-rendered HTML. ── */
+  body.v4-sidebar [style*="color:#21295C"], body.v4-sidebar [style*="color: #21295C"],
+  body.v4-sidebar [style*="color:#21295c"], body.v4-sidebar [style*="color: #21295c"] { color: var(--n-900) !important; }
+  body.v4-sidebar [style*="color:#6A7591"], body.v4-sidebar [style*="color: #6A7591"] { color: var(--n-500) !important; }
+  body.v4-sidebar [style*="color:#4B5563"], body.v4-sidebar [style*="color: #4B5563"] { color: var(--n-600) !important; }
+  body.v4-sidebar [style*="color:#0F8A4D"], body.v4-sidebar [style*="color: #0F8A4D"] { color: var(--success) !important; }
+  body.v4-sidebar [style*="border-color:#E1E5EE"], body.v4-sidebar [style*="border-color: #E1E5EE"] { border-color: var(--n-200) !important; }
+  body.v4-sidebar [style*="border:1px solid #E1E5EE"], body.v4-sidebar [style*="border: 1px solid #E1E5EE"] { border: 0.5px solid var(--n-200) !important; }
+  body.v4-sidebar [style*="border:1px solid #d1d5db"], body.v4-sidebar [style*="border: 1px solid #d1d5db"] { border: 0.5px solid var(--n-300) !important; }
+
+  /* ── Kill hard box-shadows and shrink border-radius blobs from v3 to v4. ── */
+  body.v4-sidebar [style*="box-shadow:0 4px 14px rgba(33,41,92"] { box-shadow: 0 4px 14px rgba(99,102,241,0.14) !important; }
+  body.v4-sidebar [style*="box-shadow:0 6px 18px rgba(33,41,92"] { box-shadow: 0 6px 18px rgba(24,24,27,0.06) !important; }
+  body.v4-sidebar [style*="box-shadow: 0 4px 14px rgba(33,41,92"] { box-shadow: 0 4px 14px rgba(99,102,241,0.14) !important; }
+
+  /* ── Radio + checkbox — cleaner appearance, indigo accent. ── */
+  body.v4-sidebar input[type="checkbox"], body.v4-sidebar input[type="radio"] {
+    accent-color: var(--brand);
+    width: 15px; height: 15px;
+    cursor: pointer;
+  }
+
+  /* ── Range slider — indigo thumb + track. ── */
+  body.v4-sidebar input[type="range"] { accent-color: var(--brand); }
+
+  /* ── Detail/summary — cleaner disclosure triangle everywhere. ── */
+  body.v4-sidebar details > summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  body.v4-sidebar details > summary::marker,
+  body.v4-sidebar details > summary::-webkit-details-marker { display: none; content: ''; }
+
+  /* ── Codes, deal-code chips, JE row IDs — mono + faint bg. ── */
+  body.v4-sidebar code, body.v4-sidebar .font-mono, body.v4-sidebar .mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    background: var(--n-100);
+    color: var(--n-700);
+    padding: 1px 5px;
+    border-radius: 4px;
+    letter-spacing: -0.2px;
+  }
+
+  /* ════════════════════════════════════════════════════════════════
+     V4 STEP 6b — Full-sweep polish (sidebar · modals · Stage 0 · activity list)
+     ════════════════════════════════════════════════════════════════ */
+
+  /* ── Sidebar refinement — animated active pill, smoother icons. ── */
+  .v4-sb-item {
+    position: relative;
+    transition: background .12s ease, color .12s ease, padding .12s ease;
+  }
+  .v4-sb-item.active::before {
+    content: '';
+    position: absolute; left: -12px; top: 8px; bottom: 8px;
+    width: 3px; background: var(--brand); border-radius: 0 3px 3px 0;
+  }
+  .v4-sb-item i.ti { transition: transform .12s ease; }
+  .v4-sb-item:hover i.ti { transform: scale(1.06); }
+
+  /* ── Modal frame restyle — thin border, softer radius, indigo header hairline. ── */
+  .json-modal { z-index: 10000; }
+  .json-modal-bd { background: rgba(15, 23, 42, 0.42) !important; backdrop-filter: blur(4px); }
+  .json-modal-pn {
+    background: var(--n-0) !important;
+    border-radius: 14px !important;
+    border: 0.5px solid var(--n-200) !important;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.28), 0 4px 12px rgba(0,0,0,0.08) !important;
+    animation: v4ModalIn .22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes v4ModalIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .json-modal-h {
+    padding: 14px 20px !important;
+    border-bottom: 0.5px solid var(--n-200) !important;
+    background: transparent !important;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .json-modal-h > div:first-child > div:first-child {
+    color: var(--n-900) !important;
+    letter-spacing: -0.2px !important;
+  }
+  .json-modal-b {
+    padding: 16px 20px !important;
+    background: transparent !important;
+  }
+  .json-modal-f {
+    padding: 12px 20px !important;
+    border-top: 0.5px solid var(--n-200) !important;
+    background: var(--n-50) !important;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ── Stage 0 Builder section cards — subtle indigo left accent when open. ── */
+  details.builder-section {
+    background: var(--n-0);
+    border: 0.5px solid var(--n-200);
+    border-radius: 12px;
+    margin-bottom: 14px;
+    overflow: hidden;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  details.builder-section[open] { border-color: var(--n-300); box-shadow: 0 2px 8px rgba(24,24,27,0.04); }
+  details.builder-section > summary {
+    padding: 12px 16px;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 12px;
+    background: transparent;
+    border-radius: 12px 12px 0 0;
+    transition: background .12s ease;
+    list-style: none;
+  }
+  details.builder-section > summary::-webkit-details-marker { display: none; }
+  details.builder-section > summary::marker { content: ''; }
+  details.builder-section > summary:hover { background: var(--n-50); }
+  details.builder-section[open] > summary { border-bottom: 0.5px solid var(--n-200); }
+  .builder-section-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    background: var(--brand-50); color: var(--brand-700);
+  }
+  .builder-section-icon.icon-indigo { background: var(--brand-50); color: var(--brand-700); }
+  .builder-section-icon.icon-cyan   { background: #ECFEFF; color: #0E7490; }
+  .builder-section-icon.icon-emerald{ background: #ECFDF5; color: #047857; }
+  .builder-section-icon.icon-amber  { background: #FEF3C7; color: #92400E; }
+  .builder-section-icon.icon-rose   { background: #FFE4E6; color: #9F1239; }
+  .builder-section-icon.icon-violet { background: #F3E8FF; color: #6B21A8; }
+  .builder-section-title {
+    font-size: 14px; font-weight: 600; color: var(--n-900); letter-spacing: -0.2px; line-height: 1.2;
+  }
+  .builder-section-subtitle {
+    font-size: 11.5px; color: var(--n-500); margin-top: 1px; font-weight: 400;
+  }
+  .builder-section-body { padding: 14px 16px 16px; }
+  /* Add-tranche / Add-fee / Add-covenant / Add-component etc.
+     "Create new row" affordance — dashed border to signal a placeholder /
+     insertion point (like Linear/Notion), quiet neutral by default, flips
+     to FIS green on hover so it's obvious what you're adding. */
+  .add-btn-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px 5px 10px;
+    background: transparent;
+    color: var(--n-700);
+    border: 1px dashed var(--n-300);
+    border-radius: 6px;
+    font-size: 12px; font-weight: 500; letter-spacing: -0.05px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
+  }
+  .add-btn-pill:hover {
+    background: var(--fis-green-50);
+    border-color: var(--fis-green);
+    border-style: solid;
+    color: var(--fis-green-700);
+  }
+  .add-btn-pill .material-icons-outlined,
+  .add-btn-pill i.ti { font-size: 15px; color: var(--fis-green); transition: color .12s ease; }
+  .add-btn-pill:hover .material-icons-outlined,
+  .add-btn-pill:hover i.ti { color: var(--fis-green-700); }
+
+  /* ── Builder form inputs — modernised borders + focus state. ── */
+  .b-input {
+    background: var(--n-0) !important;
+    border: 0.5px solid var(--n-300) !important;
+    border-radius: 7px !important;
+    padding: 7px 10px !important;
+    font-family: inherit !important;
+    font-size: 12.5px !important;
+    color: var(--n-900) !important;
+    transition: border-color .12s ease, box-shadow .12s ease !important;
+  }
+  .b-input:focus, .b-input:focus-visible {
+    outline: none !important;
+    border-color: var(--brand) !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.18) !important;
+  }
+  .b-input.b-missing {
+    border-color: var(--danger) !important;
+    background: #FEF2F2 !important;
+    box-shadow: 0 0 0 3px rgba(220,38,38,0.10) !important;
+  }
+
+  /* ── Recent activity list — clean row style used by Dashboard timeline. ── */
+  .v4-activity-list {
+    background: var(--n-0);
+    border: 0.5px solid var(--n-200);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .v4-activity-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    border-top: 0.5px solid var(--n-100);
+    font-size: 12.5px;
+    transition: background .12s ease;
+  }
+  .v4-activity-row:first-child { border-top: none; }
+  .v4-activity-row:hover { background: var(--n-50); }
+  .v4-activity-icon {
+    width: 30px; height: 30px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .v4-activity-icon.type-draw     { background: var(--brand-50); color: var(--brand-700); }
+  .v4-activity-icon.type-paydown  { background: #DCFCE7; color: #065F46; }
+  .v4-activity-icon.type-prepay   { background: #FEF3C7; color: #92400E; }
+  .v4-activity-icon.type-default  { background: #FEE2E2; color: #991B1B; }
+  .v4-activity-icon.type-maturity { background: var(--n-100); color: var(--n-700); }
+  .v4-activity-date  { font-size: 11px; color: var(--n-500); min-width: 90px; }
+  .v4-activity-title { flex: 1; font-weight: 500; color: var(--n-900); letter-spacing: -0.1px; }
+  .v4-activity-amt   { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--n-900); }
+
+  /* ────────────────────────────────────────────────────────────────
+     V4 sidebar layout  ── Left rail 232px, slim top breadcrumb bar 52px.
+     The old top `<header>` + `.tab-nav` stay in the DOM (so all click
+     handlers still work) but are hidden behind display:none. The sidebar
+     links dispatch to the same underlying tab-btn IDs via JS, so no
+     downstream code needs changes.
+     ════════════════════════════════════════════════════════════════ */
+  :root { --sb-w: 232px; --tb-h: 52px; }
+  body.v4-sidebar { padding-left: var(--sb-w); padding-top: var(--tb-h); background: var(--n-50); }
+  body.v4-sidebar > header { display: none !important; }
+  body.v4-sidebar .max-w-\[1400px\] { max-width: 1200px; }
+
+  /* ── Left rail ── */
+  .v4-sidebar-rail {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: var(--sb-w);
+    background: var(--n-0);
+    border-right: 0.5px solid var(--n-200);
+    display: flex; flex-direction: column;
+    z-index: 60;
+    padding: 14px 12px 12px;
+    overflow-y: auto;
+  }
+  .v4-brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px 14px;
+    border-bottom: 0.5px solid var(--n-200);
+    margin-bottom: 10px;
+  }
+  .v4-brand-mark {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: var(--fis-green);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--n-0); font-weight: 600;
+  }
+  .v4-brand-mark i.ti { font-size: 18px; }
+  .v4-brand-text {
+    font-weight: 600; font-size: 14px; letter-spacing: -0.2px; color: var(--n-900);
+  }
+  .v4-brand-badge {
+    margin-left: auto; font-size: 9px; font-weight: 600; letter-spacing: 0.4px;
+    padding: 2px 6px; border-radius: 5px; background: var(--fis-green-100); color: var(--fis-green-700);
+    text-transform: uppercase;
+  }
+  .v4-sb-group-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.55px;
+    color: var(--n-500); font-weight: 500;
+    padding: 12px 10px 6px;
+  }
+  .v4-sb-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    font-size: 13px; color: var(--n-700);
+    cursor: pointer;
+    background: transparent; border: none; width: 100%; text-align: left;
+    transition: background .12s ease, color .12s ease;
+    font-family: inherit;
+  }
+  .v4-sb-item:hover { background: var(--n-100); color: var(--n-900); }
+  .v4-sb-item.active {
+    background: var(--brand-50);
+    color: var(--brand-700);
+    font-weight: 500;
+  }
+  .v4-sb-item.active i.ti,
+  .v4-sb-item.active .material-icons-outlined { color: var(--brand-600); }
+  .v4-sb-item i.ti { font-size: 17px; color: var(--n-500); flex-shrink: 0; }
+  .v4-sb-item .material-icons-outlined { font-size: 17px; color: var(--n-500); flex-shrink: 0; }
+  .v4-sb-item .v4-sb-badge {
+    margin-left: auto; font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 999px;
+    background: var(--danger); color: var(--n-0);
+    display: none;
+  }
+  .v4-sb-item .v4-sb-badge.visible { display: inline-block; }
+  .v4-sb-spacer { flex: 1; min-height: 12px; }
+  .v4-sb-footer {
+    padding: 10px 6px 4px;
+    border-top: 0.5px solid var(--n-200);
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .v4-sb-divider { height: 0.5px; background: var(--n-200); margin: 8px 6px; }
+
+  /* ── Slim top bar (breadcrumb + ⌘K search) ── */
+  .v4-topbar {
+    position: fixed; top: 0; left: var(--sb-w); right: 0;
+    height: var(--tb-h);
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: saturate(180%) blur(10px);
+    border-bottom: 0.5px solid var(--n-200);
+    z-index: 55;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 20px;
+  }
+  .v4-crumbs {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--n-500);
+  }
+  .v4-crumbs .v4-crumb-current {
+    color: var(--n-900); font-weight: 500; letter-spacing: -0.15px;
+  }
+  .v4-crumbs i.ti { font-size: 13px; color: var(--n-400); }
+  .v4-topbar .v4-status-chip {
+    font-size: 10.5px; font-weight: 500;
+    padding: 3px 9px; border-radius: 999px;
+    background: #DCFCE7; color: #065F46;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .v4-topbar .v4-status-chip i.ti { font-size: 11px; }
+  .v4-cmdk-hint {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 10px 5px 12px;
+    background: var(--n-100);
+    border: 0.5px solid var(--n-200);
+    border-radius: 8px;
+    font-size: 12px; color: var(--n-500);
+    cursor: pointer;
+    transition: border-color .12s ease, background .12s ease;
+    min-width: 240px;
+  }
+  .v4-cmdk-hint:hover { border-color: var(--n-300); background: var(--n-0); }
+  .v4-cmdk-hint i.ti { font-size: 14px; }
+  .v4-cmdk-hint .v4-kbd {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px; padding: 1px 5px;
+    border: 0.5px solid var(--n-300); border-radius: 4px;
+    color: var(--n-500); background: var(--n-0);
+  }
 </style>
 </head>
-<body class="min-h-screen">
+<body class="min-h-screen v4-sidebar">
+
+<!-- ══ V4 sidebar ══ Fixed 232px left rail. Groups: Pipeline · Tools · Footer.
+     Every item forwards its click to the underlying (hidden) tab-btn or
+     header chip, so all existing JS keeps working without modification. -->
+<aside class="v4-sidebar-rail" aria-label="Primary navigation">
+  <div class="v4-brand">
+    <span class="v4-brand-mark"><i class="ti ti-hexagon-3d" aria-hidden="true"></i></span>
+    <span class="v4-brand-text">PCS</span>
+    <span class="v4-brand-badge">V4</span>
+  </div>
+
+  <div class="v4-sb-group-label">Pipeline</div>
+  <button class="v4-sb-item active" data-v4-tab="builder"  onclick="v4NavClick(this)">
+    <i class="ti ti-notebook" aria-hidden="true"></i>Loan builder
+  </button>
+  <button class="v4-sb-item" data-v4-tab="stage-1" onclick="v4NavClick(this)">
+    <i class="ti ti-timeline" aria-hidden="true"></i>Cashflow
+  </button>
+  <button class="v4-sb-item" data-v4-tab="stage-2" onclick="v4NavClick(this)">
+    <i class="ti ti-building-bank" aria-hidden="true"></i>Accounting
+  </button>
+  <button class="v4-sb-item" data-v4-tab="dashboard" onclick="v4NavClick(this)">
+    <i class="ti ti-layout-dashboard" aria-hidden="true"></i>Dashboard
+  </button>
+
+  <div class="v4-sb-divider"></div>
+
+  <div class="v4-sb-group-label">Tools</div>
+  <button class="v4-sb-item" onclick="window.openNoticesModal && window.openNoticesModal()">
+    <i class="ti ti-mail-forward" aria-hidden="true"></i>Notices
+    <span class="v4-sb-badge" id="v4-notices-badge">0</span>
+  </button>
+  <button class="v4-sb-item" onclick="window.openWatchlistModal && window.openWatchlistModal()">
+    <i class="ti ti-alert-triangle" aria-hidden="true"></i>Watchlist
+    <span class="v4-sb-badge" id="v4-watchlist-badge">0</span>
+  </button>
+  <button class="v4-sb-item" onclick="window.openPortfolioModal && window.openPortfolioModal()">
+    <i class="ti ti-chart-pie-4" aria-hidden="true"></i>Portfolio
+  </button>
+  <button class="v4-sb-item" onclick="window.openRegulatoryModal && window.openRegulatoryModal()">
+    <i class="ti ti-file-search" aria-hidden="true"></i>Regulatory
+  </button>
+  <button class="v4-sb-item" onclick="window.openFinancialsModal && window.openFinancialsModal()">
+    <i class="ti ti-report-analytics" aria-hidden="true"></i>Financials
+  </button>
+  <button class="v4-sb-item" onclick="window.openCreditAgreementsListModal && window.openCreditAgreementsListModal()">
+    <i class="ti ti-file-certificate" aria-hidden="true"></i>Credit agreements
+  </button>
+  <button class="v4-sb-item" onclick="window.openManageFundsModal && window.openManageFundsModal()">
+    <i class="ti ti-wallet" aria-hidden="true"></i>Manage funds
+  </button>
+
+  <div class="v4-sb-spacer"></div>
+
+  <div class="v4-sb-footer">
+    <button class="v4-sb-item" onclick="window.openDBConfigModal && window.openDBConfigModal()">
+      <i class="ti ti-settings" aria-hidden="true"></i>Settings
+    </button>
+    <button class="v4-sb-item" onclick="window.openAuthModal && window.openAuthModal()">
+      <i class="ti ti-user-circle" aria-hidden="true"></i><span id="v4-auth-label">Sign in</span>
+    </button>
+  </div>
+</aside>
+
+<!-- ══ V4 top breadcrumb bar ══
+     Breadcrumb IS the deal picker (Notion-style). Clicking the deal name
+     opens a dropdown with recent deals + 4 load actions. Status chip beside.
+     Right side: Cmd+K search opens the palette. -->
+<div class="v4-topbar">
+  <div style="position:relative;">
+    <button class="v4-crumbs" id="v4-crumb-btn"
+            onclick="v4ToggleDealMenu(event)"
+            style="background:transparent; border:none; cursor:pointer; padding:5px 8px 5px 4px; border-radius:8px; font-family:inherit;"
+            onmouseover="this.style.background='var(--n-100)'" onmouseout="this.style.background='transparent'"
+            title="Switch deal">
+      <span>Deals</span>
+      <i class="ti ti-chevron-right" aria-hidden="true"></i>
+      <span class="v4-crumb-current" id="v4-crumb-deal-name">No active deal</span>
+      <i class="ti ti-chevron-down" aria-hidden="true" style="font-size:12px; color:var(--n-500); margin-left:4px;"></i>
+    </button>
+    <div id="v4-deal-menu"
+         style="display:none; position:absolute; top:calc(100% + 6px); left:0; min-width:320px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; box-shadow:0 10px 30px rgba(15,23,42,0.14); z-index:100; overflow:hidden;">
+      <div style="padding:8px 12px 6px; font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:0.55px; color:var(--n-500);">Recent</div>
+      <div id="v4-deal-menu-recent" style="max-height:200px; overflow-y:auto;">
+        <div style="padding:10px 14px; font-size:11.5px; color:var(--n-400); font-style:italic;">Load a deal to see it here</div>
+      </div>
+      <div style="height:0.5px; background:var(--n-200); margin:4px 0;"></div>
+      <div style="padding:8px 12px 6px; font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:0.55px; color:var(--n-500);">Actions</div>
+      <button class="v4-lm-item" onclick="v4LoadMenuClick('active')" style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:transparent; border:none; text-align:left; cursor:pointer; font-size:12.5px; color:var(--n-900); font-family:inherit;" onmouseover="this.style.background='var(--n-100)'" onmouseout="this.style.background='transparent'">
+        <i class="ti ti-folder-open" aria-hidden="true" style="font-size:17px; color:var(--success);"></i>
+        <div style="flex:1;">
+          <div style="font-weight:500;">Browse saved library</div>
+          <div style="font-size:10.5px; color:var(--n-500);">All DB-saved and preset deals</div>
+        </div>
+      </button>
+      <button class="v4-lm-item" onclick="v4LoadMenuClick('manual')" style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:transparent; border:none; text-align:left; cursor:pointer; font-size:12.5px; color:var(--n-900); font-family:inherit;" onmouseover="this.style.background='var(--n-100)'" onmouseout="this.style.background='transparent'">
+        <i class="ti ti-edit" aria-hidden="true" style="font-size:17px; color:var(--brand-600);"></i>
+        <div style="flex:1;">
+          <div style="font-weight:500;">Manually build new</div>
+          <div style="font-size:10.5px; color:var(--n-500);">From scratch</div>
+        </div>
+      </button>
+      <button class="v4-lm-item" onclick="v4LoadMenuClick('isin')" style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:transparent; border:none; text-align:left; cursor:pointer; font-size:12.5px; color:var(--n-900); font-family:inherit;" onmouseover="this.style.background='var(--n-100)'" onmouseout="this.style.background='transparent'">
+        <i class="ti ti-database" aria-hidden="true" style="font-size:17px; color:#0891B2;"></i>
+        <div style="flex:1;">
+          <div style="font-weight:500;">From security master</div>
+          <div style="font-size:10.5px; color:var(--n-500);">ISIN · Markit / IHS / LSTA</div>
+        </div>
+      </button>
+      <button class="v4-lm-item" onclick="v4LoadMenuClick('ca')" style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:transparent; border:none; text-align:left; cursor:pointer; font-size:12.5px; color:var(--n-900); font-family:inherit;" onmouseover="this.style.background='var(--n-100)'" onmouseout="this.style.background='transparent'">
+        <i class="ti ti-file-certificate" aria-hidden="true" style="font-size:17px; color:#7C3AED;"></i>
+        <div style="flex:1;">
+          <div style="font-weight:500;">Import credit agreement</div>
+          <div style="font-size:10.5px; color:var(--n-500);">AI-extract from PDF</div>
+        </div>
+      </button>
+    </div>
+  </div>
+  <span class="v4-status-chip" id="v4-status-chip" style="display:none;">
+    <i class="ti ti-circle-check-filled" aria-hidden="true"></i>Performing
+  </span>
+
+  <button class="v4-cmdk-hint" style="margin-left:auto;" onclick="v4OpenCmdK()">
+    <i class="ti ti-search" aria-hidden="true"></i>
+    <span>Search deals or actions</span>
+    <span class="v4-kbd">⌘K</span>
+  </button>
+</div>
+
+<!-- ══ V4 Command palette (⌘K) ══
+     Full-screen overlay. Fuzzy search across every deal + a curated set of
+     high-frequency actions (Run accounting, Post JE, Open Notices, etc.).
+     Keyboard-driven: ↑↓ navigate, ↵ select, Esc close. -->
+<div id="v4-cmdk-overlay" style="display:none; position:fixed; inset:0; z-index:200; background:rgba(15,23,42,0.45); backdrop-filter:blur(3px);" onclick="v4CloseCmdK(event)">
+  <div id="v4-cmdk-panel" style="position:absolute; top:12vh; left:50%; transform:translateX(-50%); width:min(560px, 92vw); background:var(--n-0); border-radius:12px; box-shadow:0 24px 60px rgba(0,0,0,0.35); overflow:hidden; border:0.5px solid var(--n-200);" onclick="event.stopPropagation()">
+    <div style="display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:0.5px solid var(--n-200);">
+      <i class="ti ti-search" aria-hidden="true" style="font-size:18px; color:var(--n-500);"></i>
+      <input id="v4-cmdk-input" type="text" placeholder="Search deals or run an action…"
+             autocomplete="off" spellcheck="false"
+             style="flex:1; border:none; outline:none; font-family:inherit; font-size:14px; color:var(--n-900); background:transparent; letter-spacing:-0.15px;"/>
+      <span class="v4-kbd">Esc</span>
+    </div>
+    <div id="v4-cmdk-list" style="max-height:52vh; overflow-y:auto; padding:6px 0;"></div>
+    <div style="display:flex; gap:14px; padding:8px 16px; border-top:0.5px solid var(--n-200); background:var(--n-50); font-size:11px; color:var(--n-500);">
+      <span><span class="v4-kbd">↑↓</span> Navigate</span>
+      <span><span class="v4-kbd">↵</span> Select</span>
+      <span style="margin-left:auto;">Powered by fuzzy match</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = s => document.querySelector(s);
+
+  window.v4ToggleDealMenu = function(evt){
+    if(evt) evt.stopPropagation();
+    const m = document.getElementById('v4-deal-menu');
+    if(!m) return;
+    const opening = m.style.display !== 'block';
+    m.style.display = opening ? 'block' : 'none';
+    if(opening) v4RenderRecentDeals();
+  };
+  window.v4LoadMenuClick = function(kind){
+    document.getElementById('v4-deal-menu').style.display = 'none';
+    if(kind === 'active')      { window.handleHeaderActiveDealClick && window.handleHeaderActiveDealClick(); }
+    else if(kind === 'manual') { window.handleHeaderManualClick     && window.handleHeaderManualClick(); }
+    else if(kind === 'isin')   { window.handleHeaderIsinClick       && window.handleHeaderIsinClick(); }
+    else if(kind === 'ca')     { window.openCreditAgreementsListModal && window.openCreditAgreementsListModal(); }
+  };
+
+  // Render up to 5 most recent deals from window.PRESETS as quick-pick rows.
+  window.v4RenderRecentDeals = function(){
+    const host = document.getElementById('v4-deal-menu-recent');
+    if(!host) return;
+    const list = (window.PRESETS || []).slice(0, 5);
+    if(!list.length){
+      host.innerHTML = '<div style="padding:10px 14px; font-size:11.5px; color:var(--n-400); font-style:italic;">No saved deals yet</div>';
+      return;
+    }
+    host.innerHTML = list.map(p => {
+      const label = p.label || p.dealCode || 'Unnamed deal';
+      const sub = (p.source === 'db') ? 'Saved · DB' : 'Preset';
+      const iconColor = p.source === 'db' ? 'var(--success)' : 'var(--brand-600)';
+      const key = (p.key || p.dealCode || label).replace(/'/g, "\\'");
+      return '<button class="v4-lm-item" onclick="v4PickDeal(\'' + key + '\')"'
+        + ' style="width:100%; display:flex; align-items:center; gap:10px; padding:8px 14px; background:transparent; border:none; text-align:left; cursor:pointer; font-family:inherit;"'
+        + ' onmouseover="this.style.background=\'var(--n-100)\'" onmouseout="this.style.background=\'transparent\'">'
+        + '<i class="ti ti-notebook" aria-hidden="true" style="font-size:15px; color:' + iconColor + ';"></i>'
+        + '<div style="flex:1; min-width:0;">'
+        +   '<div style="font-size:12.5px; font-weight:500; color:var(--n-900); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + label + '</div>'
+        +   '<div style="font-size:10.5px; color:var(--n-500);">' + sub + '</div>'
+        + '</div>'
+      + '</button>';
+    }).join('');
+  };
+  window.v4PickDeal = function(key){
+    document.getElementById('v4-deal-menu').style.display = 'none';
+    const p = (window.PRESETS || []).find(x => (x.key || x.dealCode || x.label) === key);
+    if(!p) return;
+    if(typeof window.loadPresetByObject === 'function') window.loadPresetByObject(p);
+    else if(typeof window.loadPresetByKey === 'function') window.loadPresetByKey(p.key);
+  };
+
+  // ═══ Cmd+K palette ═══════════════════════════════════════════════
+  const ACTIONS = [
+    { id:'run-accounting',   label:'Run accounting',        hint:'Rebuild JE batch for the active deal', icon:'ti-calculator',   fn:() => window.runAccounting && window.runAccounting() },
+    { id:'sync-cashflow',    label:'Sync cashflow',         hint:'Refresh Stage 1 from Builder state',   icon:'ti-refresh',      fn:() => window.syncCashflowsFromStage2 && window.syncCashflowsFromStage2() },
+    { id:'open-notices',     label:'Open notices',          hint:'Loan agent notices inbox',             icon:'ti-mail-forward', fn:() => window.openNoticesModal && window.openNoticesModal() },
+    { id:'open-watchlist',   label:'Open watchlist',        hint:'Cross-portfolio early-warning',        icon:'ti-alert-triangle', fn:() => window.openWatchlistModal && window.openWatchlistModal() },
+    { id:'open-portfolio',   label:'Open portfolio',        hint:'Yield · Duration · WAL · DV01',        icon:'ti-chart-pie-4',  fn:() => window.openPortfolioModal && window.openPortfolioModal() },
+    { id:'open-regulatory',  label:'Open regulatory reports', hint:'Form PF · AIFMD · FR Y-14Q',         icon:'ti-file-search',  fn:() => window.openRegulatoryModal && window.openRegulatoryModal() },
+    { id:'open-financials',  label:'Open borrower financials', hint:'AI-extract statements',            icon:'ti-report-analytics', fn:() => window.openFinancialsModal && window.openFinancialsModal() },
+    { id:'open-ca',          label:'Open credit agreements',hint:'Browse · AI-extract from PDF',         icon:'ti-file-certificate', fn:() => window.openCreditAgreementsListModal && window.openCreditAgreementsListModal() },
+    { id:'open-funds',       label:'Manage funds',          hint:'Create / edit fund allocations',       icon:'ti-wallet',       fn:() => window.openManageFundsModal && window.openManageFundsModal() },
+    { id:'new-manual',       label:'New deal — build manually',hint:'Blank Builder',                    icon:'ti-edit',         fn:() => window.handleHeaderManualClick && window.handleHeaderManualClick() },
+    { id:'new-isin',         label:'New deal — from security master', hint:'ISIN lookup',              icon:'ti-database',      fn:() => window.handleHeaderIsinClick && window.handleHeaderIsinClick() },
+    { id:'goto-builder',     label:'Go to Loan builder',    hint:'Stage 0',                              icon:'ti-notebook',     fn:() => document.querySelector('.tab-btn[data-tab="builder"]')?.click() },
+    { id:'goto-cashflow',    label:'Go to Cashflow',        hint:'Stage 1',                              icon:'ti-timeline',     fn:() => document.querySelector('.tab-btn[data-tab="stage-1"]')?.click() },
+    { id:'goto-accounting',  label:'Go to Accounting',      hint:'Stage 2',                              icon:'ti-building-bank',fn:() => document.querySelector('.tab-btn[data-tab="stage-2"]')?.click() },
+    { id:'goto-dashboard',   label:'Go to Dashboard',       hint:'Loan overview',                        icon:'ti-layout-dashboard', fn:() => document.querySelector('.tab-btn[data-tab="dashboard"]')?.click() },
+    { id:'open-settings',    label:'Open settings',         hint:'DB · DIU · Interface preferences',     icon:'ti-settings',     fn:() => window.openDBConfigModal && window.openDBConfigModal() }
+  ];
+  let cmdkItems = [], cmdkSelected = 0;
+
+  function fuzzyScore(query, text){
+    if(!query) return 1;
+    const q = query.toLowerCase(), t = text.toLowerCase();
+    if(t.indexOf(q) === 0) return 3;              // prefix match — best
+    if(t.indexOf(q) >= 0) return 2;               // substring
+    // Character-by-character subsequence match
+    let qi = 0;
+    for(let ti = 0; ti < t.length && qi < q.length; ti++){
+      if(t[ti] === q[qi]) qi++;
+    }
+    return qi === q.length ? 1 : 0;
+  }
+
+  function buildCmdkItems(query){
+    const items = [];
+    // Deals — from window.PRESETS
+    (window.PRESETS || []).forEach(p => {
+      const label = p.label || p.dealCode || 'Unnamed';
+      const score = fuzzyScore(query, label) * 1.1;      // deals slight boost
+      if(score > 0){
+        items.push({
+          kind: 'deal', label, score,
+          hint: p.source === 'db' ? 'Saved · DB' : 'Preset',
+          icon: 'ti-notebook',
+          fn: () => v4PickDeal(p.key || p.dealCode || label)
+        });
+      }
+    });
+    // Actions
+    ACTIONS.forEach(a => {
+      const s = fuzzyScore(query, a.label);
+      const s2 = fuzzyScore(query, a.hint || '');
+      const score = Math.max(s, s2 * 0.6);
+      if(score > 0){
+        items.push({ kind:'action', label:a.label, hint:a.hint, icon:a.icon, score, fn:a.fn });
+      }
+    });
+    items.sort((a, b) => b.score - a.score);
+    return items.slice(0, 30);
+  }
+
+  function renderCmdk(){
+    const list = document.getElementById('v4-cmdk-list');
+    if(!list) return;
+    if(!cmdkItems.length){
+      list.innerHTML = '<div style="padding:24px; text-align:center; color:var(--n-500); font-size:13px;">No matches</div>';
+      return;
+    }
+    list.innerHTML = cmdkItems.map((it, i) =>
+      '<button data-idx="' + i + '" class="v4-cmdk-row" onclick="v4CmdkPick(' + i + ')"'
+      + ' style="width:100%; display:flex; align-items:center; gap:12px; padding:10px 16px; background:' + (i === cmdkSelected ? 'var(--brand-50)' : 'transparent') + '; border:none; text-align:left; cursor:pointer; font-family:inherit; border-left:2px solid ' + (i === cmdkSelected ? 'var(--brand)' : 'transparent') + ';">'
+      +   '<i class="ti ' + (it.icon || 'ti-command') + '" aria-hidden="true" style="font-size:17px; color:' + (i === cmdkSelected ? 'var(--brand-700)' : 'var(--n-500)') + '; flex-shrink:0;"></i>'
+      +   '<div style="flex:1; min-width:0;">'
+      +     '<div style="font-size:13px; font-weight:' + (i === cmdkSelected ? '500' : '400') + '; color:var(--n-900); letter-spacing:-0.1px;">' + it.label + '</div>'
+      +     (it.hint ? '<div style="font-size:11px; color:var(--n-500); margin-top:1px;">' + it.hint + '</div>' : '')
+      +   '</div>'
+      +   '<span style="font-size:10px; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-400); font-weight:500;">' + it.kind + '</span>'
+      + '</button>'
+    ).join('');
+    const active = list.querySelector('.v4-cmdk-row[data-idx="' + cmdkSelected + '"]');
+    if(active) active.scrollIntoView({ block:'nearest' });
+  }
+  window.v4CmdkPick = function(idx){
+    const it = cmdkItems[idx];
+    if(!it) return;
+    v4CloseCmdK();
+    try { it.fn(); } catch(err){ console.error('[cmdk] action failed:', err); }
+  };
+  window.v4OpenCmdK = function(){
+    const ov = document.getElementById('v4-cmdk-overlay');
+    const inp = document.getElementById('v4-cmdk-input');
+    ov.style.display = 'block';
+    inp.value = '';
+    cmdkItems = buildCmdkItems('');
+    cmdkSelected = 0;
+    renderCmdk();
+    setTimeout(() => inp.focus(), 30);
+  };
+  window.v4CloseCmdK = function(evt){
+    if(evt && evt.target && evt.target.id !== 'v4-cmdk-overlay') return;
+    document.getElementById('v4-cmdk-overlay').style.display = 'none';
+  };
+  document.addEventListener('input', function(e){
+    if(e.target && e.target.id === 'v4-cmdk-input'){
+      cmdkItems = buildCmdkItems(e.target.value);
+      cmdkSelected = 0;
+      renderCmdk();
+    }
+  });
+  // Global keyboard shortcut + nav
+  document.addEventListener('keydown', function(e){
+    const overlay = document.getElementById('v4-cmdk-overlay');
+    const open = overlay && overlay.style.display === 'block';
+    // ⌘K / Ctrl+K to open
+    if((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k'){
+      e.preventDefault();
+      if(open) v4CloseCmdK(); else v4OpenCmdK();
+      return;
+    }
+    if(!open) return;
+    if(e.key === 'Escape'){ e.preventDefault(); v4CloseCmdK(); }
+    else if(e.key === 'ArrowDown'){ e.preventDefault(); cmdkSelected = Math.min(cmdkItems.length - 1, cmdkSelected + 1); renderCmdk(); }
+    else if(e.key === 'ArrowUp'){   e.preventDefault(); cmdkSelected = Math.max(0, cmdkSelected - 1); renderCmdk(); }
+    else if(e.key === 'Enter'){     e.preventDefault(); v4CmdkPick(cmdkSelected); }
+  });
+  // Outside-click closes the deal menu (breadcrumb dropdown)
+  document.addEventListener('click', function(e){
+    const m = document.getElementById('v4-deal-menu');
+    const b = document.getElementById('v4-crumb-btn');
+    if(!m || !b) return;
+    if(m.style.display !== 'block') return;
+    if(m.contains(e.target) || b.contains(e.target)) return;
+    m.style.display = 'none';
+  });
+})();
+</script>
+
 
 <!-- ===== Header — sticky at top of viewport ===== -->
 <header class="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-md" style="backdrop-filter:saturate(180%) blur(8px); background:rgba(255,255,255,0.96);">
@@ -777,53 +1959,64 @@
      interest rate links to the calculation breakdown (base + spread +
      ratchet + ESG). -->
 <section id="builder" class="stage-card stage-tab-content tab-visible p-5">
-  <!-- ═══════════════════ HERO STRIP — Deal Summary Preview ═══════════════════ -->
-  <div class="builder-hero" style="background: linear-gradient(135deg, #21295C 0%, #2E3A7B 60%, #4338ca 100%); border-radius: 14px; padding: 20px 24px; margin-bottom: 18px; color: white; position: relative; overflow: hidden;">
-    <div style="position:absolute; top:-30px; right:-30px; width:200px; height:200px; background:radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%); border-radius:50%;"></div>
-    <div style="position:absolute; bottom:-50px; left:30%; width:300px; height:300px; background:radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 60%); border-radius:50%;"></div>
-    <div style="display:flex; align-items:flex-start; gap:18px; flex-wrap:wrap; position:relative;">
-      <div style="background:rgba(255,255,255,0.12); backdrop-filter:blur(8px); border-radius:12px; padding:12px; border:1px solid rgba(255,255,255,0.18);">
-        <span class="material-icons-outlined" style="font-size:32px;">design_services</span>
+  <!-- ═══════════════════ V4 HERO — flat, minimal ═══════════════════
+       Was a heavy navy-indigo gradient banner with dark KPI tiles and
+       gradient green buttons. Now: white card, thin border, indigo icon,
+       compact stat row, flat black primary button. -->
+  <div class="builder-hero" style="background: var(--n-0); border: 1px solid var(--n-200); border-radius: 12px; padding: 16px 20px; margin-bottom: 18px;">
+    <div style="display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap;">
+      <!-- Icon tile -->
+      <div style="background: var(--brand-50); color: var(--brand-700); border-radius: 10px; width: 42px; height: 42px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <i class="ti ti-notebook" aria-hidden="true" style="font-size:22px;"></i>
       </div>
-      <div style="flex:1; min-width:280px;">
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-          <span style="font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; opacity:0.7;">Step 0 of 5 · Start here</span>
-          <span id="step-state-builder" style="background:rgba(255,255,255,0.18); padding:2px 10px; border-radius:12px; font-size:10px; font-weight:600;">Empty</span>
+      <!-- Title + subtitle + stats -->
+      <div style="flex:1; min-width:260px;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:10.5px; font-weight:500; letter-spacing:0.5px; text-transform:uppercase; color:var(--n-500);">Step 0 · Start here</span>
+          <span id="step-state-builder" style="background:var(--n-100); color:var(--n-700); border:0.5px solid var(--n-200); padding:2px 8px; border-radius:999px; font-size:10.5px; font-weight:500;">Empty</span>
         </div>
-        <h1 id="hero-deal-name" style="font-size:24px; font-weight:700; margin:6px 0 4px; letter-spacing:-0.5px;">Loan Builder</h1>
-        <p style="font-size:12px; opacity:0.85; line-height:1.5; max-width:680px;">Define deal, facility, tranches, interest components and fees from scratch — full transparency, no black-box calculations. Each interest component supports multiple terms, lookback, lockout, multi-spread schedules, and KPI-driven ratchets.</p>
-        <!-- Live deal summary stats -->
-        <div id="hero-stats" style="display:flex; gap:16px; margin-top:14px; flex-wrap:wrap;">
-          <div class="hero-stat"><div class="hero-stat-label">Commitment</div><div class="hero-stat-val" id="hero-commitment">—</div></div>
-          <div class="hero-stat"><div class="hero-stat-label">Tranches</div><div class="hero-stat-val" id="hero-tranches">0</div></div>
-          <div class="hero-stat"><div class="hero-stat-label">Interest Components</div><div class="hero-stat-val" id="hero-components">0</div></div>
-          <div class="hero-stat"><div class="hero-stat-label">Fees</div><div class="hero-stat-val" id="hero-fees-count">0</div></div>
-          <div class="hero-stat"><div class="hero-stat-label">Framework</div><div class="hero-stat-val" id="hero-framework">IFRS</div></div>
+        <h1 id="hero-deal-name" style="font-size:20px; font-weight:600; margin:4px 0 2px; letter-spacing:-0.35px; color:var(--n-900);">Loan Builder</h1>
+        <p style="font-size:12px; color:var(--n-500); line-height:1.5; max-width:680px; margin:0;">Define deal, facility, tranches, interest components and fees from scratch.</p>
+        <!-- Live deal summary stats — proper KPI cards with icon, label, value. -->
+        <div id="hero-stats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:14px;">
+          <div class="hero-stat">
+            <div class="hero-stat-head"><i class="ti ti-currency-dollar" aria-hidden="true"></i><span class="hero-stat-label">Commitment</span></div>
+            <div class="hero-stat-val" id="hero-commitment">—</div>
+          </div>
+          <div class="hero-stat">
+            <div class="hero-stat-head"><i class="ti ti-stack-2" aria-hidden="true"></i><span class="hero-stat-label">Tranches</span></div>
+            <div class="hero-stat-val" id="hero-tranches">0</div>
+          </div>
+          <div class="hero-stat">
+            <div class="hero-stat-head"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i><span class="hero-stat-label">Components</span></div>
+            <div class="hero-stat-val" id="hero-components">0</div>
+          </div>
+          <div class="hero-stat">
+            <div class="hero-stat-head"><i class="ti ti-receipt" aria-hidden="true"></i><span class="hero-stat-label">Fees</span></div>
+            <div class="hero-stat-val" id="hero-fees-count">0</div>
+          </div>
+          <div class="hero-stat">
+            <div class="hero-stat-head"><i class="ti ti-scale-outline" aria-hidden="true"></i><span class="hero-stat-label">Framework</span></div>
+            <div class="hero-stat-val" id="hero-framework">IFRS</div>
+          </div>
         </div>
       </div>
-      <div style="display:flex; flex-direction:column; gap:8px; position:relative; z-index:1;">
-        <button id="btn-builder-reset" style="background:transparent; border:1px solid rgba(255,255,255,0.25); color:white; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer; transition:all 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
-          <span class="material-icons-outlined" style="font-size:16px;">restart_alt</span>Reset
+      <!-- Action stack — flat buttons. -->
+      <div style="display:flex; flex-direction:column; gap:8px; align-items:stretch; min-width:180px;">
+        <button id="btn-builder-toS2" class="mat-btn primary" style="justify-content:center;">
+          <i class="ti ti-arrow-right" aria-hidden="true"></i>Send to cashflow
         </button>
-        <!-- V3: persist the current builder state (window.B) to Supabase. -->
-        <button id="btn-builder-save-db" onclick="window.handleBuilderSaveDBClick && window.handleBuilderSaveDBClick()"
-                style="background:linear-gradient(135deg, #3ECF8E 0%, #10B981 100%); border:1px solid rgba(255,255,255,0.3); color:white; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:700; display:flex; align-items:center; gap:6px; cursor:pointer; transition:all 0.15s; box-shadow:0 2px 8px rgba(16,185,129,0.35);"
-                onmouseover="this.style.boxShadow='0 4px 14px rgba(16,185,129,0.55)'; this.style.transform='translateY(-1px)'"
-                onmouseout="this.style.boxShadow='0 2px 8px rgba(16,185,129,0.35)'; this.style.transform=''"
-                title="Save current Builder state to the Supabase database (deals/facilities/tranches/...)">
-          <span class="material-icons-outlined" style="font-size:16px;">cloud_upload</span>Save to DB
+        <button id="btn-builder-save-db" class="mat-btn outline" onclick="window.handleBuilderSaveDBClick && window.handleBuilderSaveDBClick()" style="justify-content:center;" title="Save current Builder state to Supabase">
+          <i class="ti ti-cloud-upload" aria-hidden="true"></i>Save to DB
         </button>
-        <button id="btn-builder-toS2" style="background:linear-gradient(135deg, #10b981 0%, #059669 100%); color:white; padding:10px 16px; border-radius:8px; font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; cursor:pointer; border:0; box-shadow:0 4px 14px rgba(16,185,129,0.4); transition:all 0.15s;" onmouseover="this.style.boxShadow='0 6px 20px rgba(16,185,129,0.55)'; this.style.transform='translateY(-1px)'" onmouseout="this.style.boxShadow='0 4px 14px rgba(16,185,129,0.4)'; this.style.transform=''">
-          <span class="material-icons-outlined" style="font-size:18px;">arrow_forward</span>Send to Cashflow Generation
+        <button id="btn-builder-reset" class="mat-btn ghost" style="justify-content:center;">
+          <i class="ti ti-refresh" aria-hidden="true"></i>Reset
         </button>
-        <span id="builder-status" style="text-align:center; font-size:10px; padding:3px 8px; border-radius:10px; background:rgba(255,255,255,0.12); margin-top:2px;">Empty</span>
-        <!-- V3 — auto-save status. Hidden until a DB-saved deal is loaded.
-             Click to flush pending edits immediately. -->
-        <span id="autosave-status"
-              onclick="window.AutoSave && window.AutoSave.flush()"
+        <span id="builder-status" style="text-align:center; font-size:10.5px; padding:3px 8px; border-radius:999px; background:var(--n-100); color:var(--n-500); font-weight:500;">Empty</span>
+        <span id="autosave-status" onclick="window.AutoSave && window.AutoSave.flush()"
               title="Auto-save status (click to save now)"
-              style="display:none; text-align:center; font-size:10px; padding:3px 8px; border-radius:10px; background:rgba(255,255,255,0.12); margin-top:2px; cursor:pointer; gap:4px; align-items:center; justify-content:center;">
-          <span class="material-icons-outlined" style="font-size:11px; vertical-align:-1px; margin-right:2px;">cloud_done</span>
+              style="display:none; text-align:center; font-size:10.5px; padding:3px 8px; border-radius:999px; background:var(--n-100); color:var(--n-500); cursor:pointer; font-weight:500;">
+          <i class="ti ti-cloud-check" aria-hidden="true" style="font-size:12px; vertical-align:-1px; margin-right:2px;"></i>
           <span id="autosave-status-text">Idle</span>
         </span>
       </div>
@@ -831,10 +2024,26 @@
   </div>
 
   <style>
-    .hero-stat { background: rgba(255,255,255,0.08); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 8px 14px; min-width: 100px; }
-    .hero-stat-label { font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; opacity: 0.65; }
-    .hero-stat-val { font-size: 16px; font-weight: 700; margin-top: 2px; letter-spacing: -0.3px; }
-    .builder-section { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 0; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); overflow: hidden; transition: box-shadow 0.2s; scroll-margin-top: 180px; }
+    /* V4 hero KPI cards — each stat is a bordered tile matching the Dashboard
+       secondary strip. Icon + uppercase label on the top row, big tabular-num
+       value below. Subtle hover lift signals live values. */
+    .hero-stat {
+      background: var(--n-0);
+      border: 0.5px solid var(--n-200);
+      border-radius: 10px;
+      padding: 10px 12px;
+      min-width: 0;
+      transition: border-color .12s ease, box-shadow .12s ease;
+    }
+    .hero-stat:hover { border-color: var(--n-300); box-shadow: 0 2px 6px rgba(24,24,27,0.04); }
+    .hero-stat-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .hero-stat-head i.ti { font-size: 13px; color: var(--n-400); flex-shrink: 0; }
+    .hero-stat-label { font-size: 10px; font-weight: 500; letter-spacing: 0.4px; text-transform: uppercase; color: var(--n-500); }
+    .hero-stat-val { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; color: var(--n-900); font-variant-numeric: tabular-nums; word-break: break-word; }
+    /* v3 baseline kept for scroll-margin only — visual styling handled by the
+       top-level `details.builder-section` block from step 6b (0.5px zinc border,
+       12px radius, hover reveal). */
+    .builder-section { scroll-margin-top: 180px; }
   /* Stage 2 → Stage 1 manual sync button.
      Default state = neutral outline. "needs sync" state = amber background +
      pulsing shadow ring to grab attention without being annoying. */
@@ -878,13 +2087,14 @@
     /* Highlight a field that failed validation */
     .b-input.b-missing { border-color: #DC2626 !important; background: #FEF2F2 !important; box-shadow: 0 0 0 3px rgba(220,38,38,0.10); }
     .b-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-    .add-btn-pill { background: linear-gradient(135deg, #21295C 0%, #4338ca 100%); color: white; border: 0; padding: 6px 14px; border-radius: 999px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; box-shadow: 0 2px 8px rgba(67,56,202,0.25); transition: all 0.15s; }
-    .add-btn-pill:hover { box-shadow: 0 4px 14px rgba(67,56,202,0.4); transform: translateY(-1px); }
-    .icon-indigo { background: linear-gradient(135deg, #eef2ff 0%, #c7d2fe 100%); color: #4338ca; }
-    .icon-emerald { background: linear-gradient(135deg, #ecfdf5 0%, #a7f3d0 100%); color: #059669; }
-    .icon-amber { background: linear-gradient(135deg, #fffbeb 0%, #fde68a 100%); color: #b45309; }
-    .icon-rose { background: linear-gradient(135deg, #fff1f2 0%, #fecdd3 100%); color: #be123c; }
-    .icon-slate { background: linear-gradient(135deg, #f1f5f9 0%, #cbd5e1 100%); color: #334155; }
+    /* V4: the .add-btn-pill and .icon-* rules that used to live here (navy→indigo
+       gradient pill + gradient icon tiles) were overriding the flat FIS-green
+       system defined at the top of the file. Removed so the top-level rules win.
+       If you re-add anything here, keep it flat and use var(--fis-green*). */
+    .icon-emerald { background: var(--fis-green-50); color: var(--fis-green-700); }
+    .icon-amber   { background: #FEF3C7; color: #92400E; }
+    .icon-rose    { background: #FFE4E6; color: #9F1239; }
+    .icon-slate   { background: var(--n-100); color: var(--n-600); }
   </style>
 
   <!-- Entry choice cards moved to the global header (Manual / Security Master /
@@ -983,7 +2193,7 @@
       <summary>
         <div class="builder-section-icon icon-amber"><span class="material-icons-outlined" style="font-size:20px;">layers</span></div>
         <div style="flex:1;"><div class="builder-section-title">Tranches <span id="tranches-count-chip" style="font-size:10px; font-weight:600; background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:10px; margin-left:6px;">0</span></div><div class="builder-section-subtitle">One or more — independent face value, currency, interest setup</div></div>
-        <button id="btn-add-tranche" class="add-btn-pill" onclick="event.stopPropagation()"><span class="material-icons-outlined" style="font-size:14px;">add</span>Add tranche</button>
+        <button id="btn-add-tranche" class="add-btn-pill" onclick="event.stopPropagation()"><i class="ti ti-plus" aria-hidden="true"></i>Add tranche</button>
       </summary>
       <div class="builder-section-body">
         <div id="tranche-validation-banner" style="display:none; margin-bottom:10px;"></div>
@@ -996,7 +2206,7 @@
       <summary>
         <div class="builder-section-icon icon-rose"><span class="material-icons-outlined" style="font-size:20px;">request_quote</span></div>
         <div style="flex:1;"><div class="builder-section-title">Fees <span id="fees-count-chip" style="font-size:10px; font-weight:600; background:#ffe4e6; color:#9f1239; padding:2px 8px; border-radius:10px; margin-left:6px;">0</span></div><div class="builder-section-subtitle">Fix · Float · % over interest component · % over funded / unfunded balances</div></div>
-        <button id="btn-add-fee" class="add-btn-pill" onclick="event.stopPropagation()"><span class="material-icons-outlined" style="font-size:14px;">add</span>Add fee</button>
+        <button id="btn-add-fee" class="add-btn-pill" onclick="event.stopPropagation()"><i class="ti ti-plus" aria-hidden="true"></i>Add fee</button>
       </summary>
       <div class="builder-section-body">
         <div id="fees-container" style="display:grid; gap:10px;"></div>
@@ -1011,7 +2221,7 @@
           <div class="builder-section-title">Covenants &amp; Reporting <span id="covenants-count-chip" style="font-size:10px; font-weight:600; background:#ede9fe; color:#5b21b6; padding:2px 8px; border-radius:10px; margin-left:6px;">0</span></div>
           <div class="builder-section-subtitle">Financial maintenance · Incurrence · Information · ESG (SLL) · Borrowing base · drives ECL SICR + ratchets + mandatory prepayments</div>
         </div>
-        <button id="btn-add-covenant" class="add-btn-pill" onclick="event.stopPropagation()"><span class="material-icons-outlined" style="font-size:14px;">add</span>Add covenant</button>
+        <button id="btn-add-covenant" class="add-btn-pill" onclick="event.stopPropagation()"><i class="ti ti-plus" aria-hidden="true"></i>Add covenant</button>
       </summary>
       <div class="builder-section-body">
         <div id="covenants-container" style="display:grid; gap:10px;">
@@ -1037,7 +2247,7 @@
             <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">tune</span> Manage funds
           </button>
           <button id="btn-add-allocation" class="add-btn-pill" onclick="window.addFundAllocationRow && window.addFundAllocationRow(); event.stopPropagation()">
-            <span class="material-icons-outlined" style="font-size:14px;">add</span>Add allocation
+            <i class="ti ti-plus" aria-hidden="true"></i>Add allocation
           </button>
         </div>
       </summary>
@@ -4685,7 +5895,14 @@ window.SB = (function(){
         //   detectSessionInUrl=true→ magic-link callbacks work (Supabase parses ?code=… on load)
         // These were previously false, which caused the "signed in for 500ms then
         // forgotten after location.reload()" bug (#234).
-        const options = { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'pcs_v3_auth' } };
+        // V4 fix: previously we set `storageKey: 'pcs_v3_auth'` which mysteriously
+        // caused the initial `.from().select()` probe to hang indefinitely (verified
+        // via isolated repro — dropping the storageKey completes the same probe in
+        // ~130ms; keeping it hangs past 4s). Falling back to Supabase's default key
+        // `sb-<projectRef>-auth-token` restores connectivity and still persists the
+        // session across reloads. Legacy `pcs_v3_auth` cache in localStorage is
+        // stale and safe to ignore.
+        const options = { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } };
         // For raw PostgREST, allow custom headers if the user configured them.
         if(BACKEND_TYPE === 'postgrest' && _cfg.authScheme === 'bearer' && _cfg.authValue){
           options.global = { headers: { 'Authorization': 'Bearer ' + _cfg.authValue } };
@@ -4693,7 +5910,15 @@ window.SB = (function(){
           options.global = { headers: { 'apikey': _cfg.authValue } };
         }
         _client = window.__supabaseCreateClient(SUPABASE_URL, key || ' ', options);
-        const { error } = await _client.from('preset_catalog').select('preset_key').limit(1);
+        // V4 fix: guard the probe with a hard timeout. If Chrome's connection
+        // pool is exhausted (6-per-origin cap) the supabase-js query would
+        // otherwise hang forever — leaving the client in a half-initialised
+        // state where the "Not connected" error surfaces at every sign-in
+        // attempt with no way to recover except closing the tab. Now we fail
+        // fast so the user can see a clear error and retry / re-open.
+        const probe = _client.from('preset_catalog').select('preset_key').limit(1);
+        const probeTimeout = new Promise((_, rj) => setTimeout(() => rj(new Error('probe timeout · Chrome connection pool may be exhausted — close and reopen the tab')), 6000));
+        const { error } = await Promise.race([probe, probeTimeout]);
         if(error) throw error;
       } else if(typeSpec.transport === 'fetch'){
         // Custom REST — create a thin wrapper that mimics the supabase-js API
@@ -22501,32 +23726,151 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
 
     const lastRow = sched[sched.length - 1];
 
-    // ── KPI cards ────────────────────────────────────────────────────
-    const kpiCards = [
-      { label: 'Active Deal',        value: inst.deal,                   sub: inst.legalEntity || '' },
-      { label: 'Framework',          value: '📋 ' + fw.label,            sub: fw.ecl.name },
-      { label: 'Face Value',         value: fmtMoneyDash(inst.faceValue, ccy), sub: 'Currency · ' + ccy },
-      { label: 'Carrying Value',     value: lastRow ? fmtMoneyDash(lastRow.carryingValue, ccy) : '—',
-                                      sub: 'Closing · ' + (inst.maturityDate || '?') },
-      { label: 'Coupon',             value: inst.coupon && inst.coupon.fixedRate ? fmtPctDash(inst.coupon.fixedRate, 4)
-                                            : (inst.coupon && inst.coupon.type) || '—',
-                                      sub: (inst.coupon && inst.coupon.type) || '' },
-      { label: 'Effective Yield',    value: fmtPctDash(eirVal, 4),       sub: eir ? (eir.eirMethodLabel || eir.method || '') : '' },
-      { label: 'Settlement → Maturity', value: (inst.settlementDate || '?') + ' → ' + (inst.maturityDate || '?'),
-                                      sub: sched.length ? sched.length + ' days' : '' },
-      { label: 'Total Interest (life)', value: summary ? fmtMoneyDash(summary.totalCashAccrual, ccy) : '—',
-                                      sub: summary && summary.totalDefaultInterest ? '+ default $' + Math.round(summary.totalDefaultInterest).toLocaleString() : '' }
-    ];
-
-    let kpiHTML = '<div class="dash-grid">';
-    for(const k of kpiCards){
-      kpiHTML += `<div class="dash-card">
-        <div class="dash-card-label">${k.label}</div>
-        <div class="dash-card-value">${k.value}</div>
-        ${k.sub ? `<div class="dash-card-sub">${k.sub}</div>` : ''}
-      </div>`;
+    // ── V4 KPI cards ── Sparklines + progress bars + Tabler icons.
+    // Sample the daily schedule down to ~40 points for the sparkline. Full-fidelity
+    // would blow the SVG DOM up for a 4-year loan (1500 rows). Uniform stride.
+    function sample(arr, count){
+      if(!arr || arr.length <= count) return arr || [];
+      const out = []; const step = arr.length / count;
+      for(let i = 0; i < count; i++){ out.push(arr[Math.floor(i * step)]); }
+      out.push(arr[arr.length - 1]);
+      return out;
     }
-    kpiHTML += '</div>';
+    // Build a mini-sparkline SVG from a sampled series. Returns HTML string.
+    function sparkline(series, opts){
+      opts = opts || {};
+      const w = opts.w || 100, h = opts.h || 22;
+      const color = opts.color || '#6366F1';
+      if(!series || series.length < 2) return '';
+      const min = Math.min(...series), max = Math.max(...series);
+      const range = Math.max(1e-9, max - min);
+      const step = w / (series.length - 1);
+      const pts = series.map((v, i) => {
+        const x = i * step;
+        const y = h - 2 - ((v - min) / range) * (h - 4);
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      const areaPts = pts + ' ' + w + ',' + h + ' 0,' + h;
+      return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '" preserveAspectRatio="none" style="display:block; margin-top:8px;">'
+        + '<polygon points="' + areaPts + '" fill="' + color + '" opacity="0.12"/>'
+        + '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        + '</svg>';
+    }
+    function progressBar(pct, color){
+      const c = color || '#6366F1';
+      const p = Math.max(0, Math.min(100, +pct || 0));
+      return '<div style="height:6px; background:var(--n-200); border-radius:999px; margin-top:10px; overflow:hidden;">'
+        + '<div style="width:' + p.toFixed(1) + '%; height:100%; background:' + c + '; border-radius:999px; transition:width .35s ease;"></div>'
+        + '</div>';
+    }
+
+    // Series for sparklines: balance-over-time and cumulative-cash-interest.
+    const balanceSeries = sample(sched.map(r => +r.balance || 0), 40);
+    let cum = 0;
+    const cumInterestSeries = sample(sched.map(r => { cum += (+r.dailyCash || 0); return cum; }), 40);
+
+    // Utilization = peak balance / commitment.
+    const commitment = +(inst.commitment) || +(inst.faceValue) || 0;
+    const peakBalance = sched.length ? Math.max(...sched.map(r => +r.balance || 0)) : 0;
+    const utilPct = commitment ? (peakBalance / commitment * 100) : 0;
+
+    // Interest / fee totals from summary.
+    const totalInterest = summary ? (+summary.totalCashAccrual || 0) : 0;
+    const totalFees     = summary ? (+summary.totalFees        || 0) : 0;
+    const totalIncome   = totalInterest + totalFees;
+    // Days to maturity + life days.
+    const dLife = sched.length;
+    let dToMat = null;
+    try {
+      if(inst.maturityDate){
+        dToMat = Math.max(0, Math.round((new Date(inst.maturityDate + 'T00:00:00') - new Date()) / (1000*60*60*24)));
+      }
+    } catch(_){}
+
+    // ── V4 hero KPI tier — 3 large cards + tighter secondary strip below ──
+    const utilColor = utilPct > 90 ? '#EF4444' : utilPct > 75 ? '#F59E0B' : '#6366F1';
+
+    // Trend arrow for the balance hero (was value → will be at maturity).
+    const openingBalance = sched.length ? (+sched[0].balance || 0) : 0;
+    const closingBalance = sched.length ? (+sched[sched.length-1].balance || 0) : 0;
+    const trendUp = closingBalance > openingBalance;
+
+    // Hero cards: bigger typography, larger sparkline area, subtle icon watermark.
+    let heroHTML = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-top:4px; margin-bottom:16px;">';
+
+    // 1. Peak balance — indigo hero
+    heroHTML += ''
+      + '<div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:14px; padding:18px 20px; position:relative; overflow:hidden;">'
+      +   '<div style="position:absolute; right:-10px; top:-10px; width:80px; height:80px; border-radius:50%; background:var(--brand-50); opacity:0.6;"></div>'
+      +   '<div style="position:relative;">'
+      +     '<div style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">'
+      +       '<i class="ti ti-chart-line" aria-hidden="true" style="font-size:15px; color:var(--brand-600);"></i>'
+      +       '<span style="font-size:11px; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-500); font-weight:500;">Peak balance</span>'
+      +     '</div>'
+      +     '<div style="font-size:28px; font-weight:600; color:var(--n-900); line-height:1.05; letter-spacing:-0.6px; font-variant-numeric:tabular-nums;">' + fmtMoneyDash(peakBalance, ccy) + '</div>'
+      +     '<div style="font-size:11.5px; color:var(--n-500); margin-top:4px;">' + (sched.length ? sched.length + '-day life' : 'No accounting run yet') + '</div>'
+      +     sparkline(balanceSeries, { color: '#6366F1', h: 36 })
+      +   '</div>'
+      + '</div>';
+
+    // 2. Utilization — thick progress bar hero
+    heroHTML += ''
+      + '<div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:14px; padding:18px 20px; position:relative; overflow:hidden;">'
+      +   '<div style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">'
+      +     '<i class="ti ti-percentage" aria-hidden="true" style="font-size:15px; color:' + utilColor + ';"></i>'
+      +     '<span style="font-size:11px; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-500); font-weight:500;">Utilization</span>'
+      +   '</div>'
+      +   '<div style="display:flex; align-items:baseline; gap:8px;">'
+      +     '<div style="font-size:28px; font-weight:600; color:var(--n-900); line-height:1.05; letter-spacing:-0.6px; font-variant-numeric:tabular-nums;">' + utilPct.toFixed(1) + '%</div>'
+      +     '<div style="font-size:11.5px; color:var(--n-500);">of ' + fmtMoneyDash(commitment, ccy) + '</div>'
+      +   '</div>'
+      +   '<div style="font-size:11.5px; color:var(--n-500); margin-top:4px;">Peak drawn / commitment</div>'
+      +   '<div style="margin-top:14px; height:8px; background:var(--n-100); border-radius:999px; overflow:hidden;">'
+      +     '<div style="width:' + Math.min(100, utilPct).toFixed(1) + '%; height:100%; background:linear-gradient(90deg, ' + utilColor + ' 0%, ' + utilColor + '99 100%); border-radius:999px; transition:width .4s ease;"></div>'
+      +   '</div>'
+      + '</div>';
+
+    // 3. Total income — teal hero, dual metric (interest + fees)
+    heroHTML += ''
+      + '<div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:14px; padding:18px 20px; position:relative; overflow:hidden;">'
+      +   '<div style="position:absolute; right:-10px; top:-10px; width:80px; height:80px; border-radius:50%; background:#F0FDFA; opacity:0.9;"></div>'
+      +   '<div style="position:relative;">'
+      +     '<div style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">'
+      +       '<i class="ti ti-cash-banknote" aria-hidden="true" style="font-size:15px; color:#0F766E;"></i>'
+      +       '<span style="font-size:11px; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-500); font-weight:500;">Total income</span>'
+      +     '</div>'
+      +     '<div style="font-size:28px; font-weight:600; color:var(--n-900); line-height:1.05; letter-spacing:-0.6px; font-variant-numeric:tabular-nums;">' + fmtMoneyDash(totalIncome, ccy) + '</div>'
+      +     '<div style="font-size:11.5px; color:var(--n-500); margin-top:4px;">Interest ' + fmtMoneyDash(totalInterest, ccy) + ' · Fees ' + fmtMoneyDash(totalFees, ccy) + '</div>'
+      +     sparkline(cumInterestSeries, { color: '#0F766E', h: 36 })
+      +   '</div>'
+      + '</div>';
+
+    heroHTML += '</div>';
+
+    // ── Secondary metrics strip — compact 5-6 cards below the hero row.
+    const yieldPct = (eirVal != null) ? (eirVal * 100).toFixed(3) + '%' : '—';
+    const secondary = [
+      { icon: 'ti-currency-dollar', label: 'Face value',     value: fmtMoneyDash(inst.faceValue, ccy), sub: ccy },
+      { icon: 'ti-target',          label: 'Effective yield', value: yieldPct, sub: (eir && (eir.eirMethodLabel || eir.method)) || '' },
+      { icon: 'ti-calendar-event',  label: 'Days to maturity', value: dToMat != null ? dToMat.toLocaleString() : '—', sub: inst.maturityDate || '' },
+      { icon: 'ti-scale-outline',   label: 'Framework',      value: escapeHTML(fw.label), sub: escapeHTML(fw.ecl && fw.ecl.name || '') },
+      { icon: 'ti-briefcase',       label: 'Legal entity',   value: escapeHTML(inst.legalEntity || '—'), sub: 'Counterparty' }
+    ];
+    let secondaryHTML = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:12px;">';
+    for(const s of secondary){
+      secondaryHTML += ''
+        + '<div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; padding:12px 14px;">'
+        +   '<div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">'
+        +     '<i class="ti ' + s.icon + '" aria-hidden="true" style="font-size:13px; color:var(--n-400);"></i>'
+        +     '<span style="font-size:10px; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-500); font-weight:500;">' + s.label + '</span>'
+        +   '</div>'
+        +   '<div style="font-size:14.5px; font-weight:600; color:var(--n-900); line-height:1.2; letter-spacing:-0.2px; font-variant-numeric:tabular-nums; word-wrap:break-word;">' + s.value + '</div>'
+        +   (s.sub ? '<div style="font-size:10.5px; color:var(--n-500); margin-top:3px;">' + s.sub + '</div>' : '')
+        + '</div>';
+    }
+    secondaryHTML += '</div>';
+
+    const kpiHTML = heroHTML + secondaryHTML;
 
     // ── Lifecycle timeline ──────────────────────────────────────────
     const events = [];
@@ -22734,11 +24078,14 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
       const text = chip ? (chip.textContent || '').trim() : '—';
       const card = document.getElementById(s.id);
       const done = card && card.classList.contains('done');
-      stageHTML += `<div class="dash-card" style="cursor:pointer" onclick="document.querySelector('.tab-btn[data-tab=\\'${s.id}\\']')?.click()">
-        <div class="dash-card-label">${s.title}</div>
-        <div class="dash-card-value" style="font-size:14px;color:${done ? '#0F8A4D' : '#21295C'}">${text}</div>
-        <div class="dash-card-sub" style="margin-top:6px"><span class="chip ${done?'green':'blue'}">${done ? '✓ done' : 'in progress'}</span></div>
-      </div>`;
+      stageHTML += '<div class="dash-card" style="cursor:pointer; position:relative;" onclick="document.querySelector(\'.tab-btn[data-tab=\\\'' + s.id + '\\\']\')?.click()">'
+        + '<i class="ti ' + (done ? 'ti-circle-check-filled' : 'ti-progress') + '" aria-hidden="true" style="position:absolute; top:14px; right:14px; font-size:15px; color:' + (done ? 'var(--success)' : 'var(--brand)') + ';"></i>'
+        + '<div class="dash-card-label">' + s.title + '</div>'
+        + '<div class="dash-card-value" style="font-size:14px; color:' + (done ? 'var(--success)' : 'var(--n-900)') + ';">' + text + '</div>'
+        + '<div class="dash-card-sub" style="margin-top:6px;">'
+        +   '<span style="font-size:10.5px; font-weight:500; padding:2px 8px; border-radius:6px; background:' + (done ? '#DCFCE7' : 'var(--brand-50)') + '; color:' + (done ? '#065F46' : 'var(--brand-700)') + ';">' + (done ? 'Done' : 'In progress') + '</span>'
+        + '</div>'
+      + '</div>';
     }
     stageHTML += '</div>';
 
@@ -28459,6 +29806,88 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   if(document.readyState === 'loading'){
     document.addEventListener('DOMContentLoaded', init);
   } else { init(); }
+})();
+</script>
+
+<!-- ═══ V4 sidebar wiring ═══
+     Everything the old top-bar did still works because the header is only
+     display:none — its DOM lives on. We forward sidebar clicks to the
+     existing `.tab-btn[data-tab=...]` buttons and mirror active state back
+     onto the sidebar; a MutationObserver keeps them in sync when the app
+     programmatically switches tabs. -->
+<script>
+(function(){
+  function $(sel, root){ return (root || document).querySelector(sel); }
+  function $$(sel, root){ return Array.from((root || document).querySelectorAll(sel)); }
+
+  window.v4NavClick = function(el){
+    const tab = el.getAttribute('data-v4-tab');
+    if(!tab) return;
+    const btn = $('.tab-btn[data-tab="' + tab + '"]');
+    if(btn) btn.click();
+    v4SyncActive();
+  };
+
+  function v4SyncActive(){
+    const activeTab = $('.tab-btn.active');
+    if(!activeTab) return;
+    const tab = activeTab.getAttribute('data-tab');
+    $$('.v4-sb-item[data-v4-tab]').forEach(i => {
+      i.classList.toggle('active', i.getAttribute('data-v4-tab') === tab);
+    });
+  }
+
+  function v4SyncCrumb(){
+    // Pull the deal name from window.B (Builder in-memory state) — fallback to
+    // localStorage or hidden select if B isn't hydrated yet.
+    let name = null;
+    try {
+      if(window.B && window.B.deal && window.B.deal.name) name = window.B.deal.name.trim();
+    } catch(_){}
+    if(!name){
+      const sel = $('#sel-instrument');
+      if(sel && sel.selectedOptions && sel.selectedOptions[0]) {
+        name = sel.selectedOptions[0].textContent.trim();
+      }
+    }
+    const crumb = $('#v4-crumb-deal-name');
+    if(crumb) crumb.textContent = (name && name.length && name !== 'undefined') ? name : 'No active deal';
+    const chip = $('#v4-status-chip');
+    if(chip) chip.style.display = name ? 'inline-flex' : 'none';
+  }
+
+  function v4SyncBadges(){
+    // Mirror existing header badges (#notices-badge, #watchlist-badge) into the sidebar.
+    ['notices','watchlist'].forEach(k => {
+      const src = $('#' + k + '-badge');
+      const dst = $('#v4-' + k + '-badge');
+      if(!src || !dst) return;
+      const shown = src.style.display !== 'none' && src.textContent && +src.textContent > 0;
+      dst.textContent = src.textContent || '0';
+      dst.classList.toggle('visible', !!shown);
+    });
+    // Mirror auth chip → sidebar footer label
+    const authTxt = $('#auth-identity-chip-text');
+    const dstAuth = $('#v4-auth-label');
+    if(authTxt && dstAuth) dstAuth.textContent = authTxt.textContent || 'Sign in';
+  }
+
+  function v4Sync(){
+    v4SyncActive();
+    v4SyncCrumb();
+    v4SyncBadges();
+  }
+
+  // Observe the tab-btn container so any programmatic .active flip re-syncs the sidebar.
+  const nav = $('#stage-tab-nav');
+  if(nav){
+    new MutationObserver(v4Sync).observe(nav, { attributes: true, attributeFilter: ['class'], subtree: true });
+  }
+  // Poll every 1500ms to catch B mutation + badge changes without wiring every source.
+  setInterval(v4Sync, 1500);
+  document.addEventListener('DOMContentLoaded', v4Sync);
+  window.addEventListener('load', v4Sync);
+  v4Sync();
 })();
 </script>
 </body>
