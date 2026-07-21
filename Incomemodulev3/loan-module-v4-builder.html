@@ -11,7 +11,7 @@
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
      Tabler because ~300 existing markup instances still reference
      material-icons-outlined; we swap them incrementally in later steps. -->
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Nunito:wght@900&display=swap" rel="stylesheet"/>
 <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons|Material+Icons+Outlined" rel="stylesheet"/>
 <style>
@@ -1193,7 +1193,7 @@
   }
   .v4-brand {
     display: flex; align-items: center; gap: 10px;
-    padding: 6px 10px 14px;
+    padding: 8px 6px 14px;
     border-bottom: 0.5px solid var(--n-200);
     margin-bottom: 10px;
   }
@@ -1308,8 +1308,17 @@
      header chip, so all existing JS keeps working without modification. -->
 <aside class="v4-sidebar-rail" aria-label="Primary navigation">
   <div class="v4-brand">
-    <span class="v4-brand-mark"><i class="ti ti-hexagon-3d" aria-hidden="true"></i></span>
-    <span class="v4-brand-text">PCS</span>
+    <a href="#" title="FIS" aria-label="FIS"
+       style="display:inline-flex; align-items:center; text-decoration:none; flex-shrink:0;">
+      <!-- Official FIS logo — actual file is WebP despite the original .svg
+           name; renamed to .webp so the server sends image/webp Content-Type
+           and the browser decodes it correctly. -->
+      <img src="FIS_logo.webp" alt="FIS" width="64" height="36" style="display:block; height:36px; width:auto; border-radius:8px;"/>
+    </a>
+    <div style="display:flex; flex-direction:column; gap:1px; min-width:0; flex:1;">
+      <span style="font-size:12.5px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px; line-height:1.1; white-space:nowrap;">Loan Module</span>
+      <span style="font-size:10px; color:var(--n-500); font-weight:500; letter-spacing:0.2px;">Private Capital Suite</span>
+    </div>
     <span class="v4-brand-badge">V4</span>
   </div>
 
@@ -5063,21 +5072,29 @@
 <div id="notices-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" onclick="window.closeNoticesModal && window.closeNoticesModal()"></div>
   <div class="json-modal-pn" style="width:min(1280px,97vw); max-height:94vh;">
-    <div class="json-modal-h">
-      <div>
-        <div class="font-semibold text-[14px] flex items-center gap-2">
-          <span class="material-icons-outlined text-[18px]" style="color:#D97706">mark_email_unread</span>
-          Loan Agent Notices
+    <!-- V4 modal header — two-row layout: title/subtitle + close on top,
+         filters + primary actions on a dedicated toolbar row below. Removes
+         the crammed single-row that mixed gradients, amber, and purple. -->
+    <div class="json-modal-h" style="flex-direction:column; align-items:stretch; gap:12px;">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:36px; height:36px; border-radius:8px; background:var(--fis-green-50); color:var(--fis-green-700); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <i class="ti ti-mail-forward" aria-hidden="true" style="font-size:18px;"></i>
+          </div>
+          <div>
+            <div style="font-size:15px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px; line-height:1.2;">Loan agent notices</div>
+            <div style="font-size:11.5px; color:var(--n-500); margin-top:2px;">Drawdown, interest, principal, rate reset, fee, and manual notices for every loan you can access</div>
+          </div>
         </div>
-        <div class="text-[11px] text-gray-500">Drawdown, interest, principal, rate reset, fee, and manual notices for every loan you can access.</div>
+        <button class="mat-btn ghost" onclick="window.closeNoticesModal && window.closeNoticesModal()" title="Close" style="min-height:32px; padding:6px 8px;">
+          <i class="ti ti-x" aria-hidden="true" style="font-size:16px;"></i>
+        </button>
       </div>
-      <div class="flex items-center gap-2">
-        <select id="notices-filter-deal" onchange="window.refreshNotices && window.refreshNotices()"
-                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by loan">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <select id="notices-filter-deal" onchange="window.refreshNotices && window.refreshNotices()" title="Filter by loan" style="min-width:140px;">
           <option value="">All deals</option>
         </select>
-        <select id="notices-filter-type" onchange="window.refreshNotices && window.refreshNotices()"
-                class="border border-gray-300 rounded px-2 py-1 text-[11px]">
+        <select id="notices-filter-type" onchange="window.refreshNotices && window.refreshNotices()">
           <option value="">All types</option>
           <option value="drawdown">Drawdown</option>
           <option value="interest">Interest</option>
@@ -5090,9 +5107,8 @@
           <option value="default">Default</option>
           <option value="other">Other</option>
         </select>
-        <select id="notices-filter-status" onchange="window.refreshNotices && window.refreshNotices()"
-                class="border border-gray-300 rounded px-2 py-1 text-[11px]">
-          <option value="active" selected>Active (pending / sent / ack)</option>
+        <select id="notices-filter-status" onchange="window.refreshNotices && window.refreshNotices()">
+          <option value="active" selected>Active</option>
           <option value="pending">Pending</option>
           <option value="sent">Sent</option>
           <option value="acknowledged">Acknowledged</option>
@@ -5100,35 +5116,27 @@
           <option value="cancelled">Cancelled</option>
           <option value="">All statuses</option>
         </select>
-        <select id="notices-filter-horizon" onchange="window.refreshNotices && window.refreshNotices()"
-                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Time window">
+        <select id="notices-filter-horizon" onchange="window.refreshNotices && window.refreshNotices()" title="Time window">
           <option value="30" selected>Next 30 days</option>
           <option value="7">Next 7 days</option>
           <option value="90">Next 90 days</option>
           <option value="365">Next year</option>
           <option value="all">All time</option>
         </select>
-        <button onclick="window.deriveAllNotices && window.deriveAllNotices()"
-                class="mat-btn outline !py-1 !px-2 text-[11px]" title="Regenerate notices from engine schedules for every deal">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Derive
-        </button>
-        <button onclick="window.exportNoticesCsv && window.exportNoticesCsv()"
-                class="mat-btn outline !py-1 !px-2 text-[11px]" title="Download filtered notices as CSV">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> CSV
-        </button>
-        <button onclick="window.openImportNoticeModal && window.openImportNoticeModal()"
-                class="mat-btn !py-1 !px-2 text-[11px]"
-                style="background:linear-gradient(135deg,#7C3AED 0%,#4F46E5 100%); color:white; border:none;" title="Import a notice from a PDF using AI extraction">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">auto_awesome</span> Import PDF
-        </button>
-        <button onclick="window.openManualNoticeForm && window.openManualNoticeForm()"
-                class="mat-btn !py-1 !px-2 text-[11px]"
-                style="background:#D97706; color:white; border-color:#D97706;" title="Add a manual notice (waiver, amendment, default, other)">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">add</span> Manual
-        </button>
-        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeNoticesModal && window.closeNoticesModal()" title="Close">
-          <span class="material-icons-outlined text-[16px]">close</span>
-        </button>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button onclick="window.deriveAllNotices && window.deriveAllNotices()" class="mat-btn outline" title="Regenerate notices from engine schedules for every deal">
+            <i class="ti ti-refresh" aria-hidden="true"></i>Derive
+          </button>
+          <button onclick="window.exportNoticesCsv && window.exportNoticesCsv()" class="mat-btn outline" title="Download filtered notices as CSV">
+            <i class="ti ti-download" aria-hidden="true"></i>CSV
+          </button>
+          <button onclick="window.openManualNoticeForm && window.openManualNoticeForm()" class="mat-btn outline" title="Add a manual notice (waiver, amendment, default, other)">
+            <i class="ti ti-plus" aria-hidden="true"></i>Manual
+          </button>
+          <button onclick="window.openImportNoticeModal && window.openImportNoticeModal()" class="mat-btn primary" title="Import a notice from a PDF using AI extraction">
+            <i class="ti ti-sparkles" aria-hidden="true"></i>Import PDF
+          </button>
+        </div>
       </div>
     </div>
     <div class="json-modal-b" id="notices-body" style="padding:14px 18px; font-size:12px;">
