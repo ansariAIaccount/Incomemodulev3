@@ -4,6 +4,99 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>PCS Loan Module · V4</title>
+<!-- ─── V4 · fetch watchdog ─────────────────────────────────────────────────
+     Root cause we kept hitting: Chrome caps concurrent connections to any
+     one origin at ~6. If a fetch to Supabase (or the ingest server on
+     :3033) hangs — a socket that never RSTs, an idle-timeout window, a
+     bad-gateway that never responds — it holds one of those 6 slots
+     forever. Once 6 accumulate, every new request to that origin queues
+     behind them and the UI appears frozen. Only a hard refresh releases
+     the pool.
+
+     The guard below monkey-patches window.fetch BEFORE any other script
+     loads (Tailwind, XLSX, jsPDF, supabase-js, app code all come after).
+     For every request whose URL matches one of our two hangy origins,
+     we attach an AbortController + timeout so the socket is closed and
+     the slot is released whether the server replies or not.
+
+     Uploads (multipart POSTs to /api/extract/* or /api/notice/*) get a
+     longer budget because they legitimately transfer file bytes.
+     Everything else — auth probes, table selects, healthz — dies at 15s
+     with a console.warn identifying which URL hung. ────────────────── -->
+<script>
+(function(){
+  const originalFetch = window.fetch.bind(window);
+
+  // Which hosts we manage and want to protect. Regex covers any Supabase
+  // project + the local ingest server. Add more origins here if we ever
+  // proxy through another host.
+  const GUARDED = /^(https?:\/\/[^/]+\.supabase\.co\/|https?:\/\/localhost:3033\/|https?:\/\/127\.0\.0\.1:3033\/)/i;
+  const UPLOAD_PATH = /\/api\/(extract|notice)\//i;
+
+  const DEFAULT_TIMEOUT_MS = 15000;   // reads, RPCs, auth calls
+  const UPLOAD_TIMEOUT_MS  = 45000;   // multipart file uploads
+  const SLOW_WARN_MS       = 8000;    // console.warn threshold
+
+  window.fetch = function(input, init){
+    const url = (typeof input === 'string') ? input : (input && input.url) || '';
+    if(!GUARDED.test(url)) return originalFetch(input, init);
+
+    const budget = UPLOAD_PATH.test(url) ? UPLOAD_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+
+    // Respect any existing AbortSignal — chain ours behind it so callers
+    // that already have their own controller keep their cancel path.
+    const ac = new AbortController();
+    const upstream = (init && init.signal) || null;
+    if(upstream){
+      if(upstream.aborted) ac.abort(upstream.reason);
+      else upstream.addEventListener('abort', () => ac.abort(upstream.reason), { once: true });
+    }
+
+    const started = performance.now();
+    let warned = false;
+    const warnTimer = setTimeout(() => {
+      warned = true;
+      console.warn('[fetch-watchdog] slow request (' + SLOW_WARN_MS + 'ms):', url);
+    }, SLOW_WARN_MS);
+
+    const killTimer = setTimeout(() => {
+      const reason = new Error(
+        'fetch-watchdog: aborted after ' + budget + 'ms · ' + url +
+        ' · one of Chrome\'s 6 connection slots is now released'
+      );
+      reason.name = 'TimeoutError';
+      ac.abort(reason);
+    }, budget);
+
+    const options = Object.assign({}, init, { signal: ac.signal });
+    return originalFetch(input, options).then(function(res){
+      clearTimeout(warnTimer);
+      clearTimeout(killTimer);
+      if(warned){
+        const dt = Math.round(performance.now() - started);
+        console.warn('[fetch-watchdog] recovered after ' + dt + 'ms:', url);
+      }
+      return res;
+    }, function(err){
+      clearTimeout(warnTimer);
+      clearTimeout(killTimer);
+      // Bubble a clearer error for our own aborts so caller code can
+      // report "server slow" instead of a bare AbortError.
+      if(err && err.name === 'AbortError' && !upstream){
+        console.error('[fetch-watchdog] TIMEOUT killed hung request → connection pool freed:', url);
+      }
+      throw err;
+    });
+  };
+
+  // Cheap counter available in devtools if we ever want to sanity-check
+  // that the guard is engaged: window.__fetchWatchdog.calls
+  let calls = 0;
+  const wrapped = window.fetch;
+  window.fetch = function(){ calls++; return wrapped.apply(this, arguments); };
+  window.__fetchWatchdog = { get calls(){ return calls; }, budget: DEFAULT_TIMEOUT_MS, uploadBudget: UPLOAD_TIMEOUT_MS };
+})();
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
