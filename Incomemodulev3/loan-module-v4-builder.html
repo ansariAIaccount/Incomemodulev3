@@ -52,11 +52,30 @@
       else upstream.addEventListener('abort', () => ac.abort(upstream.reason), { once: true });
     }
 
+    // Notification bridge — watchdog fires early, before toast() exists.
+    // Buffer events until the app boots; then either the drain code below
+    // or toast() itself flushes them. Callers can override
+    // window.__watchdogNotify with a live impl.
+    function notify(evt){
+      // evt: {kind: 'warning'|'error', msg, detail, id}
+      if(typeof window.__watchdogNotifyLive === 'function'){
+        try { window.__watchdogNotifyLive(evt); } catch(e){}
+      } else {
+        (window.__watchdogQueue = window.__watchdogQueue || []).push(evt);
+      }
+    }
+
     const started = performance.now();
     let warned = false;
     const warnTimer = setTimeout(() => {
       warned = true;
       console.warn('[fetch-watchdog] slow request (' + SLOW_WARN_MS + 'ms):', url);
+      notify({
+        kind: 'warning',
+        msg: 'Request running long (' + Math.round(SLOW_WARN_MS/1000) + 's+)',
+        detail: url,
+        id: 'watchdog:' + url
+      });
     }, SLOW_WARN_MS);
 
     const killTimer = setTimeout(() => {
@@ -75,6 +94,12 @@
       if(warned){
         const dt = Math.round(performance.now() - started);
         console.warn('[fetch-watchdog] recovered after ' + dt + 'ms:', url);
+        notify({
+          kind: 'success',
+          msg: 'Slow request recovered · ' + dt + 'ms',
+          detail: url,
+          id: 'watchdog:' + url
+        });
       }
       return res;
     }, function(err){
@@ -84,6 +109,12 @@
       // report "server slow" instead of a bare AbortError.
       if(err && err.name === 'AbortError' && !upstream){
         console.error('[fetch-watchdog] TIMEOUT killed hung request → connection pool freed:', url);
+        notify({
+          kind: 'error',
+          msg: 'Request timed out — connection freed',
+          detail: url,
+          id: 'watchdog:' + url
+        });
       }
       throw err;
     });
@@ -94,7 +125,12 @@
   let calls = 0;
   const wrapped = window.fetch;
   window.fetch = function(){ calls++; return wrapped.apply(this, arguments); };
-  window.__fetchWatchdog = { get calls(){ return calls; }, budget: DEFAULT_TIMEOUT_MS, uploadBudget: UPLOAD_TIMEOUT_MS };
+  window.__fetchWatchdog = {
+    get calls(){ return calls; },
+    get queued(){ return (window.__watchdogQueue || []).length; },
+    budget: DEFAULT_TIMEOUT_MS,
+    uploadBudget: UPLOAD_TIMEOUT_MS
+  };
 })();
 </script>
 <script src="https://cdn.tailwindcss.com"></script>
@@ -104,7 +140,10 @@
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
      Tabler because ~300 existing markup instances still reference
      material-icons-outlined; we swap them incrementally in later steps. -->
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Nunito:wght@900&display=swap" rel="stylesheet"/>
+<!-- Nunito removed 2026-07 — was loaded only to approximate the FIS
+     wordmark inside an SVG. Now that we serve the real WebP logo, the
+     900-weight Nunito face is dead weight. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons|Material+Icons+Outlined" rel="stylesheet"/>
 <style>
@@ -466,7 +505,7 @@
     display:flex; align-items:center; gap:10px; margin-top:12px;
   }
 
-  /* ─── Portfolio Covenant Report ───────────────────────────────────── */
+  /* ─── Portfolio covenant report ───────────────────────────────────── */
   .portcov-kpi {
     background:white; border:1px solid #E1E5EE; border-radius:8px;
     padding:6px 10px; min-width:110px;
@@ -767,19 +806,104 @@
     to   { opacity: 1; transform: translateY(0); }
   }
 
-  /* ── Toast — restyle to match indigo palette + subtle rise. ── */
-  .toast, #toast, .toast-notification {
-    background: var(--n-900) !important;
-    color: var(--n-0) !important;
-    border-radius: var(--r-lg) !important;
-    padding: 10px 14px !important;
-    box-shadow: 0 10px 24px rgba(0,0,0,0.20) !important;
+  /* ── Toast v4 — bottom-right stack, per-toast rendering, kind accents.
+     The legacy #toast div is repurposed as the stack container so all
+     existing toast() callers still work. Each toast is a child card
+     rendered by the toast() JS below (see helpers section). Design:
+     zinc-900 surface · 2px colored left rail (kind) · Tabler icon ·
+     tight type · optional ✕ dismiss for persistent messages. ────── */
+  #toast, .toast, .toast-notification {
+    /* stack container overrides */
+    position: fixed !important;
+    right: 20px !important;
+    bottom: 20px !important;
+    left: auto !important;
+    top: auto !important;
+    transform: none !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    display: flex !important;
+    flex-direction: column-reverse !important;  /* newest on top of stack */
+    gap: 8px !important;
+    align-items: flex-end !important;
+    pointer-events: none !important;   /* container passes clicks through */
+    opacity: 1 !important;              /* always "on"; children own opacity */
+    z-index: 100001 !important;         /* above app-dialog(100000) */
+    max-width: 420px !important;
+    width: auto !important;
+    color: inherit !important;
     font-family: inherit !important;
-    font-size: 12.5px !important;
-    font-weight: 500 !important;
-    letter-spacing: -0.1px !important;
-    border: 0.5px solid var(--n-700) !important;
   }
+  /* Individual toast card */
+  .v4-toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 280px;
+    max-width: 420px;
+    background: var(--n-900);
+    color: var(--n-0);
+    border: 0.5px solid var(--n-700);
+    border-left: 3px solid var(--fis-green);
+    border-radius: var(--r-lg);
+    padding: 11px 12px 11px 14px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.28), 0 2px 6px rgba(0,0,0,0.12);
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: -0.1px;
+    line-height: 1.45;
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    transition: opacity 180ms ease, transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .v4-toast.show   { opacity: 1; transform: translateY(0) scale(1); }
+  .v4-toast.leave  { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  .v4-toast[data-kind="success"] { border-left-color: var(--fis-green); }
+  .v4-toast[data-kind="warning"] { border-left-color: #F59E0B; }
+  .v4-toast[data-kind="error"]   { border-left-color: #EF4444; }
+  .v4-toast[data-kind="info"]    { border-left-color: #3B82F6; }
+  .v4-toast .v4-toast-icon {
+    flex-shrink: 0;
+    width: 20px; height: 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-top: 1px;
+  }
+  .v4-toast .v4-toast-icon i.ti { font-size: 18px; line-height: 1; }
+  .v4-toast[data-kind="success"] .v4-toast-icon { color: var(--fis-green); }
+  .v4-toast[data-kind="warning"] .v4-toast-icon { color: #F59E0B; }
+  .v4-toast[data-kind="error"]   .v4-toast-icon { color: #EF4444; }
+  .v4-toast[data-kind="info"]    .v4-toast-icon { color: #60A5FA; }
+  .v4-toast .v4-toast-msg {
+    flex: 1; min-width: 0;
+    word-wrap: break-word; overflow-wrap: break-word;
+  }
+  .v4-toast .v4-toast-msg .v4-toast-detail {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--n-400);
+    letter-spacing: 0;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    word-break: break-all;
+  }
+  .v4-toast .v4-toast-close {
+    flex-shrink: 0;
+    width: 20px; height: 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    color: var(--n-400);
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .v4-toast .v4-toast-close:hover { background: rgba(255,255,255,0.08); color: var(--n-0); }
+  .v4-toast .v4-toast-close i.ti { font-size: 14px; }
 
   /* ── Empty state utility — use anywhere for "no data" placeholders. ── */
   .v4-empty {
@@ -1807,7 +1931,7 @@
 
       <!-- ═══ Tools master menu ═══
            Consolidates the everyday tool set (Portfolio · Regulatory ·
-           Borrower Financials · Credit Agreements · Manage Funds) behind
+           Borrower Financials · Credit Agreements · Manage funds) behind
            one entry point. The two badge-carrying tools (Notices + Watchlist)
            stay as standalone chips because operators need their counts
            visible without opening a menu. -->
@@ -1815,7 +1939,7 @@
         <button id="tools-menu-btn" onclick="window.toggleToolsMenu && window.toggleToolsMenu(event)"
                 class="chip"
                 style="font-size:11px; cursor:pointer; background:linear-gradient(135deg,#EEF2FF 0%,#E0E7FF 100%); color:#3730A3; border:1px solid #A5B4FC; padding:3px 9px; display:inline-flex; align-items:center; gap:5px;"
-                title="Tools — Portfolio, Regulatory, Borrower Financials, Credit Agreements, Manage Funds">
+                title="Tools — Portfolio, Regulatory, Borrower Financials, Credit Agreements, Manage funds">
           <span class="material-icons-outlined" style="font-size:13px;">apps</span>
           Tools
           <span class="material-icons-outlined" style="font-size:14px; margin-left:2px;">arrow_drop_down</span>
@@ -1864,7 +1988,7 @@
                   onmouseover="this.style.background='#F3F4F6'" onmouseout="this.style.background='transparent'">
             <span class="material-icons-outlined" style="font-size:18px; color:#0891b2;">account_balance_wallet</span>
             <div style="flex:1;">
-              <div style="font-weight:600;">Manage Funds</div>
+              <div style="font-weight:600;">Manage funds</div>
               <div style="font-size:10.5px; color:#6B7280;">Create · edit fund allocations across deals</div>
             </div>
           </button>
@@ -1936,7 +2060,7 @@
           <span class="material-icons-outlined" style="font-size:22px;">database</span>
         </div>
         <div style="flex:1; min-width:0;">
-          <div style="font-size:13px; font-weight:700; color:#0e7490; letter-spacing:-0.2px;">Load from Security Master</div>
+          <div style="font-size:13px; font-weight:700; color:#0e7490; letter-spacing:-0.2px;">Load from security master</div>
           <div style="font-size:11px; color:#155e75; line-height:1.3;">ISIN search · Markit / IHS / LSTA pricing</div>
         </div>
       </button>
@@ -1949,7 +2073,7 @@
           <span class="material-icons-outlined" style="font-size:22px;">folder_open</span>
         </div>
         <div style="flex:1; min-width:0;">
-          <div style="font-size:13px; font-weight:700; color:#065f46; letter-spacing:-0.2px;">Load Active Deal</div>
+          <div style="font-size:13px; font-weight:700; color:#065f46; letter-spacing:-0.2px;">Load active deal</div>
           <div style="font-size:11px; color:#047857; line-height:1.3;">Pick from preset library — simple → complex</div>
         </div>
       </button>
@@ -2006,14 +2130,14 @@
       <button class="tab-btn advanced-stage" data-tab="stage-3" role="tab" aria-selected="false" style="display:none;">
         <span class="tab-icon"><span class="material-icons-outlined">send</span></span>
         <span class="tab-text">
-          <span class="tab-label"><span class="tab-num">Step 3</span>Cash Movements Out</span>
+          <span class="tab-label"><span class="tab-num">Step 3</span>Cash movements out</span>
           <span class="tab-sub" id="tabsub-stage-3">Awaiting JEs</span>
         </span>
       </button>
       <button class="tab-btn advanced-stage" data-tab="stage-4" role="tab" aria-selected="false" style="display:none;">
         <span class="tab-icon"><span class="material-icons-outlined">receipt_long</span></span>
         <span class="tab-text">
-          <span class="tab-label"><span class="tab-num">Step 4</span>Cash Movement Actuals</span>
+          <span class="tab-label"><span class="tab-num">Step 4</span>Cash movement actuals</span>
           <span class="tab-sub" id="tabsub-stage-4">Awaiting actuals</span>
         </span>
       </button>
@@ -2384,36 +2508,47 @@
     <div class="step-num-big">1</div>
     <div class="step-text">
       <div class="step-of">Step 1 of 5 · You are here</div>
-      <div class="step-name">Cashflow Generation</div>
-      <div class="step-hint">Forward cashflows generated from the Loan Builder — every row is transparent, every rate is traceable</div>
+      <div class="step-name">Cashflow generation</div>
+      <div class="step-hint">Forward cashflows generated from the loan builder — every row is transparent, every rate is traceable</div>
     </div>
     <span class="step-state-chip" id="step-state-1">Awaiting builder</span>
   </div>
-  <div class="flex items-start gap-3 mb-3 flex-wrap">
-    <span class="stage-num">1</span>
-    <div class="flex-1">
-      <h2 class="text-base font-bold flex items-center gap-2"><span class="material-icons-outlined text-[20px]" style="color:var(--brand-600)">analytics</span>Cashflow Generation — Transparent Forward Cashflows</h2>
-      <p class="text-[12px] text-gray-600 mt-1">The forward cashflow stream produced by the Loan Builder. No black-box calculations — every row expands to show its formula, every interest rate links to its calculation breakdown (base + spread + ratchet + ESG). Once verified, send to the Accounting Engine.</p>
+  <!-- v4 hero — flat white surface, FIS-green icon tile, sentence-case,
+       actions right-aligned with Tabler icons. Matches the Stage 0 hero. -->
+  <div class="builder-hero" style="display:flex; align-items:flex-start; gap:14px; padding:14px 16px; margin-bottom:14px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:12px;">
+    <div style="flex-shrink:0; width:36px; height:36px; border-radius:10px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+      <i class="ti ti-chart-line" aria-hidden="true" style="font-size:20px;"></i>
     </div>
-    <div class="flex flex-wrap gap-2">
-      <button id="btn-cf-back-to-builder" class="mat-btn outline"><span class="material-icons-outlined text-[16px]">edit</span>Back to Builder</button>
-      <button id="btn-cf-refresh" class="mat-btn outline" title="Recompute cashflows from the current builder state"><span class="material-icons-outlined text-[16px]">refresh</span>Refresh</button>
-      <button id="btn-cf-to-accounting" class="mat-btn primary"><span class="material-icons-outlined text-[16px]">arrow_forward</span>Send to Accounting Engine</button>
-      <span id="portf-status" class="chip gray self-center">No cashflows generated yet</span>
+    <div style="flex:1; min-width:0;">
+      <h2 style="font-size:14.5px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px; margin:0;">Cashflow generation · transparent forward cashflows</h2>
+      <p style="font-size:12px; color:var(--n-500); margin:4px 0 0; line-height:1.55;">Forward cashflow stream produced by the loan builder. No black-box math — every row expands to show its formula, every interest rate links to its calculation breakdown (base + spread + ratchet + ESG). Once verified, send to the accounting engine.</p>
+    </div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+      <button id="btn-cf-back-to-builder" class="mat-btn outline"><i class="ti ti-edit" aria-hidden="true"></i>Back to builder</button>
+      <button id="btn-cf-refresh" class="mat-btn outline" title="Recompute cashflows from the current builder state"><i class="ti ti-refresh" aria-hidden="true"></i>Refresh</button>
+      <button id="btn-cf-to-accounting" class="mat-btn primary"><i class="ti ti-arrow-right" aria-hidden="true"></i>Send to accounting engine</button>
+      <span id="portf-status" class="chip gray self-center" style="font-size:11px;">No cashflows generated yet</span>
     </div>
   </div>
 
-  <!-- Stage 1 v2 — Cashflow Generation viewer (rendered by builder) -->
-  <div id="cf-stage1-viewer" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-3">
+  <!-- Stage 1 v2 — Cashflow Generation viewer (rendered by builder).
+       v4 restyle: neutral surface, FIS-green section icon, tighter type. -->
+  <div id="cf-stage1-viewer" style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; padding:12px 12px 10px; margin-bottom:14px;">
     <div class="flex items-center gap-2 mb-2 flex-wrap">
-      <span class="material-icons-outlined text-[18px]" style="color:#0F8A4D">visibility</span>
-      <h3 class="text-[13px] font-bold text-emerald-900">Forward Cashflow Stream</h3>
-      <span id="cf-stage1-chip" class="chip gray text-[10px]">0 periods</span>
-      <span class="text-[10px] text-emerald-800 ml-2">Click any row to expand · click any rate to see its calculation</span>
+      <span style="width:22px; height:22px; border-radius:6px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-eye" aria-hidden="true" style="font-size:14px;"></i>
+      </span>
+      <h3 style="font-size:13px; font-weight:600; color:var(--n-900); letter-spacing:-0.15px; margin:0;">Forward cashflow stream</h3>
+      <span id="cf-stage1-chip" class="chip gray" style="font-size:10px; font-variant-numeric:tabular-nums;">0 periods</span>
+      <span style="font-size:10.5px; color:var(--n-500); margin-left:auto;">Click any row to expand · click any rate to see its calculation</span>
     </div>
     <div id="cf-stage1-kpis" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2"></div>
-    <div id="cf-stage1-host" class="bg-white border border-emerald-200 rounded text-[11px] max-h-[600px] overflow-y-auto">
-      <div class="p-6 text-center text-gray-400 italic">No cashflows yet. Build a deal in the Loan Builder tab to generate cashflows.</div>
+    <div id="cf-stage1-host" style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px; font-size:11px; max-height:600px; overflow-y:auto; font-variant-numeric:tabular-nums;">
+      <div class="v4-empty" style="padding:36px 20px;">
+        <div class="v4-empty-icon"><i class="ti ti-chart-histogram" aria-hidden="true"></i></div>
+        <div class="v4-empty-title">No cashflows yet</div>
+        <div class="v4-empty-body">Build a deal in the Loan builder tab to generate cashflows.</div>
+      </div>
     </div>
   </div>
   <div id="portf-summary" class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 hidden"></div>
@@ -2572,24 +2707,89 @@
     .approval-pill[data-state="rejected"]  { background:#DC2626; color:white; }
   </style>
 
-  <!-- ═══ Stage 2 sub-tab bar — Run & JEs / Treatment / Evidence Pack ═══
-       Splits the wall of controls into three focused views. State persists in
-       localStorage. Content elements below carry data-substab attributes;
-       switchStage2Sub() shows only those matching the active sub-tab. -->
-  <div id="s2-subtab-bar" style="display:flex; gap:6px; margin-bottom:14px; padding:4px; background:rgba(15,23,42,0.04); border-radius:8px;">
-    <button data-s2sub="run" class="s2-subtab-btn" style="flex:1; padding:8px 12px; border:none; background:white; border-radius:6px; font-size:12px; font-weight:600; color:#21295C; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 1px 2px rgba(15,23,42,0.06);">
-      <span class="material-icons-outlined" style="font-size:16px;">play_circle</span>
+  <!-- ═══ Stage 2 sub-tab bar — Run & JEs / Treatment / Evidence pack ═══
+       v4 restyle: zinc-100 rest strip, white active pill with FIS-green
+       accent bar, Tabler icons, sentence-case labels, tabular-numeric
+       badges. State persists in localStorage; data-substab attributes
+       and .s2-subtab-btn class are unchanged so switchStage2Sub() still
+       wires the same buttons. -->
+  <style>
+    #s2-subtab-bar {
+      display: flex; gap: 4px;
+      margin-bottom: 14px;
+      padding: 4px;
+      background: var(--n-100);
+      border: 0.5px solid var(--n-200);
+      border-radius: var(--r-lg, 10px);
+    }
+    .s2-subtab-btn {
+      flex: 1;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 7px 12px 8px;
+      border: 0;
+      background: transparent;
+      border-radius: 7px;
+      font-size: 12px; font-weight: 500;
+      color: var(--n-500);
+      cursor: pointer;
+      transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+      position: relative;
+    }
+    .s2-subtab-btn:hover { color: var(--n-800); background: rgba(255,255,255,0.6); }
+    .s2-subtab-btn i.ti { font-size: 15px; line-height: 1; }
+    /* Active state — set by switchStage2Sub(), which toggles a class or
+       flips inline styles. Support both patterns via [data-active] AND the
+       legacy inline background:white shim. */
+    .s2-subtab-btn[data-active="true"],
+    .s2-subtab-btn.is-active {
+      background: var(--n-0);
+      color: var(--n-900);
+      font-weight: 600;
+      box-shadow: 0 1px 2px rgba(15,23,42,0.06), inset 0 0 0 0.5px var(--n-200);
+    }
+    .s2-subtab-btn[data-active="true"]::after,
+    .s2-subtab-btn.is-active::after {
+      content: '';
+      position: absolute;
+      left: 12px; right: 12px; bottom: 3px;
+      height: 2px; border-radius: 2px;
+      background: var(--fis-green);
+    }
+    .s2-subtab-btn .s2-count {
+      display: inline-flex; align-items: center;
+      padding: 1px 6px;
+      margin-left: 4px;
+      font-size: 10px; font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      border-radius: 999px;
+      background: var(--n-100);
+      color: var(--n-600);
+      border: 0.5px solid var(--n-200);
+    }
+    .s2-subtab-btn[data-active="true"] .s2-count,
+    .s2-subtab-btn.is-active .s2-count {
+      background: var(--fis-green-50, #ECFDF5);
+      color: var(--fis-green-700, #15803D);
+      border-color: var(--fis-green-50, #ECFDF5);
+    }
+    .s2-subtab-btn .s2-count.amber {
+      background: #FEF3C7; color: #92400E; border-color: #FDE68A;
+    }
+  </style>
+  <div id="s2-subtab-bar" role="tablist">
+    <button data-s2sub="run" data-active="true" class="s2-subtab-btn is-active" role="tab" aria-selected="true">
+      <i class="ti ti-player-play" aria-hidden="true"></i>
       <span>Run &amp; JEs</span>
-      <span id="s2-tab-je-count" class="chip green" style="font-size:9px; padding:1px 6px; margin-left:4px; display:none;">0</span>
+      <span id="s2-tab-je-count" class="s2-count" style="display:none;">0</span>
     </button>
-    <button data-s2sub="treatment" class="s2-subtab-btn" style="flex:1; padding:8px 12px; border:none; background:transparent; border-radius:6px; font-size:12px; font-weight:500; color:#64748B; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
-      <span class="material-icons-outlined" style="font-size:16px;">tune</span>
-      <span>Treatment Overrides</span>
-      <span id="s2-tab-tr-count" class="chip amber" style="font-size:9px; padding:1px 6px; margin-left:4px; display:none;">0 mods</span>
+    <button data-s2sub="treatment" class="s2-subtab-btn" role="tab" aria-selected="false">
+      <i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>
+      <span>Treatment overrides</span>
+      <span id="s2-tab-tr-count" class="s2-count amber" style="display:none;">0 mods</span>
     </button>
-    <button data-s2sub="evidence" class="s2-subtab-btn" style="flex:1; padding:8px 12px; border:none; background:transparent; border-radius:6px; font-size:12px; font-weight:500; color:#64748B; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
-      <span class="material-icons-outlined" style="font-size:16px;">verified</span>
-      <span>Evidence Pack</span>
+    <button data-s2sub="evidence" class="s2-subtab-btn" role="tab" aria-selected="false">
+      <i class="ti ti-shield-check" aria-hidden="true"></i>
+      <span>Evidence pack</span>
     </button>
   </div>
 
@@ -2805,6 +3005,26 @@
         <span class="text-[10px] text-indigo-700">Stage 3 mechanics, POCI, EAD CCF, DPD triggers, watchlist, macro overlay</span>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <!-- Consolidated Loan status preset — one dropdown that flips the
+             three switches below (suspended interest, watchlist override,
+             covenant breach) into a coherent Performing / Watchlist /
+             Non-performing state. Individual switches remain visible as
+             advanced overrides; if the user's manual edits don't match any
+             preset the dropdown shows "Custom". Preset choice is derived,
+             not persisted — the underlying flags remain the source of
+             truth on save/load. -->
+        <div class="md:col-span-4" style="padding:10px 12px; background:var(--n-0); border:0.5px solid var(--n-200); border-left:3px solid var(--fis-green,#22C55E); border-radius:8px;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <label for="opt-loan-status" class="text-[10px] font-semibold uppercase tracking-wider text-gray-600" style="margin:0;">Loan status</label>
+            <select id="opt-loan-status" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white" style="min-width:280px;" onchange="applyLoanStatusPreset(this.value)">
+              <option value="performing">Performing — accrual on, no stage override</option>
+              <option value="watchlist">Watchlist — force Stage 2 (qualitative SICR)</option>
+              <option value="non_performing">Non-performing — Stage 3 forced, interest suspended</option>
+              <option value="custom">Custom — switches below don't match a preset</option>
+            </select>
+            <span class="text-[10.5px] text-gray-500" style="flex:1; min-width:180px;">Convenience preset — flips the switches below in one click. Fine-tune anything afterward and this dropdown will read <b>Custom</b>.</span>
+          </div>
+        </div>
         <div>
           <label data-fw-poci-label class="text-[10px] font-semibold uppercase tracking-wider text-gray-600 mb-1 block">POCI flag (IFRS 9 §B5.5.45)</label>
           <select id="opt-poci" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
@@ -2970,10 +3190,10 @@
           <div id="t4-events-list" class="text-[11px] mt-1"></div>
         </div>
 
-        <!-- ─── Transtype #5 — Prepayment Penalty Schedule ─── -->
+        <!-- ─── Transtype #5 — Prepayment penalty schedule ─── -->
         <div class="bg-white border border-indigo-200 rounded p-2 mb-2">
           <div class="flex items-center gap-2 mb-1 flex-wrap">
-            <span class="text-[11px] font-bold text-indigo-900">Prepayment Penalty Schedule</span>
+            <span class="text-[11px] font-bold text-indigo-900">Prepayment penalty schedule</span>
             <span id="t5-status-chip" class="chip gray text-[10px]">no penalty schedule</span>
             <span class="text-[10px] text-gray-500 italic">Time-banded penalty rate (e.g. 2.0% Yr1, 1.0% Yr2, 0% thereafter)</span>
             <div class="ml-auto flex gap-2">
@@ -3070,10 +3290,10 @@
           <div id="t11-events-list" class="text-[11px] mt-1"></div>
         </div>
 
-        <!-- ─── Transtype #12 — Capitalised Origination Costs ─── -->
+        <!-- ─── Transtype #12 — Capitalised origination costs ─── -->
         <div class="bg-white border border-indigo-200 rounded p-2 mb-2">
           <div class="flex items-center gap-2 mb-1 flex-wrap">
-            <span class="text-[11px] font-bold text-indigo-900">Capitalised Origination Costs</span>
+            <span class="text-[11px] font-bold text-indigo-900">Capitalised origination costs</span>
             <span id="t12-status-chip" class="chip gray text-[10px]">no capitalised cost</span>
             <span class="text-[10px] text-gray-500 italic">Legal / transaction / valuation costs paid at signing — capitalised into 141000 per IFRS 9 §B5.4 / ASC 310-20-25-2</span>
           </div>
@@ -3321,7 +3541,7 @@
         <!-- ─── Transtype #24 — Loan-Loss Recovery Allocation ─── -->
         <div class="bg-white border border-indigo-200 rounded p-2 mb-2">
           <div class="flex items-center gap-2 mb-1 flex-wrap">
-            <span class="text-[11px] font-bold text-indigo-900">Recovery Allocation Buckets</span>
+            <span class="text-[11px] font-bold text-indigo-900">Recovery allocation buckets</span>
             <span id="t24-status-chip" class="chip gray text-[10px]">no allocated recovery</span>
             <span class="text-[10px] text-gray-500 italic">IFRS 7 §35K — split recovery cash between principal / default int / default fee / legal</span>
           </div>
@@ -3514,7 +3734,7 @@
   <div id="evidence-pack" data-substab="evidence" class="hidden">
     <div class="flex items-center gap-2 mb-2 flex-wrap">
       <span class="material-icons-outlined text-[18px]" style="color:var(--brand-600)">verified</span>
-      <h3 class="text-[13px] font-bold">Accounting Evidence Pack</h3>
+      <h3 class="text-[13px] font-bold">Accounting evidence pack</h3>
       <span class="text-[11px] text-gray-500">All evidence the accounting agenda asks for — drill into each panel</span>
       <div style="margin-left:auto; display:flex; gap:4px;">
         <button onclick="document.querySelectorAll('#evidence-pack details').forEach(d => d.open = true)"
@@ -3649,7 +3869,7 @@
       </div>
       <div class="ml-auto flex gap-1">
         <button id="btn-schedule-csv" class="mat-btn outline !py-1 !px-2 text-[11px]" title="Download every column the engine produces (CSV)">
-          <span class="material-icons-outlined text-[14px]">download</span>Download Full CSV
+          <span class="material-icons-outlined text-[14px]">download</span>Download full CSV
         </button>
         <button id="btn-schedule-json" class="mat-btn outline !py-1 !px-2 text-[11px]" title="Download the schedule as JSON for downstream tools">
           <span class="material-icons-outlined text-[14px]">data_object</span>JSON
@@ -3674,13 +3894,13 @@
 
 <div class="stage-arrow"><span class="material-icons-outlined text-[28px]">south</span></div>
 
-<!-- ===== STAGE 3: Cash Movements Outbound (DIU) ===== -->
+<!-- ===== STAGE 3: Cash movements outbound (DIU) ===== -->
 <section id="stage-3" class="stage-card stage-tab-content p-5">
   <div class="step-indicator">
     <div class="step-num-big">3</div>
     <div class="step-text">
       <div class="step-of">Step 3 of 5 · You are here</div>
-      <div class="step-name">Cash Movements Outbound</div>
+      <div class="step-name">Cash movements outbound</div>
       <div class="step-hint">Wrap journal entries into a DIU batch with a deterministic external key, then post to the Cash Movements GL</div>
     </div>
     <span class="step-state-chip" id="step-state-3">Awaiting JEs</span>
@@ -3688,7 +3908,7 @@
   <div class="flex items-start gap-3 mb-3 flex-wrap">
     <span class="stage-num">3</span>
     <div class="flex-1">
-      <h2 class="text-base font-bold flex items-center gap-2"><span class="material-icons-outlined text-[20px]" style="color:var(--brand-600)">cloud_upload</span>Cash Movements Outbound — Push Journals via DIU</h2>
+      <h2 class="text-base font-bold flex items-center gap-2"><span class="material-icons-outlined text-[20px]" style="color:var(--brand-600)">cloud_upload</span>Cash movements outbound — Push Journals via DIU</h2>
       <p class="text-[12px] text-gray-600 mt-1">Generated journals are packaged for FIS Investran's Data Import Utility (DIU) and pushed to the downstream Cash Movements GL as a balanced batch with deterministic external key (idempotent retries).</p>
     </div>
     <div class="flex flex-wrap gap-2">
@@ -3715,7 +3935,7 @@
     <div class="step-num-big">4</div>
     <div class="step-text">
       <div class="step-of">Step 4 of 5 · You are here</div>
-      <div class="step-name">Cash Movement Actuals</div>
+      <div class="step-name">Cash movement actuals</div>
       <div class="step-hint">Pull or synthesise actual cash settlements from the Cash Movements GL for the posted batch</div>
     </div>
     <span class="step-state-chip" id="step-state-4">Awaiting actuals</span>
@@ -3723,11 +3943,11 @@
   <div class="flex items-start gap-3 mb-3 flex-wrap">
     <span class="stage-num">4</span>
     <div class="flex-1">
-      <h2 class="text-base font-bold flex items-center gap-2"><span class="material-icons-outlined text-[20px]" style="color:var(--brand-600)">account_balance_wallet</span>Cash Movement Actuals</h2>
+      <h2 class="text-base font-bold flex items-center gap-2"><span class="material-icons-outlined text-[20px]" style="color:var(--brand-600)">account_balance_wallet</span>Cash movement actuals</h2>
       <p class="text-[12px] text-gray-600 mt-1">The Cash Movements system returns the actual cash receipts / disbursements after settlement (drawdowns funded, interest paid, fees received). The integration layer ingests this for reconciliation against PCS expected amounts.</p>
     </div>
     <div class="flex flex-wrap gap-2">
-      <button id="btn-workday-actuals" class="mat-btn primary"><span class="material-icons-outlined text-[16px]">file_upload</span>Load Actual Cash from GL</button>
+      <button id="btn-workday-actuals" class="mat-btn primary"><span class="material-icons-outlined text-[16px]">file_upload</span>Load actual cash from GL</button>
       <button id="btn-workday-actuals-sample" class="mat-btn outline"><span class="material-icons-outlined text-[16px]">data_object</span>Synthesise Sample (with variances)</button>
       <span id="workday-in-status" class="chip gray self-center">Not loaded</span>
     </div>
@@ -3744,7 +3964,7 @@
     <div id="actuals-batches-list"></div>
   </div>
   <details id="workday-actuals-section" class="hidden">
-    <summary class="text-[12px] mb-2">View Cash Movements actual-cash entries</summary>
+    <summary class="text-[12px] mb-2">View cash movements actual-cash entries</summary>
     <div class="scrolled" id="workday-actuals-table"></div>
   </details>
 </section>
@@ -3770,7 +3990,7 @@
     </div>
     <div class="flex flex-wrap gap-2">
       <button id="btn-recon-run" class="mat-btn primary" disabled><span class="material-icons-outlined text-[16px]">balance</span>Run Reconciliation</button>
-      <button id="btn-portf-feedback" class="mat-btn success" disabled><span class="material-icons-outlined text-[16px]">cloud_upload</span>Send Feedback</button>
+      <button id="btn-portf-feedback" class="mat-btn success" disabled><span class="material-icons-outlined text-[16px]">cloud_upload</span>Send feedback</button>
       <span id="recon-status" class="chip gray self-center">Awaiting Stage 4</span>
     </div>
   </div>
@@ -3780,33 +4000,37 @@
     <div class="scrolled" id="recon-table"></div>
   </details>
   <details id="feedback-section" class="hidden mt-3">
-    <summary class="text-[12px] mb-2">View Builder feedback message payload (JSON)</summary>
+    <summary class="text-[12px] mb-2">View builder feedback message payload (JSON)</summary>
     <pre class="code" id="feedback-payload">—</pre>
   </details>
 </section>
 
 <!-- ===== DASHBOARD: Loan-level overview ===== -->
 <section id="dashboard" class="stage-card stage-tab-content p-5">
-  <div class="step-indicator dash">
-    <div class="step-num-big">📊</div>
-    <div class="step-text">
-      <div class="step-of">Loan Overview · You are here</div>
-      <div class="step-name">Dashboard</div>
-      <div class="step-hint">Single-page snapshot of the loaded deal — KPIs, charts, lifecycle timeline, pipeline progress</div>
+  <!-- v4 hero — single unified header block replacing the earlier
+       teal step-indicator + duplicate "Loan Dashboard" h2. Flat white
+       surface, FIS-green icon tile, sentence-case title, "Live view"
+       chip right-aligned. Matches the Stage 0 / Stage 1 hero pattern. -->
+  <div class="builder-hero" style="display:flex; align-items:flex-start; gap:14px; padding:14px 16px; margin-bottom:14px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:12px;">
+    <div style="flex-shrink:0; width:36px; height:36px; border-radius:10px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+      <i class="ti ti-dashboard" aria-hidden="true" style="font-size:20px;"></i>
     </div>
-    <span class="step-state-chip" id="step-state-dashboard">Live view</span>
-  </div>
-  <div class="flex items-start gap-3 mb-3 flex-wrap">
-    <span class="material-icons-outlined text-[26px]" style="color:#21295C">dashboard</span>
-    <div class="flex-1">
-      <h2 class="text-base font-bold">Loan Dashboard</h2>
-      <p class="text-[12px] text-gray-600 mt-1">
-        Single-deal overview: contractual snapshot, lifecycle events, journal-entry coverage, and accounting framework — all derived from the active deal selected at the top of the page.
-      </p>
+    <div style="flex:1; min-width:0;">
+      <div style="font-size:10.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px; margin-bottom:2px;">Loan overview · you are here</div>
+      <h2 style="font-size:14.5px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px; margin:0;">Loan dashboard</h2>
+      <p style="font-size:12px; color:var(--n-500); margin:4px 0 0; line-height:1.55;">Single-deal snapshot — contractual KPIs, charts, lifecycle timeline, journal-entry coverage, and accounting framework — all derived from the active deal selected at the top of the page.</p>
     </div>
+    <span class="step-state-chip" id="step-state-dashboard" style="display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:999px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green-700,#15803D); font-size:11px; font-weight:600; border:0.5px solid var(--fis-green-50,#ECFDF5); white-space:nowrap; flex-shrink:0;">
+      <i class="ti ti-circle-check-filled" aria-hidden="true" style="font-size:12px;"></i>Live view
+    </span>
   </div>
-  <div id="dashboard-content" class="mt-4">
-    <div class="text-[12px] text-gray-500 italic">Pick a deal from the Active Deal dropdown to see its dashboard.</div>
+  <div id="dashboard-content">
+    <!-- Empty state (rendered inline until renderDashboard() overwrites) -->
+    <div class="v4-empty">
+      <div class="v4-empty-icon"><i class="ti ti-dashboard" aria-hidden="true"></i></div>
+      <div class="v4-empty-title">No active deal selected</div>
+      <div class="v4-empty-body">Pick a deal from the <b>Deals</b> picker at the top, or head to <b>Loan builder</b> to create one. The dashboard populates once a deal is active.</div>
+    </div>
   </div>
 </section>
 
@@ -4156,7 +4380,7 @@
   <div class="json-modal-pn">
     <div class="json-modal-h">
       <div>
-        <div id="session-modal-title" class="font-semibold text-[14px]">Save Session</div>
+        <div id="session-modal-title" class="font-semibold text-[14px]">Save session</div>
         <div id="session-modal-sub" class="text-[11px] text-gray-500"></div>
       </div>
       <button class="mat-btn outline !py-1 !px-2" data-close-session="1"><span class="material-icons-outlined text-[16px]">close</span></button>
@@ -4367,11 +4591,11 @@
         </div>
       </div>
 
-      <!-- ═══ Document Ingestion Service (separate microservice) ═══ -->
+      <!-- ═══ Document ingestion service (separate microservice) ═══ -->
       <div style="margin-top:16px; padding:14px 16px; border:1px solid #4C1D95; border-radius:8px; background:linear-gradient(135deg,rgba(76,29,149,0.15) 0%, rgba(30,58,138,0.10) 100%);">
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
           <span class="material-icons-outlined text-[20px]" style="color:#A78BFA;">auto_awesome</span>
-          <div style="font-weight:700; font-size:13px;">Document Ingestion Service</div>
+          <div style="font-weight:700; font-size:13px;">Document ingestion service</div>
           <span id="ingestcfg-status-chip" class="chip" style="margin-left:auto; font-size:10px; font-weight:600; padding:3px 8px; border-radius:10px; background:#334155; color:#E2E8F0;">not configured</span>
         </div>
         <div style="font-size:11px; color:#CBD5E1; margin-bottom:12px; line-height:1.5;">
@@ -4407,9 +4631,9 @@
           <input id="uicfg-show-advanced-stages" type="checkbox"
                  style="margin-top:2px; width:16px; height:16px; accent-color:#059669; cursor:pointer;"/>
           <div style="flex:1;">
-            <div style="font-size:12px; font-weight:600; color:#064E3B;">Show Cash Movements pipeline (Stages 3-5)</div>
+            <div style="font-size:12px; font-weight:600; color:#064E3B;">Show cash movements pipeline (Stages 3–5)</div>
             <div style="font-size:10.5px; color:#065F46; margin-top:2px;">
-              Adds tabs for "Cash Movements Out", "Actuals", and "Reconciliation + Feedback" to the top nav.
+              Adds tabs for "Cash movements out", "Actuals", and "Reconciliation + Feedback" to the top nav.
               Off by default because <b>Notices</b> covers agent-side reconciliation with variance detection and PDF matching.
             </div>
           </div>
@@ -4488,7 +4712,7 @@
   </div>
 </div>
 
-<!-- ─── Portfolio Covenant Report modal — opens from the Dashboard's
+<!-- ─── Portfolio covenant report modal — opens from the Dashboard's
      Covenants section. Shows every covenant from every loan in the user's
      portfolio (respecting team scope), with filter strip, summary KPIs, and
      a row-click to load that deal as active. ─── -->
@@ -4499,7 +4723,7 @@
       <div>
         <div class="font-semibold text-[14px] flex items-center gap-2">
           <span class="material-icons-outlined text-[20px]" style="color:#21295C">monitoring</span>
-          Portfolio Covenant Report
+          Portfolio covenant report
         </div>
         <div id="portcov-sub" class="text-[11px] text-gray-500">—</div>
       </div>
@@ -4561,7 +4785,7 @@
   </div>
 </div>
 
-<!-- ─── Active Deal picker modal — opens from the header "Load Active Deal"
+<!-- ─── Active Deal picker modal — opens from the header "Load active deal"
      button. Renders every preset as a card with framework chip, team,
      complexity (★), tag, and a Load button. Replaces the inline dropdown. ─── -->
 <!-- ═══ Portfolio Analytics modal (Tier 1 #1) ═══
@@ -4571,39 +4795,41 @@
 <div id="portfolio-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" onclick="window.closePortfolioModal && window.closePortfolioModal()"></div>
   <div class="json-modal-pn" style="width:min(1280px,97vw); max-height:94vh;">
-    <div class="json-modal-h">
-      <div>
-        <div class="font-semibold text-[14px] flex items-center gap-2">
-          <span class="material-icons-outlined text-[18px]" style="color:#4F46E5">insights</span>
-          Portfolio Analytics
-        </div>
-        <div class="text-[11px] text-gray-500">Cross-loan yield, duration, WAL, DV01 and concentration for every deal you can access.</div>
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200); flex-wrap:wrap;">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-chart-line" aria-hidden="true" style="font-size:18px;"></i>
       </div>
-      <div class="flex items-center gap-2">
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Portfolio analytics</div>
+        <div style="font-size:11px; color:var(--n-500); margin-top:2px;">Cross-loan yield, duration, WAL, DV01 and concentration for every deal you can access.</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
         <select id="portfolio-filter-fund" onchange="window.refreshPortfolio && window.refreshPortfolio()"
                 class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by fund allocation">
           <option value="">All funds</option>
         </select>
-        <label style="font-size:11px; color:#4B5563;">Benchmark
-          <input id="portfolio-benchmark" type="number" step="0.05" value="4.50" style="width:70px; padding:3px 6px; border:1px solid #d1d5db; border-radius:4px; font-size:11px; margin-left:4px;"/>%
+        <label style="font-size:11px; color:var(--n-600); display:inline-flex; align-items:center; gap:4px;">Benchmark
+          <input id="portfolio-benchmark" type="number" step="0.05" value="4.50" style="width:66px; padding:3px 6px; border:0.5px solid var(--n-300); border-radius:4px; font-size:11px; font-variant-numeric:tabular-nums;"/>%
         </label>
         <button onclick="window.refreshPortfolio && window.refreshPortfolio()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]" title="Recompute portfolio metrics">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Refresh
+          <i class="ti ti-refresh" aria-hidden="true"></i> Refresh
         </button>
         <button onclick="window.exportPortfolioCsv && window.exportPortfolioCsv()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]" title="Download analytics as CSV">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> CSV
+          <i class="ti ti-download" aria-hidden="true"></i> CSV
         </button>
         <button class="mat-btn outline !py-1 !px-2" onclick="window.closePortfolioModal && window.closePortfolioModal()" title="Close">
-          <span class="material-icons-outlined text-[16px]">close</span>
+          <i class="ti ti-x" aria-hidden="true"></i>
         </button>
       </div>
     </div>
-    <div class="json-modal-b" id="portfolio-body" style="padding:14px 18px; font-size:12px;">
-      <div id="portfolio-loading" style="text-align:center; padding:40px; color:#6B7280;">
-        <div style="font-size:28px; margin-bottom:8px;">⏳</div>
-        Loading deals and running analytics…
+    <div class="json-modal-b" id="portfolio-body" style="padding:16px 20px; font-size:12px; color:var(--n-800); font-variant-numeric:tabular-nums;">
+      <div id="portfolio-loading" class="v4-empty" style="padding:44px 20px;">
+        <div class="v4-empty-icon"><i class="ti ti-loader-2" aria-hidden="true" style="animation:v4-spin 1s linear infinite;"></i></div>
+        <div class="v4-empty-title">Loading deals and running analytics…</div>
+        <div class="v4-empty-body">Yield, duration, WAL, DV01 and concentration are being computed across every deal you can access.</div>
+        <style>@keyframes v4-spin { to { transform: rotate(360deg); } }</style>
       </div>
       <div id="portfolio-content" style="display:none;">
         <!-- KPI cards row -->
@@ -4611,11 +4837,11 @@
         <!-- Concentration + maturity ladder side-by-side -->
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
           <div>
-            <div style="font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:6px;">Concentration</div>
+            <div style="font-size:10px; font-weight:600; letter-spacing:0.4px; text-transform:uppercase; color:var(--n-500); margin-bottom:6px;">Concentration</div>
             <div id="portfolio-concentration"></div>
           </div>
           <div>
-            <div style="font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:#4B5563; margin-bottom:6px;">Maturity Ladder</div>
+            <div style="font-size:10px; font-weight:600; letter-spacing:0.4px; text-transform:uppercase; color:var(--n-500); margin-bottom:6px;">Maturity ladder</div>
             <div id="portfolio-maturity"></div>
           </div>
         </div>
@@ -4718,15 +4944,15 @@
 <div id="watchlist-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" onclick="window.closeWatchlistModal && window.closeWatchlistModal()"></div>
   <div class="json-modal-pn" style="width:min(1280px,97vw); max-height:94vh;">
-    <div class="json-modal-h">
-      <div>
-        <div class="font-semibold text-[14px] flex items-center gap-2">
-          <span class="material-icons-outlined text-[18px]" style="color:#DC2626">radar</span>
-          Watchlist &middot; Early-Warning
-        </div>
-        <div class="text-[11px] text-gray-500">Covenants, ECL drift, maturity, overdue notices, default interest — one screen, sorted by risk.</div>
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200); flex-wrap:wrap;">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-radar" aria-hidden="true" style="font-size:18px;"></i>
       </div>
-      <div class="flex items-center gap-2">
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Watchlist · early-warning</div>
+        <div style="font-size:11px; color:var(--n-500); margin-top:2px;">Covenants, ECL drift, maturity, overdue notices, default interest — one screen, sorted by risk.</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
         <select id="watchlist-filter-fund" onchange="window.refreshWatchlist && window.refreshWatchlist()"
                 class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by fund allocation">
           <option value="">All funds</option>
@@ -4753,31 +4979,34 @@
         </select>
         <button onclick="window.refreshWatchlist && window.refreshWatchlist()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]" title="Reload from DB">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Reload
+          <i class="ti ti-refresh" aria-hidden="true"></i> Reload
         </button>
         <button onclick="window.exportWatchlistCsv && window.exportWatchlistCsv()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]" title="Export current view to CSV">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> CSV
+          <i class="ti ti-download" aria-hidden="true"></i> CSV
         </button>
         <button class="mat-btn outline !py-1 !px-2" onclick="window.closeWatchlistModal && window.closeWatchlistModal()" title="Close">
-          <span class="material-icons-outlined text-[16px]">close</span>
+          <i class="ti ti-x" aria-hidden="true"></i>
         </button>
       </div>
     </div>
-    <div class="json-modal-b" style="padding:0 16px 16px 16px;">
-      <!-- KPI strip -->
-      <div id="watchlist-kpis" style="display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:8px; margin:10px 0 12px 0;">
-        <div class="kpi-card" data-kpi="total"    style="padding:8px 10px; border-radius:6px; background:#F1F5F9; border:1px solid #CBD5E1;"><div class="text-[10px] uppercase text-gray-600">Deals</div><div id="wl-kpi-total" class="text-[18px] font-semibold text-slate-800">—</div></div>
-        <div class="kpi-card" data-kpi="critical" style="padding:8px 10px; border-radius:6px; background:#FEF2F2; border:1px solid #FCA5A5;"><div class="text-[10px] uppercase text-red-800">Critical</div><div id="wl-kpi-critical" class="text-[18px] font-semibold text-red-700">—</div></div>
-        <div class="kpi-card" data-kpi="warning"  style="padding:8px 10px; border-radius:6px; background:#FFF7ED; border:1px solid #FCD34D;"><div class="text-[10px] uppercase text-amber-800">Warning</div><div id="wl-kpi-warning" class="text-[18px] font-semibold text-amber-700">—</div></div>
-        <div class="kpi-card" data-kpi="info"     style="padding:8px 10px; border-radius:6px; background:#EFF6FF; border:1px solid #93C5FD;"><div class="text-[10px] uppercase text-blue-800">Info</div><div id="wl-kpi-info" class="text-[18px] font-semibold text-blue-700">—</div></div>
-        <div class="kpi-card" data-kpi="clear"    style="padding:8px 10px; border-radius:6px; background:#F0FDF4; border:1px solid #86EFAC;"><div class="text-[10px] uppercase text-green-800">Clear</div><div id="wl-kpi-clear" class="text-[18px] font-semibold text-green-700">—</div></div>
+    <div class="json-modal-b" style="padding:14px 18px 16px; font-variant-numeric:tabular-nums;">
+      <!-- KPI strip — v4: neutral surface, colored value + accent bar. -->
+      <div id="watchlist-kpis" style="display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; margin-bottom:14px;">
+        <div class="kpi-card" data-kpi="total"    style="padding:9px 11px; border-radius:8px; background:var(--n-0); border:0.5px solid var(--n-200); border-left:3px solid var(--n-500);"><div style="font-size:9.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px;">Deals</div><div id="wl-kpi-total" style="font-size:18px; font-weight:600; color:var(--n-900); letter-spacing:-0.3px; margin-top:2px;">—</div></div>
+        <div class="kpi-card" data-kpi="critical" style="padding:9px 11px; border-radius:8px; background:var(--n-0); border:0.5px solid var(--n-200); border-left:3px solid #EF4444;"><div style="font-size:9.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px;">Critical</div><div id="wl-kpi-critical" style="font-size:18px; font-weight:600; color:#B91C1C; letter-spacing:-0.3px; margin-top:2px;">—</div></div>
+        <div class="kpi-card" data-kpi="warning"  style="padding:9px 11px; border-radius:8px; background:var(--n-0); border:0.5px solid var(--n-200); border-left:3px solid #F59E0B;"><div style="font-size:9.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px;">Warning</div><div id="wl-kpi-warning" style="font-size:18px; font-weight:600; color:#B45309; letter-spacing:-0.3px; margin-top:2px;">—</div></div>
+        <div class="kpi-card" data-kpi="info"     style="padding:9px 11px; border-radius:8px; background:var(--n-0); border:0.5px solid var(--n-200); border-left:3px solid #3B82F6;"><div style="font-size:9.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px;">Info</div><div id="wl-kpi-info" style="font-size:18px; font-weight:600; color:#1D4ED8; letter-spacing:-0.3px; margin-top:2px;">—</div></div>
+        <div class="kpi-card" data-kpi="clear"    style="padding:9px 11px; border-radius:8px; background:var(--n-0); border:0.5px solid var(--n-200); border-left:3px solid var(--fis-green,#22C55E);"><div style="font-size:9.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px;">Clear</div><div id="wl-kpi-clear" style="font-size:18px; font-weight:600; color:var(--fis-green-700,#15803D); letter-spacing:-0.3px; margin-top:2px;">—</div></div>
       </div>
       <!-- Body — table with row-expand -->
-      <div id="watchlist-body" style="max-height:calc(94vh - 210px); overflow:auto; border:1px solid #E5E7EB; border-radius:6px;">
-        <div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>
+      <div id="watchlist-body" style="max-height:calc(94vh - 220px); overflow:auto; border:0.5px solid var(--n-200); border-radius:8px; background:var(--n-0);">
+        <div class="v4-empty" style="padding:36px 20px;">
+          <div class="v4-empty-icon"><i class="ti ti-loader-2" aria-hidden="true"></i></div>
+          <div class="v4-empty-title">Loading…</div>
+        </div>
       </div>
-      <div id="watchlist-error" style="display:none; padding:16px; margin-top:10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:12px;"></div>
+      <div id="watchlist-error" style="display:none; padding:12px 14px; margin-top:10px; background:#FEF2F2; border:0.5px solid #FCA5A5; border-left:3px solid #EF4444; border-radius:6px; color:#7F1D1D; font-size:12px;"></div>
     </div>
     <div class="json-modal-f">
       <span id="watchlist-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
@@ -4786,7 +5015,7 @@
   </div>
 </div>
 
-<!-- ═══ Manage Funds (Multi-fund Phase 1) ═══
+<!-- ═══ Manage funds (Multi-fund Phase 1) ═══
      CRUD for the fund entity. Funds are shared across teams (RLS: everyone
      can READ; only owner + admin can UPDATE/DELETE). Domicile + regulator
      scope drive Regulatory Reports scoping. -->
@@ -4797,7 +5026,7 @@
       <div>
         <div class="font-semibold text-[14px] flex items-center gap-2">
           <span class="material-icons-outlined text-[18px]" style="color:#9D174D">account_balance</span>
-          Manage Funds
+          Manage funds
         </div>
         <div class="text-[11px] text-gray-500">Fund entities that hold this firm's loans. Domicile + regulator scope drive Form PF / AIFMD / Y-14Q scoping.</div>
       </div>
@@ -4867,43 +5096,45 @@
 </div>
 
 <!-- ═══ Borrower Financials modal (Phase 1) ═══
-     Lists past financials per deal + Import Financials button.
+     Lists past financials per deal + Import financials button.
      Each row is a snapshot (Q1 2026, FY 2025, etc.) with the computed
      covenant KPIs (DSCR, ICR, Leverage) shown inline. -->
 <div id="financials-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" onclick="window.closeFinancialsModal && window.closeFinancialsModal()"></div>
   <div class="json-modal-pn" style="width:min(1200px,97vw); max-height:94vh;">
-    <div class="json-modal-h">
-      <div>
-        <div class="font-semibold text-[14px] flex items-center gap-2">
-          <span class="material-icons-outlined text-[18px]" style="color:#065F46">insert_chart</span>
-          Borrower Financials
-        </div>
-        <div class="text-[11px] text-gray-500">AI-extracted quarterly / annual borrower statements. Computed KPIs auto-update matching covenants.</div>
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200); flex-wrap:wrap;">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-chart-bar" aria-hidden="true" style="font-size:18px;"></i>
       </div>
-      <div class="flex items-center gap-2">
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Borrower financials</div>
+        <div style="font-size:11px; color:var(--n-500); margin-top:2px;">AI-extracted quarterly / annual borrower statements. Computed KPIs auto-update matching covenants.</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
         <select id="financials-deal-filter" onchange="window.refreshFinancials && window.refreshFinancials()"
                 class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by deal">
           <option value="">All deals</option>
         </select>
         <button onclick="window.openImportFinancialsModal && window.openImportFinancialsModal()"
-                class="mat-btn !py-1 !px-2 text-[11px]"
-                style="background:linear-gradient(135deg,#059669 0%,#0EA5E9 100%); color:white; border:none;"
+                class="mat-btn primary !py-1 !px-2 text-[11px]"
                 title="Upload a borrower financial statement PDF for AI extraction">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">auto_awesome</span> Import Financials
+          <i class="ti ti-sparkles" aria-hidden="true"></i> Import financials
         </button>
         <button onclick="window.refreshFinancials && window.refreshFinancials()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Reload
+          <i class="ti ti-refresh" aria-hidden="true"></i> Reload
         </button>
-        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeFinancialsModal && window.closeFinancialsModal()">
-          <span class="material-icons-outlined text-[16px]">close</span>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeFinancialsModal && window.closeFinancialsModal()" title="Close">
+          <i class="ti ti-x" aria-hidden="true"></i>
         </button>
       </div>
     </div>
-    <div class="json-modal-b" style="padding:12px 16px; font-size:12px;">
-      <div id="financials-body" style="max-height:calc(94vh - 180px); overflow:auto;">
-        <div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>
+    <div class="json-modal-b" style="padding:14px 18px 16px; font-size:12px; color:var(--n-800); font-variant-numeric:tabular-nums;">
+      <div id="financials-body" style="max-height:calc(94vh - 190px); overflow:auto;">
+        <div class="v4-empty" style="padding:36px 20px;">
+          <div class="v4-empty-icon"><i class="ti ti-loader-2" aria-hidden="true"></i></div>
+          <div class="v4-empty-title">Loading…</div>
+        </div>
       </div>
     </div>
     <div class="json-modal-f">
@@ -4913,7 +5144,7 @@
   </div>
 </div>
 
-<!-- Import Financials — upload flow -->
+<!-- Import financials — upload flow -->
 <div id="import-financials-modal" class="json-modal" style="display:none; z-index:10001;">
   <div class="json-modal-bd" onclick="window.closeImportFinancialsModal && window.closeImportFinancialsModal()"></div>
   <div class="json-modal-pn" style="width:min(560px,94vw); max-height:90vh;">
@@ -4978,37 +5209,37 @@
 <div id="review-financials-modal" class="json-modal" style="display:none; z-index:10002;">
   <div class="json-modal-bd" onclick="window.closeReviewFinancialsModal && window.closeReviewFinancialsModal()"></div>
   <div class="json-modal-pn" style="width:min(1200px,97vw); height:min(92vh, 1100px); display:flex; flex-direction:column;">
-    <div class="json-modal-h">
-      <div>
-        <div class="font-semibold text-[14px] flex items-center gap-2">
-          <span class="material-icons-outlined text-[18px]" style="color:#059669">preview</span>
-          Review AI-Extracted Financials
-        </div>
-        <div id="review-fin-sub" class="text-[11px] text-gray-500"></div>
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200);">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-file-search" aria-hidden="true" style="font-size:18px;"></i>
       </div>
-      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeReviewFinancialsModal && window.closeReviewFinancialsModal()">
-        <span class="material-icons-outlined text-[16px]">close</span>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Review AI-extracted financials</div>
+        <div id="review-fin-sub" style="font-size:11px; color:var(--n-500); margin-top:2px;"></div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeReviewFinancialsModal && window.closeReviewFinancialsModal()" title="Close">
+        <i class="ti ti-x" aria-hidden="true"></i>
       </button>
     </div>
     <div class="json-modal-b" style="padding:0; flex:1; overflow:hidden; display:flex;">
-      <div style="flex:1; background:#374151; display:flex; flex-direction:column;">
-        <div style="padding:6px 10px; background:#1F2937; color:#F3F4F6; font-size:11px;">
-          <span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">picture_as_pdf</span>
-          <span id="review-fin-pdf-name">Source document</span>
+      <div style="flex:1; background:var(--n-900); display:flex; flex-direction:column;">
+        <div style="padding:7px 12px; background:var(--n-800, #27272A); color:var(--n-100); font-size:11px; display:flex; align-items:center; gap:6px; border-bottom:0.5px solid rgba(255,255,255,0.06);">
+          <i class="ti ti-file-type-pdf" aria-hidden="true" style="font-size:13px; color:#EF4444;"></i>
+          <span id="review-fin-pdf-name" style="font-family:'JetBrains Mono', ui-monospace, monospace; letter-spacing:-0.15px;">Source document</span>
         </div>
         <iframe id="review-fin-pdf-frame" style="flex:1; width:100%; border:none;" title="Source PDF"></iframe>
       </div>
-      <div style="flex:1.1; overflow-y:auto; padding:12px 14px; background:#F9FAFB;">
-        <div id="review-fin-header" style="font-size:11px; color:#6B7280; margin-bottom:10px;"></div>
-        <!-- Computed KPIs panel — dominant, top of the pane -->
-        <div id="review-fin-kpis" style="margin-bottom:12px; padding:10px 12px; background:linear-gradient(135deg,#ECFDF5 0%,#DBEAFE 100%); border:1px solid #86EFAC; border-radius:8px;">
-          <div style="font-size:10.5px; text-transform:uppercase; color:#065F46; font-weight:700; letter-spacing:0.4px; margin-bottom:6px;">Computed covenant KPIs</div>
-          <div id="review-fin-kpi-grid" style="display:grid; grid-template-columns:repeat(2,1fr); gap:6px; font-size:11.5px;"></div>
-          <div id="review-fin-covenant-preview" style="margin-top:8px; padding-top:8px; border-top:1px dashed #86EFAC; font-size:10.5px; color:#065F46;"></div>
+      <div style="flex:1.1; overflow-y:auto; padding:14px 16px; background:var(--n-50, #FAFAFA);">
+        <div id="review-fin-header" style="font-size:11px; color:var(--n-500); margin-bottom:10px;"></div>
+        <!-- Computed KPIs panel — neutral surface with FIS-green accent bar. -->
+        <div id="review-fin-kpis" style="margin-bottom:14px; padding:11px 12px 10px; background:var(--n-0); border:0.5px solid var(--n-200); border-left:3px solid var(--fis-green,#22C55E); border-radius:8px;">
+          <div style="font-size:10.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px; margin-bottom:8px;">Computed covenant KPIs</div>
+          <div id="review-fin-kpi-grid" style="display:grid; grid-template-columns:repeat(2,1fr); gap:6px; font-size:11.5px; font-variant-numeric:tabular-nums;"></div>
+          <div id="review-fin-covenant-preview" style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--n-200); font-size:10.5px; color:var(--n-600);"></div>
         </div>
         <!-- 3 sections: BS / IS / CF -->
         <div id="review-fin-sections"></div>
-        <div id="review-fin-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+        <div id="review-fin-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:0.5px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
       </div>
     </div>
     <div class="json-modal-f">
@@ -5118,44 +5349,43 @@
 <div id="review-ca-modal" class="json-modal" style="display:none; z-index:10002;">
   <div class="json-modal-bd" onclick="window.closeReviewCAModal && window.closeReviewCAModal()"></div>
   <div class="json-modal-pn" style="width:min(1240px,97vw); height:min(94vh, 1200px); display:flex; flex-direction:column;">
-    <div class="json-modal-h">
-      <div>
-        <div class="font-semibold text-[14px] flex items-center gap-2">
-          <span class="material-icons-outlined text-[18px]" style="color:#7c3aed">preview</span>
-          Review Credit Agreement Extraction
-        </div>
-        <div id="review-ca-sub" class="text-[11px] text-gray-500"></div>
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200);">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-file-check" aria-hidden="true" style="font-size:18px;"></i>
       </div>
-      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeReviewCAModal && window.closeReviewCAModal()">
-        <span class="material-icons-outlined text-[16px]">close</span>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Review credit agreement extraction</div>
+        <div id="review-ca-sub" style="font-size:11px; color:var(--n-500); margin-top:2px;"></div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeReviewCAModal && window.closeReviewCAModal()" title="Close">
+        <i class="ti ti-x" aria-hidden="true"></i>
       </button>
     </div>
     <div class="json-modal-b" style="padding:0; flex:1; overflow:hidden; display:flex;">
       <!-- Left: PDF -->
-      <div style="flex:1; background:#374151; display:flex; flex-direction:column; min-width:0;">
-        <div style="padding:6px 10px; background:#1F2937; color:#F3F4F6; font-size:11px;">
-          <span class="material-icons-outlined text-[14px]" style="vertical-align:-3px;">picture_as_pdf</span>
-          <span id="review-ca-pdf-name">Source document</span>
+      <div style="flex:1; background:var(--n-900); display:flex; flex-direction:column; min-width:0;">
+        <div style="padding:7px 12px; background:var(--n-800, #27272A); color:var(--n-100); font-size:11px; display:flex; align-items:center; gap:6px; border-bottom:0.5px solid rgba(255,255,255,0.06);">
+          <i class="ti ti-file-type-pdf" aria-hidden="true" style="font-size:13px; color:#EF4444;"></i>
+          <span id="review-ca-pdf-name" style="font-family:'JetBrains Mono', ui-monospace, monospace; letter-spacing:-0.15px;">Source document</span>
         </div>
         <iframe id="review-ca-pdf-frame" style="flex:1; width:100%; border:none;" title="Credit Agreement PDF"></iframe>
       </div>
       <!-- Right: editable form -->
-      <div style="flex:1.1; overflow-y:auto; padding:12px 14px; background:#F9FAFB;">
-        <div id="review-ca-header" style="font-size:11px; color:#6B7280; margin-bottom:10px;"></div>
-        <div id="review-ca-summary" style="margin-bottom:12px; padding:10px 12px; background:linear-gradient(135deg,#faf5ff 0%,#ecfdf5 100%); border:1px solid #c4b5fd; border-radius:8px; font-size:11.5px; color:#4c1d95;"></div>
+      <div style="flex:1.1; overflow-y:auto; padding:14px 16px; background:var(--n-50, #FAFAFA);">
+        <div id="review-ca-header" style="font-size:11px; color:var(--n-500); margin-bottom:10px;"></div>
+        <div id="review-ca-summary" style="margin-bottom:14px; padding:11px 12px; background:var(--n-0); border:0.5px solid var(--n-200); border-left:3px solid var(--fis-green,#22C55E); border-radius:8px; font-size:11.5px; color:var(--n-800);"></div>
         <div id="review-ca-sections"></div>
-        <div id="review-ca-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
+        <div id="review-ca-error" style="display:none; margin-top:10px; padding:8px 10px; background:#FEF2F2; border:0.5px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:11px;"></div>
       </div>
     </div>
     <div class="json-modal-f">
       <span id="review-ca-hint" class="text-[10.5px] text-gray-500 mr-auto"></span>
       <button class="mat-btn outline" onclick="window.closeReviewCAModal && window.closeReviewCAModal()">Close</button>
       <button id="review-ca-save-btn" onclick="window.saveExtractedCA && window.saveExtractedCA()" class="mat-btn outline">
-        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">save</span> Save CA
+        <i class="ti ti-device-floppy" aria-hidden="true"></i> Save CA
       </button>
-      <button id="review-ca-promote-btn" onclick="window.promoteCAToDeal && window.promoteCAToDeal()"
-              class="mat-btn primary" style="background:#7c3aed; border-color:#7c3aed; color:#fff;">
-        <span class="material-icons-outlined text-[16px]" style="vertical-align:-3px;">rocket_launch</span> Create Deal from CA
+      <button id="review-ca-promote-btn" onclick="window.promoteCAToDeal && window.promoteCAToDeal()" class="mat-btn primary">
+        <i class="ti ti-rocket" aria-hidden="true"></i> Create deal from CA
       </button>
     </div>
   </div>
@@ -5259,10 +5489,10 @@
           </table>
         </div>
       </div>
-      <div id="notices-empty" style="display:none; text-align:center; padding:40px; color:#6B7280;">
-        <div style="font-size:28px; margin-bottom:8px;">📭</div>
-        <div style="font-weight:600; margin-bottom:4px;">No notices match your filters</div>
-        <div style="font-size:11px;">Try broadening the date horizon, or click <b>Derive</b> to generate notices from your loan schedules.</div>
+      <div id="notices-empty" class="v4-empty" style="display:none;">
+        <div class="v4-empty-icon"><i class="ti ti-mailbox" aria-hidden="true"></i></div>
+        <div class="v4-empty-title">No notices match your filters</div>
+        <div class="v4-empty-body">Broaden the date horizon, or click <b>Derive</b> to generate notices from your loan schedules.</div>
       </div>
       <div id="notices-error" style="display:none; padding:16px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D;"></div>
     </div>
@@ -5278,41 +5508,41 @@
 <div id="notice-detail-modal" class="json-modal" style="display:none; z-index:10001;">
   <div class="json-modal-bd" onclick="window.closeNoticeDetail && window.closeNoticeDetail()"></div>
   <div id="notice-detail-panel" class="json-modal-pn" style="width:min(680px,94vw); max-height:92vh; transition:width 160ms ease;">
-    <div class="json-modal-h">
-      <div>
-        <div class="font-semibold text-[14px] flex items-center gap-2">
-          <span id="nd-icon" class="material-icons-outlined text-[16px]" style="color:#D97706">mark_email_read</span>
-          <span id="nd-title">Notice detail</span>
-        </div>
-        <div id="nd-subtitle" class="text-[11px] text-gray-500"></div>
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200); flex-wrap:wrap;">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i id="nd-icon" class="ti ti-mail-forward" aria-hidden="true" style="font-size:18px;"></i>
       </div>
-      <div class="flex items-center gap-2">
+      <div style="flex:1; min-width:180px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;" id="nd-title">Notice detail</div>
+        <div id="nd-subtitle" style="font-size:11px; color:var(--n-500); margin-top:2px;"></div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
         <button onclick="window.previewNoticePdf && window.previewNoticePdf()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]"
                 title="Preview this notice as a formal PDF (download from within the preview)">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">picture_as_pdf</span> Preview PDF
+          <i class="ti ti-file-type-pdf" aria-hidden="true"></i> Preview PDF
         </button>
         <button onclick="window.openSendNoticeModal && window.openSendNoticeModal()"
                 class="mat-btn primary !py-1 !px-2 text-[11px]"
                 title="Email this notice to the deal's recipients with the PDF attached">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">send</span> Send
+          <i class="ti ti-send" aria-hidden="true"></i> Send
         </button>
         <button onclick="window.openRecipientsForNotice && window.openRecipientsForNotice()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]"
                 title="Manage recipients for this deal">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">contacts</span> Recipients
+          <i class="ti ti-users" aria-hidden="true"></i> Recipients
         </button>
         <button id="nd-delete" onclick="window.deleteCurrentNotice && window.deleteCurrentNotice()"
                 class="mat-btn outline !py-1 !px-2 text-[11px]"
                 style="color:#DC2626; border-color:#FCA5A5;" title="Delete this notice">
-          <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">delete</span> Delete
+          <i class="ti ti-trash" aria-hidden="true"></i> Delete
         </button>
-        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeNoticeDetail && window.closeNoticeDetail()">
-          <span class="material-icons-outlined text-[16px]">close</span>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closeNoticeDetail && window.closeNoticeDetail()" title="Close">
+          <i class="ti ti-x" aria-hidden="true"></i>
         </button>
       </div>
     </div>
-    <div class="json-modal-b" style="padding:16px 20px; font-size:12px;" id="nd-body">
+    <div class="json-modal-b" style="padding:16px 20px; font-size:12px; color:var(--n-800);" id="nd-body">
       <!-- Rendered dynamically -->
     </div>
     <div class="json-modal-f">
@@ -6750,7 +6980,7 @@ window.SB = (function(){
 
   async function extractNoticeFromPdf(file, opts){
     // Server call — sends the raw file to /api/extract/notice on the
-    // Document Ingestion Service (default port 4319).
+    // Document ingestion service (default port 4319).
     opts = opts || {};
     const base = _ingestBaseUrl();
     if(!base){
@@ -7477,7 +7707,7 @@ window.SB = (function(){
   }
 
   // ------------------------------------------------------------
-  // Sessions — Save Session writes the full M state + active deal id.
+  // Sessions — Save session writes the full M state + active deal id.
   // ------------------------------------------------------------
   async function saveSession(label, state){
     if(!_client || !_connected) return { ok:false };
@@ -8967,10 +9197,261 @@ const M = {
 
 // ----- Helpers --------------------------------------------------------
 const $ = id => document.getElementById(id);
-function toast(msg, ms){
-  const el = $('toast'); el.textContent = msg; el.classList.add('show');
-  setTimeout(()=> el.classList.remove('show'), ms || 2400);
+// ─── V4 toast · stack-based, kind-aware, back-compat with (msg, ms) ────
+// The legacy #toast element is now a stack container; each call renders
+// one .v4-toast child card. Kind auto-detected from message ("failed",
+// "error", "no active deal") if not supplied, so pre-existing callers
+// get sensible coloring for free. Third arg `opts` unlocks the v4 extras.
+//   toast('Loaded')                           → success, 2.4s
+//   toast('Delete failed', 6000)              → error kind auto, 6s
+//   toast('Slow request', 5000, {kind:'warning', detail:'https://…', id:'watchdog'})
+//     id lets you replace an existing toast in place (e.g., watchdog updates)
+//   toast('Working…', 0, {persistent:true, id:'x'})  → no auto-dismiss
+//   toast.dismiss('x')                        → close a keyed toast early
+const ICONS = {
+  success: 'ti-circle-check',
+  warning: 'ti-alert-triangle',
+  error:   'ti-alert-circle',
+  info:    'ti-info-circle'
+};
+function _detectKind(msg){
+  const s = String(msg || '').toLowerCase();
+  if(/failed|error|couldn['’]?t|not connected|missing|refresh/.test(s)) return 'error';
+  if(/no active|not loaded|slow|timeout|check/.test(s)) return 'warning';
+  return 'success';
 }
+function toast(msg, ms, opts){
+  opts = opts || {};
+  const stack = $('toast');
+  if(!stack) return;
+  const kind = opts.kind || _detectKind(msg);
+  const persistent = !!opts.persistent;
+  const duration = persistent ? 0 : (ms || (kind === 'error' ? 5000 : kind === 'warning' ? 4200 : 2600));
+
+  // If an id was supplied and a toast with that id is already showing,
+  // update it in place instead of stacking a new one.
+  let card = opts.id ? stack.querySelector('[data-toast-id="' + CSS.escape(opts.id) + '"]') : null;
+  const isNew = !card;
+  if(isNew){
+    card = document.createElement('div');
+    card.className = 'v4-toast';
+    if(opts.id) card.setAttribute('data-toast-id', opts.id);
+  }
+  card.setAttribute('data-kind', kind);
+
+  const iconClass = ICONS[kind] || ICONS.info;
+  const detailHtml = opts.detail
+    ? '<span class="v4-toast-detail">' + String(opts.detail).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) + '</span>'
+    : '';
+  const closeBtn = (persistent || duration > 4000)
+    ? '<button class="v4-toast-close" title="Dismiss" aria-label="Dismiss"><i class="ti ti-x"></i></button>'
+    : '';
+  card.innerHTML =
+    '<span class="v4-toast-icon"><i class="ti ' + iconClass + '"></i></span>' +
+    '<span class="v4-toast-msg">' + String(msg || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) + detailHtml + '</span>' +
+    closeBtn;
+
+  const dismiss = () => {
+    card.classList.add('leave');
+    card.classList.remove('show');
+    setTimeout(() => card.remove(), 220);
+  };
+  const cb = card.querySelector('.v4-toast-close');
+  if(cb) cb.onclick = dismiss;
+
+  if(isNew) stack.appendChild(card);
+  // Trigger enter transition on next frame
+  requestAnimationFrame(() => card.classList.add('show'));
+
+  // Reset any prior auto-dismiss timer if updating in place
+  if(card._toastTimer) clearTimeout(card._toastTimer);
+  if(duration > 0) card._toastTimer = setTimeout(dismiss, duration);
+}
+toast.dismiss = function(id){
+  const stack = $('toast'); if(!stack) return;
+  const card = stack.querySelector('[data-toast-id="' + CSS.escape(id) + '"]');
+  if(!card) return;
+  if(card._toastTimer) clearTimeout(card._toastTimer);
+  card.classList.add('leave'); card.classList.remove('show');
+  setTimeout(() => card.remove(), 220);
+};
+
+// Bridge the fetch-watchdog into the toast stack. The watchdog script
+// runs before toast() exists and buffers events into
+// window.__watchdogQueue. We (a) drain anything already buffered, and
+// (b) install a live notifier so future events go straight to toast().
+(function _wireWatchdogToToast(){
+  const drainOne = (evt) => {
+    if(!evt || !evt.msg) return;
+    // duration 0 for warnings so they persist; user dismisses.
+    // Successes auto-hide (they mean "recovered"). Errors linger 8s.
+    const kind = evt.kind || 'info';
+    const ms = kind === 'warning' ? 0 : kind === 'error' ? 8000 : 3200;
+    toast(evt.msg, ms, {
+      kind: kind,
+      detail: evt.detail,
+      id: evt.id,
+      persistent: kind === 'warning'
+    });
+  };
+  window.__watchdogNotifyLive = drainOne;
+  const q = window.__watchdogQueue || [];
+  window.__watchdogQueue = [];
+  q.forEach(drainOne);
+})();
+
+// ─── V4 · Material Icons → Tabler runtime shim ────────────────────────
+// ~366 legacy <span class="material-icons-outlined">name</span> tags live
+// across this file. Hand-migrating each is risky (each needs its own
+// Tabler name lookup + tests that the surrounding vertical-align tricks
+// still visually center). Instead we walk the DOM, swap each Material
+// icon for the Tabler equivalent, and preserve the caller's inline size
+// / color styles so no layout shifts. If a Material name isn't in the
+// map, the shim leaves the element alone — worst case it still renders
+// as a Material icon (safe fallback).
+//
+// Call migrateIconsIn(node) after any innerHTML update that could
+// introduce new material-icons-outlined tags (Notice detail, dashboard,
+// evidence pack — all use innerHTML +=). One-shot pass on DOMContentLoaded
+// handles static markup.
+window.__miMap = {
+  // Actions
+  'add':'ti-plus', 'add_circle':'ti-circle-plus', 'clear':'ti-x', 'close':'ti-x',
+  'cancel':'ti-x-circle', 'refresh':'ti-refresh', 'sync_alt':'ti-refresh',
+  'restart_alt':'ti-restore', 'history':'ti-history',
+  'download':'ti-download', 'upload':'ti-upload', 'file_upload':'ti-upload',
+  'cloud_upload':'ti-cloud-upload', 'cloud_off':'ti-cloud-off',
+  'cloud_done':'ti-cloud-check', 'upload_file':'ti-cloud-upload',
+  'check':'ti-check', 'check_circle':'ti-circle-check',
+  'edit':'ti-edit', 'edit_note':'ti-edit', 'edit_document':'ti-file-pencil',
+  'delete':'ti-trash', 'send':'ti-send', 'save':'ti-device-floppy',
+  'content_copy':'ti-copy', 'open_in_new':'ti-external-link',
+  'preview':'ti-eye', 'visibility':'ti-eye',
+  // Nav / arrows
+  'expand_less':'ti-chevron-up', 'expand_more':'ti-chevron-down',
+  'unfold_more':'ti-chevron-down', 'unfold_less':'ti-chevron-up',
+  'arrow_drop_down':'ti-caret-down-filled', 'arrow_forward':'ti-arrow-right',
+  'south':'ti-arrow-down', 'north':'ti-arrow-up',
+  'chevron_left':'ti-chevron-left', 'chevron_right':'ti-chevron-right',
+  // Auth / user
+  'login':'ti-login', 'logout':'ti-logout', 'lock':'ti-lock',
+  'lock_reset':'ti-lock-open', 'email':'ti-mail', 'mail':'ti-mail',
+  'mark_email_read':'ti-mail-check', 'mark_email_unread':'ti-mail-opened',
+  'account_circle':'ti-user-circle', 'contacts':'ti-users',
+  'support_agent':'ti-headset', 'chat':'ti-message-2',
+  // Finance / accounting
+  'account_balance':'ti-building-bank', 'account_balance_wallet':'ti-wallet',
+  'account_tree':'ti-hierarchy', 'business':'ti-building', 'layers':'ti-stack-2',
+  'receipt':'ti-receipt', 'receipt_long':'ti-receipt', 'request_quote':'ti-receipt-tax',
+  'payments':'ti-cash', 'sell':'ti-tag', 'savings':'ti-pig-money',
+  'swap_horiz':'ti-arrows-left-right', 'swap_horizontal_circle':'ti-transfer',
+  'compare_arrows':'ti-arrows-left-right', 'balance':'ti-scale',
+  'fast_rewind':'ti-rewind-backward-10', 'play_arrow':'ti-player-play',
+  'play_circle':'ti-player-play', 'pause_circle':'ti-player-pause',
+  // Analytics
+  'dashboard':'ti-dashboard', 'timeline':'ti-timeline', 'monitoring':'ti-chart-dots',
+  'insights':'ti-chart-line', 'insert_chart':'ti-chart-bar',
+  'leaderboard':'ti-chart-bar', 'multiline_chart':'ti-chart-line',
+  'pie_chart':'ti-chart-pie', 'trending_up':'ti-trending-up',
+  'calculate':'ti-calculator', 'functions':'ti-math-function',
+  'data_object':'ti-braces', 'auto_awesome':'ti-sparkles',
+  // System / misc
+  'warning':'ti-alert-triangle', 'info':'ti-info-circle',
+  'info_outline':'ti-info-circle', 'settings':'ti-settings',
+  'search':'ti-search', 'database':'ti-database', 'folder_open':'ti-folder-open',
+  'hub':'ti-affiliate', 'apps':'ti-apps', 'tune':'ti-adjustments-horizontal',
+  'checklist':'ti-checkbox', 'flag':'ti-flag',
+  'circle':'ti-circle-filled', 'radar':'ti-radar',
+  'network_check':'ti-wifi', 'event':'ti-calendar-event',
+  'event_available':'ti-calendar-check', 'link_off':'ti-link-off',
+  'healing':'ti-first-aid-kit', 'health_and_safety':'ti-shield-check',
+  'verified':'ti-shield-check', 'verified_user':'ti-user-check',
+  'gavel':'ti-gavel', 'picture_as_pdf':'ti-file-type-pdf',
+  'rocket_launch':'ti-rocket', 'hourglass_top':'ti-hourglass',
+  'notifications':'ti-bell', 'file_download':'ti-download',
+  'file_present':'ti-file', 'article':'ti-file-text',
+  'analytics':'ti-chart-line', 'history_edu':'ti-book',
+  'error':'ti-alert-circle',
+  // Additions found by the runtime shim's "unmapped" report on first run.
+  'rule':'ti-ruler', 'percent':'ti-percentage',
+  'event_repeat':'ti-calendar-repeat', 'currency_exchange':'ti-currency-dollar',
+  'print':'ti-printer', 'person_add':'ti-user-plus',
+  'person':'ti-user', 'group':'ti-users', 'group_add':'ti-users-plus',
+  'more_vert':'ti-dots-vertical', 'more_horiz':'ti-dots',
+  'menu':'ti-menu-2', 'filter_list':'ti-filter',
+  'sort':'ti-arrows-sort', 'visibility_off':'ti-eye-off',
+  'help_outline':'ti-help', 'help':'ti-help',
+  'copy_all':'ti-copy', 'attach_file':'ti-paperclip',
+  'link':'ti-link', 'cached':'ti-refresh',
+  'block':'ti-ban', 'do_not_disturb':'ti-ban',
+  'schedule':'ti-clock', 'access_time':'ti-clock',
+  'date_range':'ti-calendar-month', 'calendar_today':'ti-calendar',
+  'today':'ti-calendar', 'update':'ti-refresh',
+  'star':'ti-star', 'star_border':'ti-star',
+  'bookmark':'ti-bookmark', 'label':'ti-tag',
+  'category':'ti-category', 'inventory':'ti-package',
+  'shopping_cart':'ti-shopping-cart', 'store':'ti-building-store',
+  'notifications_active':'ti-bell-ringing', 'notifications_off':'ti-bell-off',
+  'volume_up':'ti-volume', 'volume_off':'ti-volume-off',
+  'wifi':'ti-wifi', 'wifi_off':'ti-wifi-off',
+  'battery_full':'ti-battery', 'signal_cellular_alt':'ti-signal-4g',
+  'zoom_in':'ti-zoom-in', 'zoom_out':'ti-zoom-out',
+  'crop':'ti-crop', 'palette':'ti-palette'
+};
+window.migrateIconsIn = function(root){
+  root = root || document;
+  const nodes = root.querySelectorAll('span.material-icons-outlined');
+  const map = window.__miMap;
+  let swapped = 0, unmapped = 0;
+  nodes.forEach(node => {
+    const name = (node.textContent || '').trim();
+    const tabler = map[name];
+    if(!tabler){ unmapped++; return; }
+    // Preserve size + color inline styles the caller set (font-size, color,
+    // vertical-align). Tabler icons honor font-size natively.
+    const i = document.createElement('i');
+    i.className = 'ti ' + tabler;
+    i.setAttribute('aria-hidden', 'true');
+    // Copy over any inline style so the icon lands at the same size/color.
+    if(node.getAttribute('style')) i.setAttribute('style', node.getAttribute('style'));
+    // Fold Tailwind text-[Npx] size classes into the Tabler icon so
+    // font-size still cascades. Also copy any non-size utility classes.
+    const cls = (node.getAttribute('class') || '').split(/\s+/).filter(c =>
+      c && c !== 'material-icons-outlined');
+    cls.forEach(c => i.classList.add(c));
+    node.replaceWith(i);
+    swapped++;
+  });
+  if(swapped || unmapped){
+    console.log('[icon-shim] migrated ' + swapped + ' icons' + (unmapped ? ' · ' + unmapped + ' unmapped (fallback rendered as Material)' : ''));
+  }
+  return { swapped, unmapped };
+};
+// Run on DOMContentLoaded (or immediately if already loaded)
+function _initIconShim(){
+  window.migrateIconsIn(document);
+  // Observe future DOM changes — Notice detail, Dashboard, Evidence pack
+  // all render dynamically via innerHTML. Batch swaps with rAF so we don't
+  // thrash on heavy renders.
+  let pending = false;
+  const scheduleSweep = () => {
+    if(pending) return;
+    pending = true;
+    requestAnimationFrame(() => { pending = false; window.migrateIconsIn(document); });
+  };
+  const mo = new MutationObserver(muts => {
+    for(const m of muts){
+      if(m.addedNodes && m.addedNodes.length){ scheduleSweep(); return; }
+    }
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+}
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', _initIconShim);
+} else {
+  _initIconShim();
+}
+
 function fmtMoney(n, ccy){
   if(n == null || isNaN(n)) return '—';
   const sym = ccy === 'USD' ? '$' : ccy === 'EUR' ? '€' : '£';
@@ -11436,7 +11917,7 @@ function interpretSaveError(rawMsg){
       summary:  'A referenced record is missing',
       field:    'FK: ' + m[1],
       fieldId:  null,
-      suggestion: 'Reload the deal from Load Active Deal — the underlying data may have changed since the Builder loaded it.'
+      suggestion: 'Reload the deal from Load active deal — the underlying data may have changed since the Builder loaded it.'
     };
   }
   // Unique / duplicate key
@@ -11446,7 +11927,7 @@ function interpretSaveError(rawMsg){
       summary:  'A deal with this identifier already exists',
       field:    'Stage 0 → Deal Setup → Deal Name',
       fieldId:  'b-deal-name',
-      suggestion: 'Rename this deal, or reload the existing one via Load Active Deal.'
+      suggestion: 'Rename this deal, or reload the existing one via Load active deal.'
     };
   }
   // RLS
@@ -11648,7 +12129,7 @@ function handleBuilderSaveDBClick(){
       title: 'No Builder state to save',
       subtitle: 'The Loan Builder is empty.',
       body: '<div style="background:#FEF2F2; border:1px solid #FECACA; color:#7F1D1D; padding:12px 14px; border-radius:8px;">'
-          + 'Fill in at least the Deal Name in Stage 0 before saving. You can also click "Load Active Deal" to start from an existing deal.</div>',
+          + 'Fill in at least the Deal Name in Stage 0 before saving. You can also click "Load active deal" to start from an existing deal.</div>',
       debug: window.B || null
     });
     return;
@@ -11955,6 +12436,12 @@ function applyTreatmentFromForm(){
   if(!isNaN(dpdCur)) inst.ifrs.dpdCurrent = dpdCur; else delete inst.ifrs.dpdCurrent;
   // Gap #4 — covenant breach (triggers SICR move to Stage 2 if currently Stage 1)
   inst.ifrs.covenantBreach      = $('opt-covenant-breach').value === 'true';
+  // Loan status preset is a derived read on the switches above — no
+  // separate persistence needed. Refresh the chip so it stays coherent
+  // after any programmatic writeback.
+  if(typeof window._syncLoanStatusFromSwitches === 'function'){
+    window._syncLoanStatusFromSwitches();
+  }
   // ─── Modification Policy ───
   inst.ifrs.modification = inst.ifrs.modification || {};
   const modThresh = parseFloat($('opt-mod-threshold').value);      if(!isNaN(modThresh)) inst.ifrs.modification.substantialThreshold = modThresh; else delete inst.ifrs.modification.substantialThreshold;
@@ -12210,6 +12697,12 @@ function loadTreatmentForm(){
   $('opt-macro-weight').value     = inst.ifrs?.macroOverlayWeight ?? '';
   $('opt-dpd-current').value      = inst.ifrs?.dpdCurrent ?? '';
   $('opt-covenant-breach').value  = String(inst.ifrs?.covenantBreach === true);
+  // Re-derive the consolidated Loan status dropdown from the switches
+  // above. Runs after each load so the preset chip stays in sync with
+  // the deal's actual credit-risk posture.
+  if(typeof window._syncLoanStatusFromSwitches === 'function'){
+    window._syncLoanStatusFromSwitches();
+  }
   // Modification Policy
   $('opt-mod-threshold').value    = inst.ifrs?.modification?.substantialThreshold ?? '';
   $('opt-mod-reir').value         = String(inst.ifrs?.modification?.recomputeEIROnSubstantial !== false);
@@ -12998,7 +13491,7 @@ function addPrepaymentTest(){
   onTreatmentChange();
 }
 
-// Transtype #5 — Prepayment Penalty Schedule. Inject a standard 3-band
+// Transtype #5 — Prepayment penalty schedule. Inject a standard 3-band
 // step-down: 2.0% Yr1, 1.0% Yr2, 0% thereafter (relative to settle).
 function addPrepaymentPenaltyTest(){
   const inst = currentInstrument();
@@ -15015,9 +15508,15 @@ window.refreshPortfolio = async function(){
     if(!presets.length){
       loading.style.display = 'none';
       errBox.style.display = '';
-      errBox.innerHTML = fundFilterId
-        ? '<b>No deals allocated to the selected fund.</b> Change the fund filter or add an allocation via the Builder.'
-        : '<b>No deals to analyze.</b> Load or save at least one deal first (Load Active Deal → pick one → Save to DB).';
+      errBox.innerHTML =
+        '<div class="v4-empty">' +
+          '<div class="v4-empty-icon"><i class="ti ti-briefcase" aria-hidden="true"></i></div>' +
+          '<div class="v4-empty-title">' + (fundFilterId ? 'No deals allocated to this fund' : 'No deals to analyze yet') + '</div>' +
+          '<div class="v4-empty-body">' + (fundFilterId
+            ? 'Change the fund filter — or add an allocation via the Builder → Fund allocations section.'
+            : 'Load an active deal, or create one in the Builder and save it to the database.') +
+          '</div>' +
+        '</div>';
       return;
     }
     // Build instruments + schedules + metrics
@@ -15066,7 +15565,7 @@ function _portfolioRender(loans, agg){
   // Diagnostic banner — surface how many loans produced valid metrics.
   // "Valid" means we could compute a YTM (implies schedule build succeeded and
   // future cashflows were extractable). If a lot failed, tell the user to
-  // click each deal in Load Active Deal → Run Accounting to prime the engine.
+  // click each deal in Load active deal → Run Accounting to prime the engine.
   const withYtm = loans.filter(l => l.metrics && l.metrics.ytm != null).length;
   const withoutYtm = loans.length - withYtm;
   const diagWrap = document.getElementById('portfolio-diag') || (function(){
@@ -15214,7 +15713,7 @@ window.exportPortfolioCsv = function(){
 };
 
 // ═════════════════════════════════════════════════════════════════════
-// Manage Funds modal (Multi-fund Phase 1)
+// Manage funds modal (Multi-fund Phase 1)
 // ═════════════════════════════════════════════════════════════════════
 window.openManageFundsModal = async function(){
   const el = document.getElementById('manage-funds-modal');
@@ -16036,7 +16535,12 @@ window.renderWatchlist = function(){
 
   const body = document.getElementById('watchlist-body');
   if(!filtered.length){
-    body.innerHTML = '<div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">No deals match the current filter.</div>';
+    body.innerHTML =
+      '<div class="v4-empty">' +
+        '<div class="v4-empty-icon"><i class="ti ti-shield-check" aria-hidden="true"></i></div>' +
+        '<div class="v4-empty-title">No deals match the current filter</div>' +
+        '<div class="v4-empty-body">Broaden the severity or signal filter — or, if this is fresh good news, everything under coverage is clear.</div>' +
+      '</div>';
     document.getElementById('watchlist-summary').textContent =
       rows.length + ' deals scanned · 0 shown';
     return;
@@ -16778,21 +17282,26 @@ window.openNoticeDetail = async function(noticeId){
     const uuid = p.dealId || p._dbDealId || p.dbDealId;
     if(uuid) dealNameById[uuid] = p.label || p.dealCode || uuid;
   }
+  // v4: Tabler icon class per type. Icon element is now <i class="ti">.
   const typeMeta = {
-    drawdown:{ icon:'account_balance', color:'#0EA5E9' },
-    interest:{ icon:'payments',        color:'#8B5CF6' },
-    repayment:{ icon:'undo',           color:'#10B981' },
-    prepayment:{ icon:'fast_rewind',   color:'#059669' },
-    rate_reset:{ icon:'trending_up',   color:'#F59E0B' },
-    fee:{ icon:'receipt_long',         color:'#6366F1' },
-    waiver:{ icon:'gavel',             color:'#D97706' },
-    amendment:{ icon:'edit_document',  color:'#DC2626' },
-    default:{ icon:'warning',          color:'#B91C1C' },
-    other:{ icon:'mail',               color:'#6B7280' }
+    drawdown:  { icon:'ti-building-bank',  color:'#0EA5E9' },
+    interest:  { icon:'ti-cash',           color:'#8B5CF6' },
+    repayment: { icon:'ti-arrow-back-up',  color:'#10B981' },
+    prepayment:{ icon:'ti-rewind-backward-10', color:'#059669' },
+    rate_reset:{ icon:'ti-trending-up',    color:'#F59E0B' },
+    fee:       { icon:'ti-receipt',        color:'#6366F1' },
+    waiver:    { icon:'ti-gavel',          color:'#D97706' },
+    amendment: { icon:'ti-file-pencil',    color:'#DC2626' },
+    default:   { icon:'ti-alert-triangle', color:'#B91C1C' },
+    other:     { icon:'ti-mail',           color:'#6B7280' }
   };
   const meta = typeMeta[n.notice_type] || typeMeta.other;
-  document.getElementById('nd-icon').textContent = meta.icon;
-  document.getElementById('nd-icon').style.color = meta.color;
+  const iconEl = document.getElementById('nd-icon');
+  if(iconEl){
+    // Replace any prior ti-* modifier with the new one; keep the base 'ti' class.
+    iconEl.className = 'ti ' + meta.icon;
+    iconEl.style.color = meta.color;
+  }
   document.getElementById('nd-title').textContent = (meta.icon ? '' : '') + n.notice_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()) + ' — ' + (n.reference || 'no ref');
   document.getElementById('nd-subtitle').textContent =
     (dealNameById[n.deal_id] || n.deal_id) + ' · effective ' + n.effective_date;
@@ -17894,7 +18403,7 @@ window.refreshFinancials = async function(){
     body.innerHTML = '<div style="padding:40px; text-align:center; color:#6B7280;">' +
       '<div style="font-size:28px; margin-bottom:8px;">📊</div>' +
       '<div style="font-weight:600; margin-bottom:4px;">No borrower financials yet</div>' +
-      '<div style="font-size:11px; margin-bottom:12px;">Click <b>Import Financials</b> to upload a borrower\'s quarterly / annual PDF. AI extracts the balance sheet, P&L, and cash flow — then computes DSCR / ICR / Leverage and auto-updates matching covenants.</div>' +
+      '<div style="font-size:11px; margin-bottom:12px;">Click <b>Import financials</b> to upload a borrower\'s quarterly / annual PDF. AI extracts the balance sheet, P&L, and cash flow — then computes DSCR / ICR / Leverage and auto-updates matching covenants.</div>' +
     '</div>';
     sum.textContent = '0 records';
     return;
@@ -17947,7 +18456,7 @@ window.refreshFinancials = async function(){
 };
 
 // ─── Upload flow ────────────────────────────────────────────────
-// Wire drag-and-drop on the Import Financials dropzone (idempotent).
+// Wire drag-and-drop on the Import financials dropzone (idempotent).
 function _wireFinancialsDropzone(){
   const dz = document.getElementById('import-fin-dropzone');
   if(!dz || dz.__dndWired) return;
@@ -18917,7 +19426,7 @@ function _renderCASections(){
           '</select>' +
         '</div>' +
       '</div>' +
-      '<div style="font-size:10.5px; color:#78350f; margin-top:6px;">This becomes the deal name in the Load Active Deal picker after "Create Deal".</div>' +
+      '<div style="font-size:10.5px; color:#78350f; margin-top:6px;">This becomes the deal name in the Load active deal picker after "Create Deal".</div>' +
     '</div>';
 
   // ── Parties ────────────────────────────────────────────────────
@@ -18957,7 +19466,8 @@ function _renderCASections(){
         _caField('', 'base_rate_tenor', 'Tenor',                ex.base_rate_tenor, { type:'select', options: _CA_ENUMS.tenor }) +
         _caField('', 'day_count',       'Day count',            ex.day_count,       { type:'select', options: _CA_ENUMS.dayCount }) +
         _caField('', 'margin_bps',      'Initial margin (bps)', ex.margin_bps,      { type:'number' }) +
-        _caField('', 'rate_floor_bps',  'Floor (bps)',          ex.rate_floor_bps,  { type:'number' }) +
+        _caField('', 'rate_floor_bps',   'Floor (bps)',         ex.rate_floor_bps,   { type:'number' }) +
+        _caField('', 'rate_ceiling_bps', 'Ceiling / cap (bps)', ex.rate_ceiling_bps, { type:'number' }) +
         _caField('', 'amort_type',      'Amortisation',         ex.amort_type,      { type:'select', options: _CA_ENUMS.amortType }) +
       '</div>' +
     '</details>';
@@ -19240,7 +19750,7 @@ window.saveExtractedCA = async function(){
 
 // ─── Promote CA → Builder deal + Save to DB ───────────────────
 // Full one-click flow: save CA extraction → populate Builder → save Deal
-// to DB → refresh PRESETS so it appears in the Load Active Deal picker.
+// to DB → refresh PRESETS so it appears in the Load active deal picker.
 window.promoteCAToDeal = async function(){
   const s = window._reviewCAState; if(!s) return;
   const err = document.getElementById('review-ca-error'); err.style.display = 'none';
@@ -19279,7 +19789,7 @@ window.promoteCAToDeal = async function(){
       catch(linkErr){ console.warn('[ca-promote] linkCAToDeal failed (non-fatal):', linkErr); }
     }
 
-    // 6. Refresh PRESETS so the new deal appears in Load Active Deal picker.
+    // 6. Refresh PRESETS so the new deal appears in Load active deal picker.
     setLbl('Refreshing deal list…');
     try {
       if(window.SB && window.SB.fetchUserDeals && Array.isArray(window.PRESETS)){
@@ -19297,7 +19807,7 @@ window.promoteCAToDeal = async function(){
     if(typeof window.refreshBuilderUI === 'function') { try { window.refreshBuilderUI(); } catch(_){} }
     else if(typeof window.renderBuilderCards === 'function') { try { window.renderBuilderCards(); } catch(_){} }
 
-    toast('✓ Deal "' + ex.deal_name + '" saved — now in Load Active Deal picker', 5000);
+    toast('✓ Deal "' + ex.deal_name + '" saved — now in Load active deal picker', 5000);
     window.closeReviewCAModal();
     // Also refresh the Credit Agreements list so the CA row shows "Saved as Deal" chip
     if(typeof window.refreshCreditAgreementsList === 'function'){
@@ -19351,21 +19861,80 @@ function _applyCAToBuilder(ex, caRowId){
                         : 'act_360';
   B.facility.holiday    = 'us';
 
-  // Single tranche mirroring the whole facility
+  // Single tranche mirroring the whole facility. Builder reads
+  // tranche.interestComponents[] — NOT tranche.interest — for base rate,
+  // margin, floor, cap, ratchet, ESG. Prior versions wrote to
+  // tranche.interest which the Builder silently ignored (the floor/cap
+  // never landed on the IC card). This block emits the canonical shape.
+  //
+  // Base-index enum translation: CA extraction uses SOFR/TERM_SOFR/SONIA/
+  // EURIBOR/FIXED/PRIME. Builder IC enum is SONIA/SOFR/TermSOFR/ESTR/
+  // EURIBOR/FIXED. PRIME has no Builder equivalent → collapse to FIXED so
+  // the calc engine still runs; user can adjust in the IC card.
+  const baseIndexMap = {
+    SOFR: 'SOFR', TERM_SOFR: 'TermSOFR', SONIA: 'SONIA',
+    EURIBOR: 'EURIBOR', FIXED: 'FIXED', PRIME: 'FIXED'
+  };
+  const caBase = (ex.base_rate || 'FIXED').toString().toUpperCase();
+  const builderBaseIndex = baseIndexMap[caBase] || 'FIXED';
+
+  // Ceiling passthrough — extraction may emit either rate_ceiling_bps or
+  // rate_cap_bps depending on the prompt. Accept both aliases; default 0.
+  const ceilingBps = (ex.rate_ceiling_bps != null ? +ex.rate_ceiling_bps
+                    : ex.rate_cap_bps     != null ? +ex.rate_cap_bps
+                    : 0);
+  const floorBps = ex.rate_floor_bps != null ? +ex.rate_floor_bps : 0;
+
+  // Margin ratchet translation — CA emits margin_ratchet[] with
+  // leverage_* bounds. Fold into Builder's ratchet.tiers shape when
+  // present so the IC card shows the tiered spread editor pre-populated.
+  const ratchetTiers = (Array.isArray(ex.margin_ratchet) ? ex.margin_ratchet : [])
+    .map(r => ({
+      threshold: (r.leverage_lte != null ? +r.leverage_lte
+                : r.leverage_gt  != null ? +r.leverage_gt
+                : r.leverage_lt  != null ? +r.leverage_lt
+                : r.leverage_gte != null ? +r.leverage_gte
+                : (typeof r.threshold === 'number' ? +r.threshold : 0)),
+      bps: r.margin_bps != null ? +r.margin_bps : (r.bps != null ? +r.bps : 0),
+      note: r.test || r.description || ''
+    }))
+    .filter(t => t.bps > 0);
+
+  const dayBasisBuilder = ex.day_count === '30/360' ? 'thirty_360'
+                        : ex.day_count === 'ACT/365' ? 'act_365'
+                        : 'act_360';
+
   B.tranches = [{
     name: ex.facility_name || 'Tranche 1',
     currency: ex.currency || 'USD',
     face: +ex.principal || 0,
     drawnInitially: +ex.principal || 0,
     isPikToggle: false,
-    interest: {
-      baseRate: (ex.base_rate || 'FIXED').toString().toUpperCase(),
-      tenor: ex.base_rate_tenor || '3M',
-      marginBps: ex.margin_bps != null ? +ex.margin_bps : 0,
-      floorBps: ex.rate_floor_bps != null ? +ex.rate_floor_bps : 0,
-      dayBasis: ex.day_count || 'ACT/360',
-      ratchet: Array.isArray(ex.margin_ratchet) ? ex.margin_ratchet : []
-    },
+    dayBasis: dayBasisBuilder,
+    interestComponents: [{
+      id: 'IC_CA_' + Date.now().toString(36),
+      name: 'Margin over ' + builderBaseIndex.toLowerCase(),
+      baseIndex: builderBaseIndex,
+      baseValue: 0, // fixings drive live value at runtime; 0 keeps the card clean
+      terms: [{
+        tenor: ex.base_rate_tenor || '3M',
+        lookbackDays: 5, observationShift: 0, lockoutDays: 0,
+        dailyCompounding: true, weighted: false
+      }],
+      spreads: [{
+        from: '', to: '',
+        bps: ex.margin_bps != null ? +ex.margin_bps : 0,
+        note: 'Initial margin (from CA)'
+      }],
+      ratchet: {
+        kpi: ratchetTiers.length ? 'leverage' : 'none',
+        tiers: ratchetTiers
+      },
+      esgAdjustmentBps: 0,
+      floorBps: floorBps,
+      capBps: ceilingBps,
+      fixings: []
+    }],
     repayments: [] // paydowns — CAs are typically bullet so this stays empty; user can add via Stage 2
   }];
 
@@ -20167,7 +20736,7 @@ window.handleHeaderManualClick = function(){
      (window.B.tranches && window.B.tranches.length) ||
      (window.B.fees && window.B.fees.length)));
   if(hasDeal){
-    const ok = confirm('Start a new blank loan? This will clear the currently loaded deal from the Builder and reset Stages 1-5.\n\nDB-saved deals are NOT affected — you can reload them from "Load Active Deal".');
+    const ok = confirm('Start a new blank loan? This will clear the currently loaded deal from the Builder and reset Stages 1-5.\n\nDB-saved deals are NOT affected — you can reload them from "Load active deal".');
     if(!ok) return;
   }
   // Full reset
@@ -20732,7 +21301,7 @@ function renderScheduleTable(){
   $('acct-schedule-table').innerHTML = `<table class="data" style="width:100%;font-size:11px">
     <thead><tr>${headerRow}</tr></thead>
     <tbody>${rowsHtml || '<tr><td colspan="' + SCHEDULE_DISPLAY_COLS.length + '" class="text-[11px] text-gray-500" style="text-align:center;padding:10px">No rows match the filter.</td></tr>'}</tbody>
-  </table>${truncated ? `<div class="text-[11px] text-gray-500 mt-1">Preview truncated at ${SCHEDULE_PREVIEW_LIMIT.toLocaleString()} rows. Click <strong>Download Full CSV</strong> to export every row (${M.schedule.length.toLocaleString()} total).</div>` : ''}`;
+  </table>${truncated ? `<div class="text-[11px] text-gray-500 mt-1">Preview truncated at ${SCHEDULE_PREVIEW_LIMIT.toLocaleString()} rows. Click <strong>Download full CSV</strong> to export every row (${M.schedule.length.toLocaleString()} total).</div>` : ''}`;
 }
 
 function downloadScheduleCSV(){
@@ -21295,7 +21864,7 @@ function renderModificationHistory(inst, summary){
 }
 
 // ============================================================
-// STAGE 3 — Cash Movements Outbound
+// STAGE 3 — Cash movements outbound
 // ============================================================
 function djb2(s){
   let h = 5381 >>> 0;
@@ -21897,7 +22466,7 @@ function openSaveSessionModal(){
   if(!inst){ toast('No active deal'); return; }
   const stage = detectCurrentStage();
   const defaultLabel = `${inst.deal} · ${stage} · ${new Date().toISOString().slice(0,10)}`;
-  $('session-modal-title').textContent = 'Save Session';
+  $('session-modal-title').textContent = 'Save session';
   $('session-modal-sub').textContent = 'Captures full pipeline state for the active deal — restorable later.';
   $('session-modal-body').innerHTML = `
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -21957,7 +22526,7 @@ function openLoadSessionModal(){
     (grouped[k] = grouped[k] || []).push(s);
   }
   if(!all.length){
-    $('session-modal-body').innerHTML = `<div class="text-[12px] text-gray-600 italic p-4 text-center">No saved sessions yet. Save one first via the <strong>Save Session</strong> button.</div>`;
+    $('session-modal-body').innerHTML = `<div class="text-[12px] text-gray-600 italic p-4 text-center">No saved sessions yet. Save one first via the <strong>Save session</strong> button.</div>`;
   } else {
     let html = '';
     for(const [deal, sessions] of Object.entries(grouped)){
@@ -22904,6 +23473,91 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   })();
 
+  // ═══ Stage 2 · Consolidated Loan status preset ═══════════════
+  // The Credit Risk & ECL panel exposes ~10 low-level switches
+  // (suspended interest, watchlist override, POCI, DPD thresholds…).
+  // 95% of the time the user is picking one of three real business
+  // postures: Performing, Watchlist, or Non-performing. This preset
+  // dropdown collapses those three into one click while leaving the
+  // individual switches editable for the remaining 5% edge cases
+  // (early cure, POCI purchase, etc.).
+  //
+  // Storage model: NO new persistence field. The preset is a derived
+  // read on the underlying switches, always computed on the fly. That
+  // keeps the source of truth in inst.ifrs and avoids drift between
+  // the preset and the actual credit-risk flags on save/load.
+  (function(){
+    window.applyLoanStatusPreset = function(preset){
+      const $s = id => document.getElementById(id);
+      const set = (id, val) => {
+        const el = $s(id); if(!el) return;
+        if(el.value === val) return;
+        el.value = val;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      if(preset === 'performing'){
+        set('opt-suspended', 'false');
+        set('opt-watchlist', 'false');
+      } else if(preset === 'watchlist'){
+        set('opt-suspended', 'false');
+        set('opt-watchlist', 'true');
+      } else if(preset === 'non_performing'){
+        set('opt-suspended', 'true');
+        set('opt-watchlist', 'true');
+      }
+      // 'custom' is user-selected acknowledgment — take no action.
+      window._syncLoanStatusFromSwitches();
+      if(typeof toast === 'function' && preset !== 'custom'){
+        const labels = {
+          performing:     'Loan status → Performing',
+          watchlist:      'Loan status → Watchlist',
+          non_performing: 'Loan status → Non-performing'
+        };
+        toast(labels[preset], 2400, { kind: 'success', id: 'loan-status-preset' });
+      }
+    };
+
+    window._syncLoanStatusFromSwitches = function(){
+      const dd = document.getElementById('opt-loan-status');
+      if(!dd) return;
+      const sus = document.getElementById('opt-suspended')?.value === 'true';
+      const wl  = document.getElementById('opt-watchlist')?.value === 'true';
+      let derived = 'custom';
+      if(!sus && !wl)      derived = 'performing';
+      else if(!sus && wl)  derived = 'watchlist';
+      else if(sus && wl)   derived = 'non_performing';
+      dd.value = derived;
+      // Also mirror onto the top-bar status chip so the sidebar/topbar
+      // always tell the same story as Stage 2.
+      const chip = document.getElementById('v4-status-chip');
+      if(chip){
+        const chipMap = {
+          performing:     { icon:'ti-circle-check-filled', text:'Performing',     color:'var(--fis-green,#22C55E)' },
+          watchlist:      { icon:'ti-alert-triangle-filled', text:'Watchlist',    color:'#F59E0B' },
+          non_performing: { icon:'ti-circle-x-filled',       text:'Non-performing', color:'#EF4444' },
+          custom:         { icon:'ti-adjustments-horizontal',text:'Custom',       color:'var(--n-500)' }
+        };
+        const c = chipMap[derived];
+        chip.style.display = 'inline-flex';
+        chip.style.color = c.color;
+        chip.innerHTML = '<i class="ti ' + c.icon + '" aria-hidden="true"></i>' + c.text;
+      }
+    };
+
+    // Re-derive whenever the user hand-edits any of the underlying
+    // switches. This is the safety net for "Custom" mode — if you flip
+    // the watchlist toggle by hand, the preset drops back to Custom
+    // without you having to touch the dropdown.
+    document.addEventListener('DOMContentLoaded', () => {
+      ['opt-suspended','opt-watchlist'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.addEventListener('change', window._syncLoanStatusFromSwitches);
+      });
+      // Initial pass in case a deal was already loaded before this ran.
+      setTimeout(window._syncLoanStatusFromSwitches, 400);
+    });
+  })();
+
   // ═══ Stage 2 sub-tab switcher ═══════════════════════════════
   // Splits Stage 2 into 3 focused views: Run & JEs / Treatment / Evidence.
   // Content elements carry data-substab attributes. Persist selection so
@@ -22911,11 +23565,20 @@ document.addEventListener('DOMContentLoaded', ()=>{
   (function(){
     const buttons = document.querySelectorAll('.s2-subtab-btn');
     if(!buttons.length) return;
-    const activeBtnStyle = { background:'white', color:'#21295C', fontWeight:'600', boxShadow:'0 1px 2px rgba(15,23,42,0.06)' };
-    const inactiveBtnStyle = { background:'transparent', color:'#64748B', fontWeight:'500', boxShadow:'none' };
+    // v4 restyle owns the active/inactive visuals via CSS on
+    // [data-active="true"] and .is-active. Clear any legacy inline
+    // styles from a prior page-render, then toggle the flags.
     const applyBtn = (btn, active) => {
-      const style = active ? activeBtnStyle : inactiveBtnStyle;
-      Object.keys(style).forEach(k => btn.style[k] = style[k]);
+      ['background','color','fontWeight','boxShadow'].forEach(k => btn.style.removeProperty(k));
+      if(active){
+        btn.setAttribute('data-active', 'true');
+        btn.classList.add('is-active');
+        btn.setAttribute('aria-selected', 'true');
+      } else {
+        btn.removeAttribute('data-active');
+        btn.classList.remove('is-active');
+        btn.setAttribute('aria-selected', 'false');
+      }
     };
     window.switchStage2Sub = function(target){
       // Show/hide content by data-substab
@@ -22944,7 +23607,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
         if(title && desc){
           if(!inst){
             title.textContent = 'No deal loaded';
-            desc.innerHTML = 'Go to <b>Stage 0 — Loan Builder</b> and pick a deal from <b>Load Active Deal</b>, or build one manually. The accounting engine needs a loan definition to run.';
+            desc.innerHTML = 'Go to <b>Stage 0 — Loan builder</b> and pick a deal from <b>Load active deal</b>, or build one manually. The accounting engine needs a loan definition to run.';
           } else {
             title.textContent = 'Ready to run accounting';
             desc.innerHTML = 'Click <b>Run Accounting</b> above to build the daily cashflow schedule and framework-aware journal entries for <b>' + escapeHTML(inst.deal || inst.id || 'this deal') + '</b>.';
@@ -23809,7 +24472,7 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
         '<div style="padding:60px 20px; text-align:center; color:#6A7591;">'
         + '<span class="material-icons-outlined" style="font-size:48px; opacity:0.4; display:block; margin-bottom:14px;">dashboard</span>'
         + '<div style="font-size:14px; font-weight:600; color:#21295C; margin-bottom:6px;">No active deal selected</div>'
-        + '<div style="font-size:12px; max-width:360px; margin:0 auto; line-height:1.5;">Go to <b>Stage 0 — Loan Builder</b> and either <b>Load Active Deal</b> from the library, <b>Load from Security Master</b>, or build a new deal manually. The Dashboard will populate once a deal is active.</div>'
+        + '<div style="font-size:12px; max-width:360px; margin:0 auto; line-height:1.5;">Go to <b>Stage 0 — Loan builder</b> and either <b>Load active deal</b> from the library, <b>Load from security master</b>, or build a new deal manually. The Dashboard will populate once a deal is active.</div>'
         + '</div>';
       return;
     }
@@ -23987,7 +24650,7 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
       if(e.type === 'recovery')   events.push({ date: e.date, type: 'recovery',  title: 'Recovery',                detail: fmtMoneyDash(e.amount, ccy) + (e.reason ? ' · ' + e.reason : '') });
       if(e.type === 'cure')       events.push({ date: e.date, type: 'cure',      title: 'ECL Cure / Stage Reversal', detail: 'Allowance release ' + fmtMoneyDash(e.releaseAmount || 0, ccy) + (e.reason ? ' · ' + e.reason : '') });
       if(e.type === 'forbearance')events.push({ date: e.date, type: 'default',   title: 'Forbearance Start',       detail: 'Deferred ' + fmtMoneyDash(e.deferredAmount || 0, ccy) + (e.reason ? ' · ' + e.reason : '') });
-      if(e.type === 'capitalisedCost') events.push({ date: e.date, type: 'drawdown', title: 'Capitalised Origination Costs', detail: fmtMoneyDash(e.amount, ccy) + (e.category ? ' · ' + e.category : '') });
+      if(e.type === 'capitalisedCost') events.push({ date: e.date, type: 'drawdown', title: 'Capitalised origination costs', detail: fmtMoneyDash(e.amount, ccy) + (e.category ? ' · ' + e.category : '') });
       if(e.type === 'loanSale')   events.push({ date: e.date, type: 'writeoff',  title: 'Loan Sale (Full Derecognition)', detail: 'Sale price ' + fmtMoneyDash(e.salePrice || e.amount || 0, ccy) + (e.reason ? ' · ' + e.reason : '') });
       if(e.type === 'participation') events.push({ date: e.date, type: 'prepay',  title: 'Loan Participation (Partial Sell-Down)', detail: ((e.fraction||0)*100).toFixed(0) + '% sold at ' + fmtMoneyDash(e.salePrice || 0, ccy) + (e.participant ? ' to ' + e.participant : '') });
       if(e.type === 'debtEquitySwap') events.push({ date: e.date, type: 'writeoff', title: 'Debt-for-Equity Swap (IFRIC 19)', detail: 'Equity FV ' + fmtMoneyDash(e.equityFairValue || 0, ccy) + (e.reason ? ' · ' + e.reason : '') });
@@ -24049,7 +24712,7 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     let covHTML = '<div class="dash-section-header" style="display:flex; align-items:center; gap:8px;">';
     covHTML += '<span class="material-icons-outlined text-[18px]">verified_user</span>Covenants &amp; Maintenance Tests';
     covHTML += '<button id="btn-open-portcov" onclick="window.openPortfolioCovenantReport && window.openPortfolioCovenantReport()" class="mat-btn outline !py-1 !px-2.5 text-[11px]" style="margin-left:auto;" title="Cross-loan covenant report across every deal in your portfolio">';
-    covHTML += '<span class="material-icons-outlined text-[14px]">monitoring</span>Portfolio Covenant Report</button>';
+    covHTML += '<span class="material-icons-outlined text-[14px]">monitoring</span>Portfolio covenant report</button>';
     covHTML += '</div>';
     if(covenants.length){
       // Aggregate health
@@ -24170,8 +24833,8 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     const stages = [
       { id: 'stage-1', title: '1 · Cashflow Generation',  chip: 'portf-status' },
       { id: 'stage-2', title: '2 · Accounting Engine',    chip: 'acct-status' },
-      { id: 'stage-3', title: '3 · Cash Movements Out',     chip: 'workday-out-status' },
-      { id: 'stage-4', title: '4 · Cash Movement Actuals', chip: 'workday-in-status' },
+      { id: 'stage-3', title: '3 · Cash movements out',     chip: 'workday-out-status' },
+      { id: 'stage-4', title: '4 · Cash movement actuals', chip: 'workday-in-status' },
       { id: 'stage-5', title: '5 · Reconciliation',       chip: 'recon-status' }
     ];
     for(const s of stages){
@@ -24963,7 +25626,7 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
       : '';
 
     return `<div class="chart-card">
-      <div class="chart-card-title">Quarterly Income Composition</div>
+      <div class="chart-card-title">Quarterly income composition</div>
       <div class="chart-card-sub">Showing ${buckets.length} of ${quarterly.length} quarters · stacked by source</div>
       <svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
         ${yTicks.map(t => `<line class="chart-grid-line" x1="${padL}" y1="${t.y}" x2="${W-padR}" y2="${t.y}"/>`).join('')}
@@ -25239,7 +25902,7 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
           <div class="font-semibold text-emerald-900">${methodLabel}</div>
         </div>
         <div class="text-gray-700">${blurb}</div>
-        <div class="text-[11px] text-gray-600 mt-1">Citation: <b>ASC 310-20-35-26</b> (interest method). Spec source: Folder 1 — Effective Interest Rate Calculation Method.</div>
+        <div class="text-[11px] text-gray-600 mt-1">Citation: <b>ASC 310-20-35-26</b> (interest method). Spec source: Folder 1 — Effective Interest rate calculation Method.</div>
       </div>
 
       <div class="text-[12px] font-semibold mb-1">Inputs (from instrument record)</div>
@@ -26950,7 +27613,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // For newly-added rows via the picker, `fund` is populated at add time.
 
   // In-memory cache of all available funds — populated from SB.fetchFunds().
-  // Refreshed on modal open and after Manage Funds edits.
+  // Refreshed on modal open and after Manage funds edits.
   window._fundsCache = [];
   async function _ensureFundsCache(){
     if(!window._fundsCache.length && window.SB && window.SB.fetchFunds){
@@ -27273,7 +27936,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const html = `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;" onclick="this.remove()">
         <div style="background:white;border-radius:8px;padding:20px;max-width:560px;width:90%;" onclick="event.stopPropagation()">
-          <h3 style="font-weight:700;margin:0 0 8px;color:#21295C;">Interest Rate Calculation</h3>
+          <h3 style="font-weight:700;margin:0 0 8px;color:#21295C;">Interest rate calculation</h3>
           <div style="font-size:11px;color:#666;margin-bottom:12px;">${escapeHtml(ic.trancheName)} · ${escapeHtml(ic.componentName)} · as of ${m.asOfDate}</div>
           <table style="width:100%;font-size:12px;">
             <tr><td>Base rate</td><td style="text-align:right;font-family:monospace;">${(m.base*100).toFixed(4)}%</td></tr>
@@ -27467,7 +28130,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const feedbackBtn = document.getElementById('btn-portf-feedback');
     if(feedbackBtn){
       feedbackBtn.onclick = function(){
-        console.log('Send Feedback clicked');
+        console.log('Send feedback clicked');
         if(typeof sendPortFFeedback === 'function') sendPortFFeedback();
       };
     }
@@ -29356,7 +30019,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const chip = document.getElementById('md-status-chip');
     if(!staticHost || !pricingHost) return;
     if(!md.static.length){
-      staticHost.innerHTML = '<div style="font-size:11px; color:#9ca3af; font-style:italic; padding:10px 0;">No static data ingested. Click <b>Load Sample</b> or <b>Paste Static</b> above.</div>';
+      staticHost.innerHTML = '<div style="font-size:11px; color:#9ca3af; font-style:italic; padding:10px 0;">No static data ingested. Click <b>Load sample</b> or <b>Paste static</b> above.</div>';
       pricingHost.innerHTML = '';
       if(chip){ chip.textContent = 'None'; chip.style.background='#fee2e2'; chip.style.color='#991b1b'; }
       return;
@@ -29367,7 +30030,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       chip.style.background='#dcfce7'; chip.style.color='#166534';
     }
     // STATIC TABLE
-    staticHost.innerHTML = '<div style="font-size:12px; font-weight:700; margin-bottom:6px; color:#0e7490;">Security Static Data</div>' +
+    staticHost.innerHTML = '<div style="font-size:12px; font-weight:700; margin-bottom:6px; color:#0e7490;">Security static data</div>' +
       '<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:11px;">' +
       '<thead><tr style="background:#ecfeff; color:#0e7490;">' +
         '<th style="text-align:left; padding:6px 8px;">ISIN / LXID</th>' +
@@ -29700,8 +30363,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const status = document.getElementById('portf-status');
     if(!host) return;
     if(!rows || !rows.length){
-      host.innerHTML = '<div class="p-6 text-center text-gray-400 italic">No cashflows yet. Build a deal in the Loan Builder tab to generate cashflows.</div>';
-      if(chip){ chip.className = 'chip gray text-[10px]'; chip.textContent = '0 periods'; }
+      // v4 empty state — matches Notices / Watchlist / Portfolio.
+      host.innerHTML =
+        '<div class="v4-empty" style="padding:36px 20px;">' +
+          '<div class="v4-empty-icon"><i class="ti ti-chart-histogram" aria-hidden="true"></i></div>' +
+          '<div class="v4-empty-title">No cashflows yet</div>' +
+          '<div class="v4-empty-body">Build a deal in the Loan builder tab to generate cashflows.</div>' +
+        '</div>';
+      if(chip){ chip.className = 'chip gray'; chip.textContent = '0 periods'; }
       if(kpis) kpis.innerHTML = '';
       if(status){ status.className = 'chip gray self-center'; status.textContent = 'No cashflows generated yet'; }
       return;
@@ -29715,14 +30384,27 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(chip){ chip.className = 'chip green text-[10px]'; chip.textContent = rows.length + ' periods'; }
     if(status){ status.className = 'chip green self-center'; status.textContent = 'Generated · ' + rows.length + ' periods'; }
     if(kpis){
+      // v4 KPI mini-cards — neutral surface, semantic value color,
+      // tabular-numeric values, tight uppercase label. Icon accents match
+      // the Stage 0 hero KPIs.
       kpis.innerHTML = [
-        { label:'Total Drawdowns', value: fmtCcy(totalDraws), color:'text-rose-700' },
-        { label:'Peak Balance',    value: fmtCcy(peakBal) },
-        { label:'Total Interest',  value: fmtCcy(totalInt), color:'text-indigo-700' },
-        { label:'Total Fees',      value: fmtCcy(totalFee), color:'text-amber-700' },
-        { label:'Paydowns',      value: fmtCcy(totalReps), color:'text-emerald-700' },
-        { label:'Net Cash to Lender', value: fmtCcy(netCash), color:'text-emerald-900' }
-      ].map(k => `<div class="bg-white border border-emerald-200 rounded px-2 py-1"><div class="text-[9px] uppercase text-gray-500">${k.label}</div><div class="font-bold ${k.color || 'text-emerald-900'}">${k.value}</div></div>`).join('');
+        { label:'Total drawdowns',      value: fmtCcy(totalDraws), color:'#B91C1C', icon:'ti-arrow-up-right' },
+        { label:'Peak balance',         value: fmtCcy(peakBal),    color:'var(--n-900)', icon:'ti-chart-bar' },
+        { label:'Total interest',       value: fmtCcy(totalInt),   color:'#4338CA', icon:'ti-cash' },
+        { label:'Total fees',           value: fmtCcy(totalFee),   color:'#B45309', icon:'ti-receipt' },
+        { label:'Paydowns',             value: fmtCcy(totalReps),  color:'var(--fis-green-700,#15803D)', icon:'ti-arrow-down-right' },
+        { label:'Net cash to lender',   value: fmtCcy(netCash),    color:'var(--fis-green-700,#15803D)', icon:'ti-scale' }
+      ].map(k => (
+        '<div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px; padding:7px 9px 8px; display:flex; align-items:center; gap:8px;">' +
+          '<span style="width:22px; height:22px; border-radius:6px; background:var(--n-50,#FAFAFA); color:' + k.color + '; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">' +
+            '<i class="ti ' + k.icon + '" style="font-size:13px;"></i>' +
+          '</span>' +
+          '<div style="min-width:0; flex:1;">' +
+            '<div style="font-size:9.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.3px; line-height:1;">' + k.label + '</div>' +
+            '<div style="font-size:13px; font-weight:600; color:' + k.color + '; letter-spacing:-0.15px; font-variant-numeric:tabular-nums; margin-top:2px;">' + k.value + '</div>' +
+          '</div>' +
+        '</div>'
+      )).join('');
     }
     // ─── Non-cash Stage 2 transtype banner ───
     // Group C events (debt-for-equity swap #15, participation #14) don't
@@ -29737,24 +30419,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       if(p && p.source === 'stage2'){ stage2Cash += 1; stage2CashAmt += (+p.amount || 0); }
     }));
     const stage2CashBanner = stage2Cash > 0 ? (
-      '<div class="bg-blue-50 border border-blue-300 rounded p-2 mb-3 text-[11px] text-blue-900 flex items-center gap-2">' +
-        '<span class="material-icons-outlined" style="font-size:14px">sync_alt</span>' +
+      '<div style="background:#EFF6FF; border:0.5px solid #93C5FD; border-left:3px solid #3B82F6; border-radius:6px; padding:7px 10px; margin-bottom:10px; font-size:11px; color:#1E3A8A; display:flex; align-items:center; gap:8px;">' +
+        '<i class="ti ti-refresh" style="font-size:14px; color:#3B82F6;"></i>' +
         '<b>' + stage2Cash + ' Stage 2 transtype' + (stage2Cash===1?'':'s') + ' applied</b> · ' +
         'total cash impact <b>' + fmtCcy(stage2CashAmt) + '</b> · click any row with the ' +
-        '<span style="background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:6px; font-size:9px; font-weight:700;">STAGE 2</span> badge to expand the breakdown.' +
+        '<span style="background:#FEF3C7; color:#92400E; padding:1px 6px; border-radius:6px; font-size:9px; font-weight:700; font-variant-numeric:tabular-nums;">STAGE 2</span> badge to expand the breakdown.' +
       '</div>'
     ) : '';
     const nonCash = (inst && Array.isArray(inst.principalSchedule))
       ? inst.principalSchedule.filter(e => e.type === 'debtEquitySwap' || e.type === 'participation')
       : [];
     const bannerHtml = nonCash.length ? (
-      '<div class="bg-amber-50 border border-amber-300 rounded p-3 mb-3 text-[11px]">' +
-        '<div class="font-semibold text-amber-900 mb-1 flex items-center gap-2">' +
-          '<span class="material-icons-outlined" style="font-size:14px">info</span>' +
+      '<div style="background:#FFFBEB; border:0.5px solid #FCD34D; border-left:3px solid #F59E0B; border-radius:6px; padding:10px 12px; margin-bottom:10px; font-size:11px;">' +
+        '<div style="font-weight:600; color:#78350F; margin-bottom:3px; display:flex; align-items:center; gap:6px;">' +
+          '<i class="ti ti-info-circle" style="font-size:14px; color:#F59E0B;"></i>' +
           nonCash.length + ' non-cash Stage 2 event' + (nonCash.length===1?'':'s') +
           ' affecting this deal (not shown as cashflow rows)' +
         '</div>' +
-        '<ul class="text-amber-800 ml-5 mt-1 list-disc">' +
+        '<ul style="color:#78350F; margin-left:22px; margin-top:4px; list-style:disc; font-variant-numeric:tabular-nums;">' +
           nonCash.map(e => {
             if(e.type === 'debtEquitySwap'){
               const fv = ((+e.equityFairValue) || 0) / 1e6;
@@ -29772,37 +30454,40 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         '</ul>' +
       '</div>'
     ) : '';
-    const html = stage2CashBanner + bannerHtml + `<table class="w-full text-[11px]">
-      <thead class="sticky top-0 bg-emerald-100">
-        <tr>
-          <th class="text-left px-2 py-1">Period Start</th>
-          <th class="text-left px-2 py-1">Period End</th>
-          <th class="text-right px-2 py-1">Balance</th>
-          <th class="text-right px-2 py-1" title="Cash disbursed to borrower">Drawdowns</th>
-          <th class="text-right px-2 py-1">Interest</th>
-          <th class="text-right px-2 py-1">Fees</th>
-          <th class="text-right px-2 py-1" title="Principal paid down (incl. Stage 2 cash transtypes)">Paydowns</th>
-          <th class="text-right px-2 py-1" title="Interest + Fees + Paydowns − Drawdowns">Net Cash</th>
+    // v4 table — neutral zinc header, sentence-case columns, tabular
+    // numerics, tight row rhythm, quiet hover, muted em-dashes.
+    const html = stage2CashBanner + bannerHtml + `<table class="w-full" style="font-size:11px; font-variant-numeric:tabular-nums;">
+      <thead style="position:sticky; top:0; background:var(--n-50, #FAFAFA); z-index:1;">
+        <tr style="border-bottom:0.5px solid var(--n-200);">
+          <th style="text-align:left; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Period start</th>
+          <th style="text-align:left; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Period end</th>
+          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Balance</th>
+          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;" title="Cash disbursed to borrower">Drawdowns</th>
+          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Interest</th>
+          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Fees</th>
+          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;" title="Principal paid down (incl. Stage 2 cash transtypes)">Paydowns</th>
+          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;" title="Interest + Fees + Paydowns − Drawdowns">Net cash</th>
         </tr>
       </thead>
       <tbody>
       ${rows.map((r, i) => `
-        <tr class="cursor-pointer hover:bg-emerald-50 border-t" data-s1-row="${i}">
-          <td class="px-2 py-1">${r.start}</td>
-          <td class="px-2 py-1">${r.end}</td>
-          <td class="px-2 py-1 text-right">${fmtCcy(r.balance)}</td>
-          <td class="px-2 py-1 text-right ${r.drawdowns>0?'text-rose-700 font-semibold':'text-gray-300'}">${r.drawdowns>0 ? '−'+fmtCcy(r.drawdowns) : '—'}</td>
-          <td class="px-2 py-1 text-right text-indigo-700 font-semibold">${fmtCcy(r.interest)}</td>
-          <td class="px-2 py-1 text-right text-amber-700 font-semibold">${fmtCcy(r.fees)}</td>
-          <td class="px-2 py-1 text-right ${r.repayments>0?'text-emerald-700 font-semibold':'text-gray-300'}">${r.repayments>0 ? fmtCcy(r.repayments) : '—'}</td>
-          <td class="px-2 py-1 text-right font-bold ${r.netCash<0?'text-rose-900':'text-emerald-900'}">${r.netCash<0?'−'+fmtCcy(-r.netCash):fmtCcy(r.netCash)}</td>
+        <tr class="s1-row" style="cursor:pointer; border-top:0.5px solid var(--n-100); transition:background 100ms ease;" data-s1-row="${i}">
+          <td style="padding:6px 10px; color:var(--n-800);">${r.start}</td>
+          <td style="padding:6px 10px; color:var(--n-800);">${r.end}</td>
+          <td style="padding:6px 10px; text-align:right; color:var(--n-900); font-weight:500;">${fmtCcy(r.balance)}</td>
+          <td style="padding:6px 10px; text-align:right; color:${r.drawdowns>0?'#B91C1C':'var(--n-400)'}; font-weight:${r.drawdowns>0?'600':'400'};">${r.drawdowns>0 ? '−'+fmtCcy(r.drawdowns) : '—'}</td>
+          <td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:500;">${fmtCcy(r.interest)}</td>
+          <td style="padding:6px 10px; text-align:right; color:#B45309; font-weight:500;">${fmtCcy(r.fees)}</td>
+          <td style="padding:6px 10px; text-align:right; color:${r.repayments>0?'var(--fis-green-700,#15803D)':'var(--n-400)'}; font-weight:${r.repayments>0?'600':'400'};">${r.repayments>0 ? fmtCcy(r.repayments) : '—'}</td>
+          <td style="padding:6px 10px; text-align:right; color:${r.netCash<0?'#7F1D1D':'var(--fis-green-700,#15803D)'}; font-weight:600;">${r.netCash<0?'−'+fmtCcy(-r.netCash):fmtCcy(r.netCash)}</td>
         </tr>
         <tr class="hidden" data-s1-detail="${i}">
-          <td colspan="8" class="bg-gray-50 px-3 py-2">${renderRowDetail(r)}</td>
+          <td colspan="8" style="background:var(--n-50, #FAFAFA); padding:8px 12px; border-top:0.5px dashed var(--n-200); border-bottom:0.5px dashed var(--n-200);">${renderRowDetail(r)}</td>
         </tr>
       `).join('')}
       </tbody>
-    </table>`;
+    </table>
+    <style>.s1-row:hover { background: var(--n-50, #FAFAFA); }</style>`;
     host.innerHTML = html;
     host.querySelectorAll('[data-s1-row]').forEach(tr => {
       tr.onclick = () => {
