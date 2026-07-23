@@ -1579,6 +1579,10 @@
   <button class="v4-sb-item" onclick="window.openManageFundsModal && window.openManageFundsModal()">
     <i class="ti ti-wallet" aria-hidden="true"></i>Manage funds
   </button>
+  <!-- Waterfall — mezz-support cash distribution simulator (Barrenjoey RFP). -->
+  <button class="v4-sb-item" onclick="window.openWaterfallModal && window.openWaterfallModal()">
+    <i class="ti ti-arrow-waterfall" aria-hidden="true"></i>Waterfall
+  </button>
 
   <div class="v4-sb-spacer"></div>
 
@@ -1743,6 +1747,7 @@
     { id:'open-financials',  label:'Open borrower financials', hint:'AI-extract statements',            icon:'ti-report-analytics', fn:() => window.openFinancialsModal && window.openFinancialsModal() },
     { id:'open-ca',          label:'Open credit agreements',hint:'Browse · AI-extract from PDF',         icon:'ti-file-certificate', fn:() => window.openCreditAgreementsListModal && window.openCreditAgreementsListModal() },
     { id:'open-funds',       label:'Manage funds',          hint:'Create / edit fund allocations',       icon:'ti-wallet',       fn:() => window.openManageFundsModal && window.openManageFundsModal() },
+    { id:'open-waterfall',   label:'Open waterfall',        hint:'Cash distribution simulator (mezz)',   icon:'ti-arrow-waterfall', fn:() => window.openWaterfallModal && window.openWaterfallModal() },
     { id:'new-manual',       label:'New deal — build manually',hint:'Blank Builder',                    icon:'ti-edit',         fn:() => window.handleHeaderManualClick && window.handleHeaderManualClick() },
     { id:'new-isin',         label:'New deal — from security master', hint:'ISIN lookup',              icon:'ti-database',      fn:() => window.handleHeaderIsinClick && window.handleHeaderIsinClick() },
     { id:'goto-builder',     label:'Go to Loan builder',    hint:'Stage 0',                              icon:'ti-notebook',     fn:() => document.querySelector('.tab-btn[data-tab="builder"]')?.click() },
@@ -2384,6 +2389,49 @@
           </div>
           <div><label class="b-label required">Settlement Date</label><input id="b-settle" type="date" class="b-input"/></div>
           <div><label class="b-label required">Maturity Date</label><input id="b-maturity" type="date" class="b-input"/></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- ─── CONSTRUCTION / ARRANGER (mezz support) ───
+         Collapsed by default — only relevant for construction-finance,
+         mezzanine, and syndicated deals where senior debt sits above
+         this facility and the LVR/LTC/RLVR covenant math needs an
+         explicit "as-if-complete" valuation + TDC + QPS + NRV. Also
+         captures the lender role (arranger/manager vs lender of
+         record) which changes fee treatment. All fields optional. -->
+    <details class="builder-section" id="b-construction-section">
+      <summary>
+        <div class="builder-section-icon icon-emerald"><i class="ti ti-buildings" style="font-size:20px;"></i></div>
+        <div><div class="builder-section-title">Construction / arranger — mezz support</div><div class="builder-section-subtitle">Senior debt ref · valuation · LVR/LTC/RLVR inputs · arranger role. Leave blank for plain term loans.</div></div>
+      </summary>
+      <div class="builder-section-body">
+        <div class="b-field-grid">
+          <div><label class="b-label">Deal structure</label>
+            <select id="b-structure" class="b-input">
+              <option value="">— select —</option>
+              <option value="term">Term loan</option>
+              <option value="construction_mezz">Construction mezzanine</option>
+              <option value="borrowing_base">Borrowing base facility</option>
+              <option value="revolver">Revolver</option>
+              <option value="delayed_draw">Delayed-draw term loan</option>
+            </select>
+          </div>
+          <div><label class="b-label">Lender role</label>
+            <select id="b-lender-role" class="b-input">
+              <option value="">— select —</option>
+              <option value="lender_of_record">Lender of record</option>
+              <option value="arranger_manager">Arranger / manager</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+          <div><label class="b-label">Senior debt provider</label><input id="b-senior-provider" type="text" placeholder="e.g. Major AU bank" class="b-input"/></div>
+          <div><label class="b-label">Senior debt limit</label><input id="b-senior-limit" type="number" min="0" step="1000000" placeholder="e.g. 130000000" class="b-input"/></div>
+          <div><label class="b-label">As-if-complete value</label><input id="b-aic-value" type="number" min="0" step="1000000" placeholder="Net of GST + selling costs" class="b-input"/></div>
+          <div><label class="b-label">Total development cost</label><input id="b-tdc" type="number" min="0" step="1000000" placeholder="Incl. senior finance costs" class="b-input"/></div>
+          <div><label class="b-label">Qualifying presales (QPS)</label><input id="b-qps" type="number" min="0" step="1000000" placeholder="e.g. 46500000" class="b-input"/></div>
+          <div><label class="b-label">Net realisation value (NRV)</label><input id="b-nrv" type="number" min="0" step="1000000" placeholder="Net of GST + selling costs" class="b-input"/></div>
+          <div><label class="b-label">Guarantor min net assets</label><input id="b-min-nav" type="number" min="0" step="1000000" placeholder="e.g. 15000000" class="b-input"/></div>
         </div>
       </div>
     </details>
@@ -5095,6 +5143,87 @@
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════
+     Waterfall of Payments modal — mezz-support cash distribution
+     simulator.
+
+     Reads the active deal's waterfall_config (JSONB) and lets the user
+     type sale proceeds + balances. Runs PCS.computeWaterfall(...) and
+     renders the tier-by-tier cascade + per-recipient totals. This is
+     the differentiator for the Barrenjoey RE Mezz demo.
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="waterfall-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeWaterfallModal && window.closeWaterfallModal()"></div>
+  <div class="json-modal-pn" style="width:min(1280px,97vw); max-height:96vh;">
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200);">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-arrow-waterfall" style="font-size:18px;"></i>
+      </div>
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Waterfall of payments — cash distribution simulator</div>
+        <div id="wf-subtitle" style="font-size:11px; color:var(--n-500); margin-top:2px;">Cascade sale proceeds through the deal's priority stack. Tiered exit fees compute per hurdle-tier automatically.</div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeWaterfallModal && window.closeWaterfallModal()" title="Close">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+    <div class="json-modal-b" style="padding:0; display:flex; flex-direction:row; gap:0; min-height:520px;">
+      <!-- Left: input pane -->
+      <div style="flex:0 0 380px; padding:14px 16px 16px; border-right:0.5px solid var(--n-200); background:var(--n-50,#FAFAFA); overflow-y:auto; max-height:calc(96vh - 130px);">
+        <div style="font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Deal</div>
+        <select id="wf-deal-picker" style="width:100%; padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; background:var(--n-0); margin-bottom:12px;">
+          <option value="__ACTIVE__">Active deal (from Builder)</option>
+        </select>
+
+        <div style="font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Cash inflow</div>
+        <label style="display:block; font-size:11px; color:var(--n-600); margin-bottom:3px;">Sale proceeds (net revenue at exit)</label>
+        <input id="wf-sale-proceeds" type="number" min="0" step="1000000" placeholder="e.g. 220000000"
+               style="width:100%; padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:12px; font-variant-numeric:tabular-nums;"/>
+
+        <div style="font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Outstanding balances</div>
+        <label style="display:block; font-size:11px; color:var(--n-600); margin-bottom:3px;">Sales costs + GST (tier 1)</label>
+        <input id="wf-costs" type="number" min="0" step="100000" placeholder="e.g. 8500000"
+               style="width:100%; padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:8px; font-variant-numeric:tabular-nums;"/>
+        <label style="display:block; font-size:11px; color:var(--n-600); margin-bottom:3px;">Senior debt outstanding</label>
+        <input id="wf-senior" type="number" min="0" step="1000000" placeholder="e.g. 130000000"
+               style="width:100%; padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:8px; font-variant-numeric:tabular-nums;"/>
+        <label style="display:block; font-size:11px; color:var(--n-600); margin-bottom:3px;">Cost overrun outstanding</label>
+        <input id="wf-overrun" type="number" min="0" step="500000" placeholder="e.g. 0"
+               style="width:100%; padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:12px; font-variant-numeric:tabular-nums;"/>
+
+        <div id="wf-tranche-inputs" style="margin-bottom:12px;"></div>
+
+        <label style="display:block; font-size:11px; color:var(--n-600); margin-bottom:3px;">Borrower equity contribution (tier 6)</label>
+        <input id="wf-equity" type="number" min="0" step="500000" placeholder="e.g. 12682026"
+               style="width:100%; padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:12px; font-variant-numeric:tabular-nums;"/>
+
+        <div id="wf-hurdle-inputs" style="margin-bottom:12px;"></div>
+
+        <button id="wf-run" onclick="window.runWaterfall && window.runWaterfall()"
+                class="mat-btn primary" style="width:100%; font-size:12px; padding:7px 12px;">
+          <i class="ti ti-player-play"></i>Run distribution
+        </button>
+        <button onclick="window.resetWaterfallInputs && window.resetWaterfallInputs()"
+                class="mat-btn outline" style="width:100%; font-size:12px; padding:6px 12px; margin-top:6px;">
+          <i class="ti ti-refresh"></i>Reset inputs
+        </button>
+      </div>
+      <!-- Right: results pane -->
+      <div style="flex:1; padding:14px 18px 16px; overflow-y:auto; max-height:calc(96vh - 130px);">
+        <div id="wf-results" class="v4-empty" style="padding:44px 20px;">
+          <div class="v4-empty-icon"><i class="ti ti-arrow-waterfall"></i></div>
+          <div class="v4-empty-title">No distribution yet</div>
+          <div class="v4-empty-body">Enter a sale-proceeds amount and outstanding balances on the left, then click <b>Run distribution</b>. The tier-by-tier cascade + per-recipient totals will render here.</div>
+        </div>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <span id="wf-summary" class="text-[11px] text-gray-500 mr-auto">—</span>
+      <button class="mat-btn outline" onclick="window.closeWaterfallModal && window.closeWaterfallModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Borrower Financials modal (Phase 1) ═══
      Lists past financials per deal + Import financials button.
      Each row is a snapshot (Q1 2026, FY 2025, etc.) with the computed
@@ -6097,9 +6226,12 @@
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
 <script src="loan-module-engine.js"></script>
 <script src="loan-module-instruments.js"></script>
-<script src="loan-module-analytics.js"></script>
-<script src="demo-assistant-kb.js"></script>
-<script src="demo-assistant-system-prompt.js"></script>
+<script src="loan-module-analytics.js?v=covenantkpi-mezz-v3"></script>
+<!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
+     (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
+     floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
+<script src="demo-assistant-kb.js?v=v4-2026-07-22"></script>
+<script src="demo-assistant-system-prompt.js?v=v4-2026-07-22"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -6240,6 +6372,18 @@ window.SB = (function(){
         } else if(BACKEND_TYPE === 'postgrest' && _cfg.authScheme === 'apikey' && _cfg.authValue){
           options.global = { headers: { 'apikey': _cfg.authValue } };
         }
+        // ─── V4 fix (2026-07): route supabase-js through the fetch watchdog.
+        // supabase-js @2.46.1 internally uses cross-fetch which captures a
+        // fetch reference that DOES NOT go through our window.fetch patch
+        // (verified: watchdogDelta = 0 after issuing a supabase query).
+        // Result: connection-pool exhaustion could freeze DB reads forever
+        // — the exact symptom of the "hourglass and stuck" freeze on the
+        // Notices modal. Passing options.global.fetch explicitly forces
+        // supabase-js to use OUR patched fetch, so every DB call now gets
+        // the 15s watchdog timeout and a visible error toast instead of
+        // hanging. .bind(window) preserves `this` inside supabase-js's
+        // internal caller.
+        options.global = Object.assign({}, options.global, { fetch: window.fetch.bind(window) });
         _client = window.__supabaseCreateClient(SUPABASE_URL, key || ' ', options);
         // V4 fix: guard the probe with a hard timeout. If Chrome's connection
         // pool is exhausted (6-per-origin cap) the supabase-js query would
@@ -6518,6 +6662,24 @@ window.SB = (function(){
   // and augmented with manual entries (waivers, defaults, amendments).
   // Status lifecycle: pending → sent → acknowledged → completed (or cancelled).
 
+  // Per-call timeout wrapper — races the supabase query against a hard
+  // deadline. If the query hangs (which happened for Notices even after
+  // the fetch watchdog was in place because supabase-js was bypassing
+  // window.fetch), the wrapper rejects at DB_CALL_BUDGET_MS so the
+  // caller's loading spinner + error surface actually fire. Now that
+  // supabase-js goes through the watchdog too this is belt-and-
+  // suspenders — but the extra guard costs nothing and future-proofs
+  // against any transport that bypasses fetch (WebSocket, wasm, etc.).
+  const DB_CALL_BUDGET_MS = 12000;   // one DB read/write should be well under this
+  function _withDbTimeout(label, promise, ms){
+    ms = ms || DB_CALL_BUDGET_MS;
+    let timer;
+    const timeout = new Promise((_, rj) => {
+      timer = setTimeout(() => rj(new Error(label + ' · timed out after ' + Math.round(ms/1000) + 's — DB call did not return')), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
   // Fetch notices for a set of deal IDs (or all if empty). Returns notices
   // sorted by effective_date ascending. RLS filters by ownership.
   async function fetchNotices(dealIds){
@@ -6525,10 +6687,20 @@ window.SB = (function(){
     try {
       let q = _client.from('loan_notices').select('*').order('effective_date', { ascending: true });
       if(Array.isArray(dealIds) && dealIds.length) q = q.in('deal_id', dealIds);
-      const { data, error } = await q;
+      const { data, error } = await _withDbTimeout('fetchNotices', q);
       if(error){ console.error('[SB] fetchNotices:', error); return []; }
       return data || [];
-    } catch(err){ console.error('[SB] fetchNotices threw:', err); return []; }
+    } catch(err){
+      console.error('[SB] fetchNotices threw:', err);
+      // Surface as a visible toast so the user sees the failure rather
+      // than a silent empty-notices state.
+      if(typeof toast === 'function'){
+        toast(err.message || 'Failed to load notices', 6000, {
+          kind: 'error', id: 'sb:fetchNotices', detail: 'loan_notices · Supabase'
+        });
+      }
+      return [];
+    }
   }
 
   // Upsert an auto-derived notice. The unique index on (deal_id, notice_type,
@@ -7776,11 +7948,15 @@ window.SB = (function(){
     repayment:       { allowed: ['AtMaturity','Periodic','BulletWithAmort'], default: 'AtMaturity', alias: { atMaturity:'AtMaturity', bullet:'AtMaturity', amortising:'Periodic', amortizing:'Periodic' } },
     facility_type:   { allowed: ['termLoan','revolver','delayedDraw','bridgeLoan'], default: 'termLoan' },
     base_index:      { allowed: ['FIXED','SONIA','SOFR','TermSOFR','BBSW','EURIBOR','ESTR'], default: 'FIXED', alias: { fixed:'FIXED' } },
-    fee_kind:        { allowed: ['arrangement','commitment','utilisation','agency','other'], default: 'other', alias: { upfront:'arrangement', undrawn:'commitment', utilization:'utilisation' } },
-    fee_mode:        { allowed: ['fixPct','fixAmount','floatBps','overFunded','overUnfunded','overInterestComponent'], default: 'fixPct', alias: { percent:'fixPct', amount:'fixAmount', bps:'floatBps' } },
+    fee_kind:        { allowed: ['arrangement','commitment','utilisation','agency','other','exitFeeIrrHurdle','origination','management','performance'], default: 'other', alias: { upfront:'arrangement', undrawn:'commitment', utilization:'utilisation', exitFee:'exitFeeIrrHurdle', arranger:'origination', mgmt:'management', perf:'performance' } },
+    fee_mode:        { allowed: ['fixPct','fixAmount','floatBps','overFunded','overUnfunded','overInterestComponent','irrHurdleTiers','cashCoupon'], default: 'fixPct', alias: { percent:'fixPct', amount:'fixAmount', bps:'floatBps', hurdle:'irrHurdleTiers', cash:'cashCoupon' } },
     fee_base:        { allowed: ['commitment','funded','unfunded','tranche-face'], default: 'commitment', alias: { undrawn:'unfunded', drawn:'funded', face:'tranche-face' } },
     fee_freq:        { allowed: ['oneOff','monthly','quarterly','semi','annual'], default: 'oneOff', alias: { 'semi-annual':'semi', 'semiAnnual':'semi', 'semiannual':'semi', yearly:'annual' } },
-    ratchet_kpi:     { allowed: ['none','leverageRatio','dscr','esgScore','interestCoverage'], default: 'none', alias: { custom:'none', leverage:'leverageRatio', icr:'interestCoverage' } },
+    // Covenant KPI enum — extended in mezz_support migration with construction-
+    // finance covenants (LVR / LTC / RLVR / MinNetAssets / MinPresales).
+    // Also used by interest_components.ratchet_kpi, so we keep the pre-existing
+    // ratchet-relevant values (leverageRatio, dscr, interestCoverage, esgScore).
+    ratchet_kpi:     { allowed: ['none','leverageRatio','netLeverageRatio','dscr','fccr','esgScore','interestCoverage','currentRatio','minNetWorth','capexLimit','restrictedPayments','icr','borrowingBase','lvrConstruction','ltc','rlvr','minNetAssets','minPresales'], default: 'none', alias: { custom:'none', leverage:'leverageRatio', 'lvr':'lvrConstruction', 'lvrConstr':'lvrConstruction', 'ltv':'lvrConstruction', 'residualLvr':'rlvr', 'residualLVR':'rlvr', 'minNAV':'minNetAssets' } },
     paydown_kind:    { allowed: ['scheduled','voluntary','mandatory','changeOfControl','assetSale'], default: 'scheduled', alias: { coc:'changeOfControl', amort:'scheduled', sale:'assetSale' } },
     prepay_trigger:  { allowed: ['changeOfControl','assetSale','ecfSweep','covenantBreach','manual'], default: null, alias: { coc:'changeOfControl', sale:'assetSale', ecf:'ecfSweep' } },
     aasb_tier:       { allowed: ['tier1','tier1RDR','tier2'], default: 'tier1' },
@@ -7827,6 +8003,19 @@ window.SB = (function(){
   async function saveDeal(B){
     if(!_client || !_connected) return { ok:false, reason:'not connected' };
     if(!B || !B.deal || !B.deal.name) return { ok:false, reason:'deal name required' };
+    // ─── Rollback tracking (2026-07) ──────────────────────────────
+    // saveDeal writes ~15 related tables sequentially. Any failure mid-way
+    // used to leave the parent deal row committed with orphaned partial
+    // children in the picker (bugged for 4 debug artifacts recently).
+    //
+    // Fix: wrap the whole save in an IIFE that returns { ok, ... }. After
+    // it resolves, if it failed AND we NEWLY created the deal row in this
+    // call, delete the parent (cascades remove children). Existing deals
+    // being resaved don't roll back — a partial re-save shouldn't destroy
+    // the prior valid state.
+    let _cleanupDealId = null;
+    let _wasNewDeal = false;
+    const result = await (async () => {
     try {
       const dealCode = (B.deal.dealId || B.deal.name).replace(/\s+/g, '_').slice(0,80);
       const framework = safeEnum('framework', B.deal.framework);
@@ -7861,6 +8050,20 @@ window.SB = (function(){
         is_preset:         false,
         complexity:        B.complexity || null,
         tag:               B.tag || null,
+        // ─── Mezz support (2026-07): construction-finance + waterfall fields.
+        // All nullable — plain term loans leave these blank and the row saves
+        // as before. RE mezzanine, borrowing-base and syndicated construction
+        // deals populate them.
+        deal_structure:         B.deal.structure         || null,   // 'construction_mezz' | 'borrowing_base' | 'term' | ...
+        lender_role:            B.deal.lenderRole        || null,   // 'lender_of_record' | 'arranger_manager' | 'both'
+        senior_debt_provider:   B.deal.seniorDebtProvider|| null,
+        senior_debt_limit:      B.deal.seniorDebtLimit   != null ? +B.deal.seniorDebtLimit   : null,
+        as_if_complete_value:   B.deal.asIfCompleteValue != null ? +B.deal.asIfCompleteValue : null,
+        total_development_cost: B.deal.totalDevCost      != null ? +B.deal.totalDevCost      : null,
+        qualifying_presales:    B.deal.qualifyingPresales!= null ? +B.deal.qualifyingPresales: null,
+        net_realisation_value:  B.deal.nrv               != null ? +B.deal.nrv               : null,
+        min_net_assets:         B.deal.minNetAssets      != null ? +B.deal.minNetAssets      : null,
+        waterfall_config:       B.waterfall || null,                 // JSONB — tier array + recipients
         created_by:        _uid,
         updated_at:        stamp
       };
@@ -7868,6 +8071,11 @@ window.SB = (function(){
         .from('deals').upsert(dealPayload, { onConflict: 'deal_code' }).select().single();
       if(dealErr){ console.error('[SB] saveDeal: deal upsert:', dealErr); return { ok:false, reason: dealErr.message }; }
       const dealId = dealRow.id;
+      // Track for rollback. `wasNewDeal` fires when the upsert produced a
+      // fresh row (created_at within 2s of updated_at). Re-saving an
+      // existing deal has created_at far in the past → we won't wipe it.
+      _cleanupDealId = dealId;
+      _wasNewDeal = Math.abs(new Date(dealRow.created_at).getTime() - new Date(dealRow.updated_at).getTime()) < 2000;
 
       // 2. UPSERT facility (1:1 by deal_id)
       const facPayload = {
@@ -7893,6 +8101,9 @@ window.SB = (function(){
       // 4. Insert tranches + nested
       const counts = { tranches:0, interestComponents:0, terms:0, spreads:0, ratchets:0, drawdowns:0, paydowns:0, fees:0, aasbExtras:0 };
       const tranches = Array.isArray(B.tranches) ? B.tranches : [];
+      // Map from Builder tranche.id (or index) → persisted UUID so per-tranche
+      // fees can resolve their tranche_id foreign key in the fees insert below.
+      const trancheIdMap = {};
       for(let ti = 0; ti < tranches.length; ti++){
         const t = tranches[ti];
         const tranchePayload = {
@@ -7902,13 +8113,25 @@ window.SB = (function(){
           currency:        t.currency || ccy,
           face_value:      +t.face || 0,
           drawn_initially: +t.drawnInitially || 0,
-          is_pik_toggle:   !!t.isPikToggle
+          is_pik_toggle:   !!t.isPikToggle,
+          // ─── Mezz support: per-tranche investor attribution + PIK
+          // capitalisation cadence + coupon-servicing split.
+          investor_name:               t.investorName          || null,
+          investor_domicile:           t.investorDomicile      || null,
+          pik_capitalisation_freq:     t.pikCapitalisationFreq || null,    // 'monthly' | 'quarterly' | 'semi' | 'annual'
+          coupon_servicing_pct:        t.couponServicingPct        != null ? +t.couponServicingPct        : null,
+          coupon_servicing_cap:        t.couponServicingCap        != null ? +t.couponServicingCap        : null,
+          coupon_servicing_start_year: t.couponServicingStartYear  != null ? +t.couponServicingStartYear  : null
         };
         const { data: trRow, error: trErr } = await _client
           .from('tranches').insert(tranchePayload).select().single();
         if(trErr){ console.error('[SB] saveDeal: tranche insert:', trErr); return { ok:false, reason: trErr.message }; }
         counts.tranches++;
         const trancheId = trRow.id;
+        // Register both by Builder id and by index so fees can reference either.
+        if(t.id) trancheIdMap[t.id] = trancheId;
+        trancheIdMap['#' + ti] = trancheId;
+        trancheIdMap[t.name || ('Tranche ' + (ti+1))] = trancheId;
 
         // 4a. drawdowns
         const draws = Array.isArray(t.drawdowns) ? t.drawdowns : [];
@@ -7986,10 +8209,16 @@ window.SB = (function(){
           // Spreads
           const spreads = Array.isArray(ic.spreads) ? ic.spreads : [];
           if(spreads.length){
+            // interest_spreads.effective_from is NOT NULL; interest_spreads.effective_to
+            // is nullable (spread runs to end-of-term). Empty-string in the Builder
+            // means "since origination / until maturity" — coerce to those anchors so
+            // Postgres accepts the row.
+            const dealSettle  = (B.deal && B.deal.settle)   || null;
+            const dealMaturity= (B.deal && B.deal.maturity) || null;
             const rows = spreads.map(sp => ({
               interest_component_id: icId,
-              effective_from:        sp.from,
-              effective_to:          sp.to,
+              effective_from:        (sp.from && sp.from !== '') ? sp.from : dealSettle,
+              effective_to:          (sp.to   && sp.to   !== '') ? sp.to   : dealMaturity,
               bps:                   +sp.bps || 0,
               note:                  sp.note || null
             }));
@@ -8039,20 +8268,35 @@ window.SB = (function(){
       // 5. Fees
       const fees = Array.isArray(B.fees) ? B.fees : [];
       if(fees.length){
-        const rows = fees.map((f, i) => ({
-          deal_id:              dealId,
-          fee_no:               i + 1,
-          label:                f.label || ('Fee ' + (i+1)),
-          kind:                 safeEnum('fee_kind', f.kind),
-          mode:                 safeEnum('fee_mode', f.mode),
-          pct:                  +f.pct || 0,
-          bps:                  +f.bps || 0,
-          flat_amount:          +f.flatAmount || 0,
-          base_kind:            safeEnum('fee_base', f.base),
-          frequency:            safeEnum('fee_freq', f.frequency),
-          payment_date:         f.paymentDate || null,
-          ifrs_treatment_value: f.ifrs || null
-        }));
+        const rows = fees.map((f, i) => {
+          // Resolve tranche attribution — f.trancheRef can be a Builder id,
+          // '#0'/'#1' index, or a tranche name. Facility-wide fees leave it
+          // blank and tranche_id ends up NULL (existing shape).
+          let trancheFk = null;
+          if(f.trancheRef && trancheIdMap[f.trancheRef]) trancheFk = trancheIdMap[f.trancheRef];
+          else if(typeof f.trancheIndex === 'number' && trancheIdMap['#' + f.trancheIndex]) trancheFk = trancheIdMap['#' + f.trancheIndex];
+          return {
+            deal_id:              dealId,
+            fee_no:               i + 1,
+            label:                f.label || ('Fee ' + (i+1)),
+            kind:                 safeEnum('fee_kind', f.kind),
+            mode:                 safeEnum('fee_mode', f.mode),
+            pct:                  +f.pct || 0,
+            bps:                  +f.bps || 0,
+            flat_amount:          +f.flatAmount || 0,
+            base_kind:            safeEnum('fee_base', f.base),
+            frequency:            safeEnum('fee_freq', f.frequency),
+            payment_date:         f.paymentDate || null,
+            ifrs_treatment_value: f.ifrs || null,
+            // ─── Mezz support: per-tranche + hurdle + cap + start-year fields.
+            tranche_id:           trancheFk,
+            recipient:            f.recipient       || null,
+            cap_amount:           f.capAmount       != null ? +f.capAmount       : null,
+            start_year:           f.startYear       != null ? +f.startYear       : null,
+            irr_hurdle_pct:       f.irrHurdlePct    != null ? +f.irrHurdlePct    : null,
+            irr_hurdle_tiers:     Array.isArray(f.irrHurdleTiers) ? f.irrHurdleTiers : null
+          };
+        });
         const { error: feeErr } = await _client.from('fees').insert(rows);
         if(feeErr){ console.error('[SB] saveDeal: fees:', feeErr); return { ok:false, reason: feeErr.message }; }
         counts.fees += rows.length;
@@ -8330,6 +8574,25 @@ window.SB = (function(){
       console.error('[SB] saveDeal failed:', err);
       return { ok:false, reason: err && err.message ? err.message : String(err) };
     }
+    })();
+    // ─── Rollback partial newly-created deals ─────────────────────
+    // If the save failed AND we just created the deal in this call,
+    // delete the parent row. FK ON DELETE CASCADE removes the partial
+    // children (facilities, tranches, interest_components, etc.), so
+    // the deal picker won't show an orphaned "debug artifact" row.
+    if(!result.ok && _cleanupDealId && _wasNewDeal){
+      try {
+        await _client.from('deals').delete().eq('id', _cleanupDealId);
+        console.warn('[SB] saveDeal: rolled back partial newly-created deal', _cleanupDealId, '· reason:', result.reason);
+      } catch(rbErr){
+        console.error('[SB] saveDeal: rollback delete failed for', _cleanupDealId, rbErr);
+        // Best-effort — surface a toast so the user knows there's a stray row.
+        if(typeof toast === 'function'){
+          toast('Save failed AND rollback failed — one orphan row remains in DB. Delete via DB console.', 8000, {kind:'error', id:'sb:rollback-failed', detail: _cleanupDealId});
+        }
+      }
+    }
+    return result;
   }
 
   // ------------------------------------------------------------
@@ -8395,7 +8658,7 @@ window.SB = (function(){
   async function fetchUserDeals(){
     if(!_client || !_connected) return [];
     try {
-      const { data, error } = await _client
+      const q = _client
         .from('deals')
         .select(
           '*, ' +
@@ -8422,6 +8685,9 @@ window.SB = (function(){
         )
         .eq('is_preset', false)
         .order('updated_at', { ascending: false });
+      // Big query — nested relations across 15 tables. Give it 20s
+      // (versus the default 12s) but still cap it so it can't hang.
+      const { data, error } = await _withDbTimeout('fetchUserDeals', q, 20000);
       if(error){ console.error('[SB] fetchUserDeals:', error); return []; }
       const wrap = (row) => {
         // Build the builder-definition JSONB shape (matches preset_catalog.build_definition
@@ -8437,7 +8703,18 @@ window.SB = (function(){
             framework:    row.framework,
             settle:       row.settlement_date,
             maturity:     row.maturity_date,
-            participationPct: row.participation_pct
+            participationPct: row.participation_pct,
+            // ─── Mezz support round-trip: bring construction-finance +
+            // arranger + valuation fields back onto B.deal.*.
+            structure:            row.deal_structure          || null,
+            lenderRole:           row.lender_role             || null,
+            seniorDebtProvider:   row.senior_debt_provider    || null,
+            seniorDebtLimit:      row.senior_debt_limit       != null ? +row.senior_debt_limit       : null,
+            asIfCompleteValue:    row.as_if_complete_value    != null ? +row.as_if_complete_value    : null,
+            totalDevCost:         row.total_development_cost  != null ? +row.total_development_cost  : null,
+            qualifyingPresales:   row.qualifying_presales     != null ? +row.qualifying_presales     : null,
+            nrv:                  row.net_realisation_value   != null ? +row.net_realisation_value   : null,
+            minNetAssets:         row.min_net_assets          != null ? +row.min_net_assets          : null
           },
           facility: row.facility ? {
             commitment:  +row.facility.commitment || 0,
@@ -8453,6 +8730,14 @@ window.SB = (function(){
             currency:         t.currency,
             face:             +t.face_value      || 0,
             drawnInitially:   +t.drawn_initially || 0,
+            isPikToggle:      !!t.is_pik_toggle,
+            // ─── Mezz support round-trip: investor + PIK cadence + cash-coupon split.
+            investorName:              t.investor_name             || null,
+            investorDomicile:          t.investor_domicile         || null,
+            pikCapitalisationFreq:     t.pik_capitalisation_freq   || null,
+            couponServicingPct:        t.coupon_servicing_pct         != null ? +t.coupon_servicing_pct        : null,
+            couponServicingCap:        t.coupon_servicing_cap         != null ? +t.coupon_servicing_cap        : null,
+            couponServicingStartYear:  t.coupon_servicing_start_year  != null ? +t.coupon_servicing_start_year : null,
             drawdowns:        sort(t.drawdowns, 'drawdown_no').map(d => ({
               date: d.draw_date, amount: +d.amount || 0, reason: d.reason || ''
             })),
@@ -8511,8 +8796,17 @@ window.SB = (function(){
             base:         f.base_kind || 'commitment',
             frequency:    f.frequency || 'oneOff',
             paymentDate:  f.payment_date || '',
-            ifrs:         f.ifrs_treatment_value || ''
+            ifrs:         f.ifrs_treatment_value || '',
+            // ─── Mezz support round-trip: per-tranche + hurdle + cap fields.
+            trancheRef:      f.tranche_id       || null,
+            recipient:       f.recipient        || null,
+            capAmount:       f.cap_amount       != null ? +f.cap_amount     : null,
+            startYear:       f.start_year       != null ? +f.start_year     : null,
+            irrHurdlePct:    f.irr_hurdle_pct   != null ? +f.irr_hurdle_pct : null,
+            irrHurdleTiers:  Array.isArray(f.irr_hurdle_tiers) ? f.irr_hurdle_tiers : null
           })),
+          // Waterfall config lives on deals.waterfall_config (JSONB).
+          waterfall:  row.waterfall_config || null,
           aasbExtras: (Array.isArray(row.aasb_extras) && row.aasb_extras.length) ? {
             tier:               row.aasb_extras[0].tier,
             asicReportable:     !!row.aasb_extras[0].asic_reportable,
@@ -8718,6 +9012,13 @@ window.SB = (function(){
       return wrapped;
     } catch(err) {
       console.error('[SB] fetchUserDeals failed:', err);
+      // Surface as toast so a hung deal-list load ends visibly instead
+      // of leaving the picker empty with no explanation.
+      if(typeof toast === 'function'){
+        toast(err.message || 'Failed to load deals', 6000, {
+          kind: 'error', id: 'sb:fetchUserDeals', detail: 'deals · Supabase'
+        });
+      }
       return [];
     }
   }
@@ -9414,11 +9715,21 @@ window.migrateIconsIn = function(root){
     i.setAttribute('aria-hidden', 'true');
     // Copy over any inline style so the icon lands at the same size/color.
     if(node.getAttribute('style')) i.setAttribute('style', node.getAttribute('style'));
+    // Preserve the id attribute — otherwise document.getElementById lookups
+    // for icons that had an id (app-dialog-icon, notice-icon, deal-selection-
+    // toggle-icon, etc.) break silently after migration. Discovered while
+    // deriving notices for the RE Mezz deal — showAppDialog couldn't find
+    // #app-dialog-icon because the shim had eaten the id on page-load.
+    if(node.id) i.id = node.id;
     // Fold Tailwind text-[Npx] size classes into the Tabler icon so
     // font-size still cascades. Also copy any non-size utility classes.
     const cls = (node.getAttribute('class') || '').split(/\s+/).filter(c =>
       c && c !== 'material-icons-outlined');
     cls.forEach(c => i.classList.add(c));
+    // Preserve data-* attributes too (some code stores state on these).
+    for(const attr of node.attributes){
+      if(attr.name.startsWith('data-')) i.setAttribute(attr.name, attr.value);
+    }
     node.replaceWith(i);
     swapped++;
   });
@@ -16458,6 +16769,36 @@ function _watchlistBuildDeals(){
     // consumers (Regulatory) can read them from either shape.
     const fundAllocations = Array.isArray(def.fundAllocations) ? def.fundAllocations : [];
     if(inst && !inst.fundAllocations) inst.fundAllocations = fundAllocations;
+    // Mezz support — mirror the construction / arranger reference fields
+    // onto the inst so LMA.computeWatchlist can compute LVR / LTC / RLVR
+    // covenant values mechanically (no manual reported-value entry needed
+    // for construction ratios — they're derived from the deal's own
+    // senior_debt_limit + facility.commitment + as_if_complete_value +
+    // TDC + QPS + NRV).
+    if(inst && def.deal){
+      inst.seniorDebtLimit    = def.deal.seniorDebtLimit    != null ? +def.deal.seniorDebtLimit    : null;
+      inst.asIfCompleteValue  = def.deal.asIfCompleteValue  != null ? +def.deal.asIfCompleteValue  : null;
+      inst.totalDevCost       = def.deal.totalDevCost       != null ? +def.deal.totalDevCost       : null;
+      inst.qualifyingPresales = def.deal.qualifyingPresales != null ? +def.deal.qualifyingPresales : null;
+      inst.nrv                = def.deal.nrv                != null ? +def.deal.nrv                : null;
+      inst.minNetAssets       = def.deal.minNetAssets       != null ? +def.deal.minNetAssets       : null;
+      // Mirror settle / maturity onto the wrapper so covenantKpiValue's
+      // PIK-coupon estimator has the tenor it needs.
+      inst.settle             = def.deal.settle    || inst.settle;
+      inst.maturity           = def.deal.maturity  || inst.maturity;
+    }
+    if(inst && def.facility){
+      inst.facility = inst.facility || {};
+      inst.facility.commitment = +def.facility.commitment || 0;
+    }
+    // Preserve the raw Builder tranches array on the wrapper so the
+    // PIK-coupon estimator can walk isPikToggle + interestComponents[0]
+    // .baseValue × years. (The instrument-shape tranches use different
+    // field names — face_value vs face — so we mirror the Builder
+    // definition here.)
+    if(inst && Array.isArray(def.tranches)){
+      inst.tranches = def.tranches;
+    }
     out.push({ key, name, inst, team, fundAllocations });
   }
   return out;
@@ -16720,6 +17061,10 @@ window.closeNoticesModal = function(){
 };
 
 // Fetch + render. Filters happen client-side on the cache.
+// Wrapped in a top-level 15s guard so the sandclock/spinner can NEVER
+// persist past that deadline — even if a DB call somewhere in the chain
+// hangs and the watchdog + per-call timeouts both miss. Fires an error
+// toast with the reason so the user knows why the load failed.
 window.refreshNotices = async function(){
   const loading = document.getElementById('notices-loading');
   const content = document.getElementById('notices-content');
@@ -16727,9 +17072,19 @@ window.refreshNotices = async function(){
   const errBox  = document.getElementById('notices-error');
   loading.style.display = ''; content.style.display = 'none'; empty.style.display = 'none'; errBox.style.display = 'none';
   await new Promise(r => setTimeout(r, 30));
-  try {
-    if(!window.SB || !window.SB.connected){ throw new Error('Not connected to database'); }
+
+  // Hard top-level deadline. If anything downstream (fetchNotices,
+  // reconcile, render) hangs past this, we bail with a visible error so
+  // the modal doesn't get stuck on the spinner.
+  let hardTimer;
+  const hardStop = new Promise((_, rj) => {
+    hardTimer = setTimeout(() => rj(new Error('Notices load exceeded 15s — aborted so the modal doesn\'t freeze')), 15000);
+  });
+
+  const run = async () => {
+    if(!window.SB || !window.SB.connected){ throw new Error('Not connected to database — Supabase probe failed at init. Reload the page to retry.'); }
     // Fetch all notices for deals the user can see. RLS handles authorization.
+    // fetchNotices already has its own _withDbTimeout guard (12s default).
     const notices = await window.SB.fetchNotices();
     window._noticesCache = notices;
     _renderNotices();
@@ -16739,11 +17094,22 @@ window.refreshNotices = async function(){
     if(notices.length){
       window.reconcileNotices().then(() => _renderNotices()).catch(err => console.warn('[notices] reconcile failed', err));
     }
+  };
+
+  try {
+    await Promise.race([run(), hardStop]);
   } catch(err){
     console.error('[notices] refresh failed', err);
     loading.style.display = 'none';
     errBox.style.display = '';
     errBox.innerHTML = '<b>Notices failed:</b> ' + (err && err.message ? err.message : String(err));
+    if(typeof toast === 'function'){
+      toast(err.message || 'Failed to load notices', 6000, {
+        kind: 'error', id: 'notices:refresh', detail: 'loan_notices'
+      });
+    }
+  } finally {
+    clearTimeout(hardTimer);
   }
 };
 
@@ -24243,22 +24609,39 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
       // citation render correctly. Fall through values are preserved so
       // legacy demo-derived covenants (which already use the Dashboard names)
       // still work unchanged.
-      return inst.covenants.map(c => ({
-        name:         c.name,
-        kpi:          c.kpi          || c.kpiMetric          || c.kpi_metric            || '',
-        direction:    c.direction,
-        threshold:    c.threshold,
-        current:      c.current      != null ? c.current
-                                              : (c.lastReportedValue != null ? c.lastReportedValue : null),
-        unit:         c.unit,
-        frequency:    c.frequency    || c.testFrequency      || c.test_frequency        || '',
-        nextTestDate: c.nextTestDate || c.next_test_date     || '',
-        source:       c.source       || c.creditAgreementSection || c.credit_agreement_section || '',
-        note:         c.note         || c.notes              || '',
-        // Pass through everything else (e.g. category, consequenceOnBreach, breachStepUpBps)
-        // in case future enhancements need them.
-        ...c
-      }));
+      //
+      // Value resolution: prefer c.current (legacy demo shape), then the
+      // ops-reported c.lastReportedValue, then fall back to LMA.covenantKpiValue
+      // which can compute construction ratios (LVR / LTC / RLVR) mechanically
+      // from the deal's own reference fields. Without this fallback the
+      // Dashboard shows "No data" for mezz covenants even after we've
+      // populated the reference fields — a mismatch with the Watchlist.
+      const canDerive = (typeof LMA !== 'undefined' && typeof LMA.covenantKpiValue === 'function');
+      return inst.covenants.map(c => {
+        let cur = c.current      != null ? c.current
+                : (c.lastReportedValue != null ? c.lastReportedValue : null);
+        if(cur == null && canDerive){
+          const kpiKey = c.kpiMetric || c.kpi_metric || c.kpi || '';
+          const derived = LMA.covenantKpiValue(kpiKey, inst.financialKpis || null, inst, c);
+          if(derived != null) cur = +derived;
+        }
+        return {
+          name:         c.name,
+          kpi:          c.kpi          || c.kpiMetric          || c.kpi_metric            || '',
+          direction:    c.direction,
+          threshold:    c.threshold,
+          current:      cur,
+          unit:         c.unit,
+          frequency:    c.frequency    || c.testFrequency      || c.test_frequency        || '',
+          nextTestDate: c.nextTestDate || c.next_test_date     || '',
+          source:       c.source       || c.creditAgreementSection || c.credit_agreement_section || '',
+          note:         c.note         || c.notes              || '',
+          // Pass through everything else (e.g. category, consequenceOnBreach, breachStepUpBps)
+          // in case future enhancements need them.
+          ...c,
+          current:      cur   // re-apply after spread so ...c doesn't overwrite
+        };
+      });
     }
     // Frequency → next test date. We anchor to settlement and step forward
     // until we land on a date >= today, so the "next test" is plausible.
@@ -24388,6 +24771,11 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
   //   direction 'min' → breach when current < threshold; headroom = (current - threshold) / threshold
   // Status: red if breached, amber if < 10% headroom, green otherwise.
   function evaluateCovenant(c){
+    // Guard against null / undefined current before coercion — `+null` = 0
+    // which would silently mark unreported min-NAV / min-presales covenants
+    // as 100% breached against their positive thresholds. We want them to
+    // show "No data" until ops populates the value.
+    if(c.current == null || c.current === '') return { status:'amber', headroom:null, label:'No data' };
     const cur = +c.current, thr = +c.threshold;
     if(isNaN(cur) || isNaN(thr)) return { status:'amber', headroom:null, label:'No data' };
     let headroom;
@@ -26474,7 +26862,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
           <div><label class="text-[10px] uppercase text-gray-600 block">Currency</label>
             <select data-t-field="currency" data-tidx="${idx}" class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]">
-              ${['USD','GBP','EUR','CHF','JPY'].map(c => `<option ${t.currency===c?'selected':''} value="${c}">${c}</option>`).join('')}
+              ${['USD','GBP','EUR','CHF','JPY','AUD'].map(c => `<option ${t.currency===c?'selected':''} value="${c}">${c}</option>`).join('')}
             </select>
           </div>
           <div><label class="text-[10px] uppercase text-gray-600 block">Face Value <span style="color:#DC2626; font-weight:900;">*</span></label>
@@ -26488,6 +26876,53 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           <div><label class="text-[10px] uppercase text-gray-600 block">Paydowns</label>
             <span class="text-[11px] py-1 text-gray-600">${(t.repayments || []).length} scheduled · <button data-t-action="addPaydown" data-tidx="${idx}" class="text-emerald-700 underline">+ add</button></span></div>
         </div>
+
+        <!-- ─── Mezz support: investor attribution + PIK cadence + coupon
+             servicing split. Auto-shown when isPikToggle is true or when
+             investor_name is populated. For plain term loans without PIK
+             this row still renders (so users can add investor metadata
+             at will) but the coupon-servicing fields are visually muted
+             unless isPikToggle is on — since they only matter for PIK. -->
+        <details class="mb-2" ${(t.isPikToggle || t.investorName || t.couponServicingPct) ? 'open' : ''}>
+          <summary style="font-size:10.5px; color:#4B5563; cursor:pointer; font-weight:600; padding:2px 0;">
+            <i class="ti ti-user-dollar" style="font-size:12px; vertical-align:-1px;"></i>
+            Investor &amp; PIK — capitalisation cadence + optional cash-serviced coupon
+          </summary>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2" style="background:white; padding:8px; border-radius:6px; border:0.5px solid #E5E7EB;">
+            <div><label class="text-[10px] uppercase text-gray-600 block">Investor name</label>
+              <input data-t-field="investorName" data-tidx="${idx}" type="text" value="${escapeHtml(t.investorName || '')}" placeholder="e.g. Investor A"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block">Domicile</label>
+              <select data-t-field="investorDomicile" data-tidx="${idx}" class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]">
+                <option value="" ${!t.investorDomicile?'selected':''}>—</option>
+                <option value="domestic" ${t.investorDomicile==='domestic'?'selected':''}>Domestic</option>
+                <option value="foreign"  ${t.investorDomicile==='foreign' ?'selected':''}>Foreign (s128F check)</option>
+              </select></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block">PIK capitalisation</label>
+              <select data-t-field="pikCapitalisationFreq" data-tidx="${idx}" class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]">
+                <option value="" ${!t.pikCapitalisationFreq?'selected':''}>—</option>
+                <option value="monthly"   ${t.pikCapitalisationFreq==='monthly'?'selected':''}>Monthly</option>
+                <option value="quarterly" ${t.pikCapitalisationFreq==='quarterly'?'selected':''}>Quarterly</option>
+                <option value="semi"      ${t.pikCapitalisationFreq==='semi'?'selected':''}>Semi-annual</option>
+                <option value="annual"    ${t.pikCapitalisationFreq==='annual'?'selected':''}>Annual</option>
+              </select></div>
+            <div style="display:flex; align-items:end; gap:4px;">
+              <label class="text-[10px] uppercase text-gray-600 flex items-center gap-1" style="cursor:pointer;">
+                <input data-t-field="isPikToggle" data-tidx="${idx}" type="checkbox" ${t.isPikToggle?'checked':''} style="width:14px; height:14px;"/>
+                PIK / capitalise coupon
+              </label>
+            </div>
+            <div style="grid-column: span 2;"><label class="text-[10px] uppercase text-gray-600 block">Cash-serviced coupon (% p.a.) — optional</label>
+              <input data-t-field="couponServicingPct" data-tidx="${idx}" type="number" min="0" step="0.1" value="${t.couponServicingPct != null ? t.couponServicingPct : ''}" placeholder="e.g. 6.0 = 6% cash-served, remainder capitalised"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block">Cap on cash servicing ($)</label>
+              <input data-t-field="couponServicingCap" data-tidx="${idx}" type="number" min="0" step="100000" value="${t.couponServicingCap != null ? t.couponServicingCap : ''}" placeholder="Total-payment cap"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block">Start year</label>
+              <input data-t-field="couponServicingStartYear" data-tidx="${idx}" type="number" min="0" max="30" step="1" value="${t.couponServicingStartYear != null ? t.couponServicingStartYear : ''}" placeholder="e.g. 2 = from year 2"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+          </div>
+        </details>
 
         <!-- Drawdown / paydown schedules -->
         ${(t.drawdowns.length || (t.repayments || []).length) ? `
@@ -26699,7 +27134,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     document.querySelectorAll(`[data-tidx="${idx}"][data-t-field]`).forEach(el => {
       el.oninput = el.onchange = () => {
         const f = el.dataset.tField;
-        const val = (el.type === 'number') ? (parseFloat(el.value) || 0) : el.value;
+        let val;
+        if(el.type === 'checkbox')          val = !!el.checked;
+        else if(el.type === 'number')       val = (el.value === '') ? null : (parseFloat(el.value) || 0);
+        else                                val = el.value || null;
         t[f] = val;
         if(f === 'currency') B.deal.currency = val;   // tranche currency drives deal display
         recompute();
@@ -26957,7 +27395,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           <input data-f-field="label" data-fidx="${idx}" type="text" value="${escapeHtml(f.label)}"
                  class="border border-gray-300 rounded px-2 py-0.5 bg-white w-40 font-semibold"/>
           <select data-f-field="kind" data-fidx="${idx}" class="border border-gray-300 rounded px-1 py-0.5 bg-white">
-            ${['arrangement','commitment','utilisation','agency','other'].map(x => `<option ${f.kind===x?'selected':''} value="${x}">${x}</option>`).join('')}
+            ${[
+              'arrangement','commitment','utilisation','agency','other',
+              // Mezz support: extended fee kinds
+              'origination','management','performance','exitFeeIrrHurdle'
+            ].map(x => `<option ${f.kind===x?'selected':''} value="${x}">${x}</option>`).join('')}
           </select>
           <select data-f-field="mode" data-fidx="${idx}" class="border border-gray-300 rounded px-1 py-0.5 bg-white">
             <option ${f.mode==='fixPct'?'selected':''} value="fixPct">Fix % over base</option>
@@ -26966,6 +27408,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             <option ${f.mode==='overFunded'?'selected':''} value="overFunded">% over funded balance</option>
             <option ${f.mode==='overUnfunded'?'selected':''} value="overUnfunded">% over unfunded balance</option>
             <option ${f.mode==='overInterestComponent'?'selected':''} value="overInterestComponent">% × an interest component rate</option>
+            <!-- Mezz support: extended fee modes -->
+            <option ${f.mode==='irrHurdleTiers'?'selected':''} value="irrHurdleTiers">IRR-hurdle tiers (waterfall)</option>
+            <option ${f.mode==='cashCoupon'?'selected':''} value="cashCoupon">Cash-serviced coupon (schedule)</option>
           </select>
           <button data-f-action="remove" data-fidx="${idx}" class="ml-auto text-red-600 underline">remove</button>
         </div>
@@ -27110,6 +27555,72 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             })()
           }
         </div>
+
+        <!-- ─── Mezz support: attribution + recipient + optional caps ───
+             Collapsible. Facility-wide fees leave everything blank; per-
+             tranche fees pick a tranche; performance/exit fees have a
+             recipient + optional IRR hurdle. All fields optional — the
+             engine and Waterfall use whatever is present. -->
+        <details class="mt-2" ${(f.trancheRef || f.recipient || f.capAmount || f.startYear || f.irrHurdlePct || (Array.isArray(f.irrHurdleTiers) && f.irrHurdleTiers.length)) ? 'open' : ''}>
+          <summary style="font-size:10.5px; color:#78350F; cursor:pointer; font-weight:600; padding:2px 0;">
+            <i class="ti ti-user-dollar" style="font-size:12px; vertical-align:-1px;"></i>
+            Attribution &amp; recipient — per-tranche assignment, cap, IRR hurdle
+          </summary>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2" style="background:white; padding:8px; border-radius:6px; border:0.5px solid #FCD34D;">
+            <div><label class="text-[10px] uppercase text-gray-600 block">Recipient</label>
+              <input data-f-field="recipient" data-fidx="${idx}" type="text" value="${escapeHtml(f.recipient || '')}" placeholder="e.g. Investor A · Barrenjoey"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block">Applies to tranche</label>
+              <select data-f-field="trancheRef" data-fidx="${idx}" class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]">
+                <option value="" ${!f.trancheRef?'selected':''}>Facility-wide</option>
+                ${B.tranches.map(t => `<option value="${t.id}" ${f.trancheRef===t.id?'selected':''}>${escapeHtml(t.name || t.id)}</option>`).join('')}
+              </select></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block">Cap amount ($)</label>
+              <input data-f-field="capAmount" data-fidx="${idx}" type="number" min="0" step="100000" value="${f.capAmount != null ? f.capAmount : ''}" placeholder="Total-payment cap"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block">Start year</label>
+              <input data-f-field="startYear" data-fidx="${idx}" type="number" min="0" max="30" step="1" value="${f.startYear != null ? f.startYear : ''}" placeholder="e.g. 2 = from year 2"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block">IRR hurdle % (single)</label>
+              <input data-f-field="irrHurdlePct" data-fidx="${idx}" type="number" min="0" step="0.1" value="${f.irrHurdlePct != null ? f.irrHurdlePct : ''}" placeholder="e.g. 16 for perf-fee hurdle"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+          </div>
+
+          ${ /* IRR-hurdle tier editor — only visible when mode = irrHurdleTiers OR
+              kind = exitFeeIrrHurdle. Inline mini-table with 3 columns per row
+              (tier, share %, IRR hurdle %) plus + and × controls. */
+            (f.mode === 'irrHurdleTiers' || f.kind === 'exitFeeIrrHurdle')
+              ? `<div class="mt-2" style="background:#FFFBEB; padding:8px; border-radius:6px; border:0.5px solid #F59E0B; border-left:3px solid #F59E0B;">
+                  <div style="display:flex; align-items:center; gap:6px; font-size:10.5px; color:#78350F; font-weight:600; margin-bottom:6px;">
+                    <i class="ti ti-stairs" style="font-size:12px;"></i>IRR-hurdle tiers
+                    <span style="font-weight:400; font-size:10px; color:#92400E;">Each tier consumes surplus at its share % until the IRR hurdle is met. Leave hurdle blank for the residual tier.</span>
+                    <button data-f-action="addHurdleTier" data-fidx="${idx}" class="ml-auto mat-btn outline !py-0.5 !px-2 text-[10px]">
+                      <i class="ti ti-plus"></i>Add tier
+                    </button>
+                  </div>
+                  ${ Array.isArray(f.irrHurdleTiers) && f.irrHurdleTiers.length ? (
+                    '<div style="display:grid; grid-template-columns:44px 1fr 1fr 32px; gap:4px 6px; font-size:10px; color:#92400E; font-weight:600; margin-bottom:4px;">' +
+                      '<div>Tier</div><div>Share %</div><div>IRR hurdle %</div><div></div>' +
+                    '</div>' +
+                    f.irrHurdleTiers.map((sub, si) => `
+                      <div style="display:grid; grid-template-columns:44px 1fr 1fr 32px; gap:4px 6px; align-items:center; margin-bottom:4px;">
+                        <span style="font-size:11px; font-weight:600; color:#78350F; font-variant-numeric:tabular-nums;">${sub.tier || (si+1)}</span>
+                        <input data-f-hurdle-field="share_pct" data-sub-idx="${si}" data-fidx="${idx}" type="number" min="0" max="100" step="0.5" value="${sub.share_pct != null ? sub.share_pct : ''}"
+                               placeholder="e.g. 20"
+                               style="width:100%; padding:4px 6px; border:0.5px solid #FCD34D; border-radius:4px; font-size:11px; font-variant-numeric:tabular-nums;"/>
+                        <input data-f-hurdle-field="irr_hurdle_pct" data-sub-idx="${si}" data-fidx="${idx}" type="number" min="0" step="0.5" value="${sub.irr_hurdle_pct != null ? sub.irr_hurdle_pct : ''}"
+                               placeholder="blank = residual"
+                               style="width:100%; padding:4px 6px; border:0.5px solid #FCD34D; border-radius:4px; font-size:11px; font-variant-numeric:tabular-nums;"/>
+                        <button data-f-action="rmHurdleTier" data-sub-idx="${si}" data-fidx="${idx}"
+                                style="padding:3px 6px; background:transparent; color:#B45309; border:0.5px solid #FCD34D; border-radius:4px; cursor:pointer; font-size:11px;">×</button>
+                      </div>
+                    `).join('')
+                  ) : '<div style="font-size:10.5px; color:#92400E; font-style:italic;">No tiers yet — click <b>+ Add tier</b> to start (typical: 20% until 20% IRR / 22.5% until 30% / 20% residual).</div>' }
+                </div>`
+              : ''
+          }
+        </details>
+
         <div class="text-[10px] text-amber-700 mt-1 italic" title="What gets calculated for this fee mode">
           ${ /* Compact help text explaining what each mode computes — appears under each fee card. */
             f.mode==='fixPct'                 ? 'Fee = % × base balance × day-count factor.'
@@ -27118,6 +27629,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           : f.mode==='overFunded'             ? 'Fee = % × drawn balance × day-count factor (base implicit).'
           : f.mode==='overUnfunded'           ? 'Fee = % × undrawn balance × day-count factor (base implicit).'
           : f.mode==='overInterestComponent'  ? 'Fee = % × interest-component all-in rate × drawn balance × DCF.'
+          : f.mode==='irrHurdleTiers'         ? 'Fee = tiered % of surplus cash in the Waterfall until each IRR hurdle is met (see tiers above).'
+          : f.mode==='cashCoupon'             ? 'Fee = cash-serviced coupon on scheduled dates (starts at Start year, capped at Cap amount).'
           : ''
           }
         </div>
@@ -27128,13 +27641,46 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     document.querySelectorAll(`[data-fidx="${idx}"][data-f-field]`).forEach(el => {
       el.oninput = el.onchange = () => {
         const fld = el.dataset.fField;
-        const val = (el.type === 'number') ? (parseFloat(el.value)||0) : el.value;
+        let val;
+        if(el.type === 'checkbox')       val = !!el.checked;
+        else if(el.type === 'number')    val = (el.value === '') ? null : (parseFloat(el.value) || 0);
+        else                             val = el.value || null;
         f[fld] = val;
         // Re-render whenever a field that drives visibility of OTHER fields
         // changes — mode toggles which input is visible (Bps / % / FlatAmount /
-        // Linked Component), frequency toggles whether Payment Date appears.
-        if(fld === 'mode' || fld === 'frequency') renderFees();
+        // Linked Component / IRR-hurdle tier editor), kind reveals hurdle
+        // section for exit-fee kind, frequency toggles Payment Date.
+        if(fld === 'mode' || fld === 'kind' || fld === 'frequency') renderFees();
         recompute();
+      };
+    });
+    // IRR-hurdle tier editor — inline rows in the exit-fee card
+    document.querySelectorAll(`[data-fidx="${idx}"][data-f-hurdle-field]`).forEach(el => {
+      el.oninput = el.onchange = () => {
+        const si = +el.dataset.subIdx;
+        const fld = el.dataset.fHurdleField;
+        if(!Array.isArray(f.irrHurdleTiers)) f.irrHurdleTiers = [];
+        while(f.irrHurdleTiers.length <= si) f.irrHurdleTiers.push({ tier: f.irrHurdleTiers.length + 1, share_pct: 0, irr_hurdle_pct: null });
+        const val = (el.value === '') ? null : (parseFloat(el.value) || 0);
+        f.irrHurdleTiers[si][fld] = val;
+        recompute();
+      };
+    });
+    document.querySelectorAll(`[data-fidx="${idx}"][data-f-action="addHurdleTier"]`).forEach(el => {
+      el.onclick = () => {
+        if(!Array.isArray(f.irrHurdleTiers)) f.irrHurdleTiers = [];
+        f.irrHurdleTiers.push({ tier: f.irrHurdleTiers.length + 1, share_pct: 0, irr_hurdle_pct: null });
+        renderFees(); recompute();
+      };
+    });
+    document.querySelectorAll(`[data-fidx="${idx}"][data-f-action="rmHurdleTier"]`).forEach(el => {
+      el.onclick = () => {
+        const si = +el.dataset.subIdx;
+        if(!Array.isArray(f.irrHurdleTiers)) return;
+        f.irrHurdleTiers.splice(si, 1);
+        // Renumber
+        f.irrHurdleTiers.forEach((t, i) => t.tier = i + 1);
+        renderFees(); recompute();
       };
     });
     document.querySelectorAll(`[data-fidx="${idx}"][data-f-action="remove"]`).forEach(el => {
@@ -27509,7 +28055,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         <div style="display:grid; grid-template-columns:repeat(6, 1fr); gap:6px;">
           <div><label class="text-[9px] uppercase text-gray-500 block">KPI</label>
             <select data-cv-field="kpiMetric" data-cvidx="${idx}" style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:3px 4px; font-size:11px; background:white;">
-              ${['leverageRatio','interestCoverage','dscr','icr','currentRatio','minNetWorth','capexLimit','restrictedPayments','borrowingBase','esgScore','none'].map(v =>
+              ${[
+                // Financial maintenance (P&L / balance sheet)
+                'leverageRatio','netLeverageRatio','interestCoverage','dscr','icr','fccr','currentRatio','minNetWorth',
+                // Construction / real-estate secured (mezz)
+                'lvrConstruction','ltc','rlvr','minNetAssets','minPresales',
+                // Operational / other
+                'capexLimit','restrictedPayments','borrowingBase','esgScore','none'
+              ].map(v =>
                 `<option value="${v}" ${c.kpiMetric===v?'selected':''}>${v}</option>`).join('')}
             </select>
           </div>
@@ -27764,6 +28317,17 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.facility.holiday      = $b('b-holiday')?.value || 'none';
     B.facility.repayment    = $b('b-repayment')?.value || 'AtMaturity';
     B.facility.type         = $b('b-facility-type')?.value || 'termLoan';
+    // ─── Mezz support fields (all optional — blank means "not applicable") ───
+    B.deal.structure           = $b('b-structure')?.value || null;
+    B.deal.lenderRole          = $b('b-lender-role')?.value || null;
+    B.deal.seniorDebtProvider  = $b('b-senior-provider')?.value || null;
+    const _numOrNull = (id) => { const v = parseFloat($b(id)?.value); return isFinite(v) ? v : null; };
+    B.deal.seniorDebtLimit     = _numOrNull('b-senior-limit');
+    B.deal.asIfCompleteValue   = _numOrNull('b-aic-value');
+    B.deal.totalDevCost        = _numOrNull('b-tdc');
+    B.deal.qualifyingPresales  = _numOrNull('b-qps');
+    B.deal.nrv                 = _numOrNull('b-nrv');
+    B.deal.minNetAssets        = _numOrNull('b-min-nav');
   }
   function updateBuilderStatus(){
     const valid = B.deal.name && B.deal.settle && B.deal.maturity && B.tranches.length && B.tranches.some(t => t.face > 0);
@@ -28444,6 +29008,34 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // V3 Covenants Small-scope — project so the Dashboard can read them.
     if(Array.isArray(B.covenants) && B.covenants.length){
       inst.covenants = B.covenants.map(c => ({ ...c }));
+    }
+    // Mezz support — mirror the deal's construction / arranger reference
+    // fields onto inst so LMA.covenantKpiValue can compute LVR / LTC / RLVR
+    // for the Dashboard covenant panel too (same fields the Watchlist uses).
+    // Without this the Dashboard shows "No data" for construction covenants
+    // even though the mezz reference values exist on B.deal — a mismatch
+    // where Watchlist correctly flagged breaches but Dashboard didn't.
+    if(B.deal){
+      inst.seniorDebtLimit    = B.deal.seniorDebtLimit    != null ? +B.deal.seniorDebtLimit    : null;
+      inst.asIfCompleteValue  = B.deal.asIfCompleteValue  != null ? +B.deal.asIfCompleteValue  : null;
+      inst.totalDevCost       = B.deal.totalDevCost       != null ? +B.deal.totalDevCost       : null;
+      inst.qualifyingPresales = B.deal.qualifyingPresales != null ? +B.deal.qualifyingPresales : null;
+      inst.nrv                = B.deal.nrv                != null ? +B.deal.nrv                : null;
+      inst.minNetAssets       = B.deal.minNetAssets       != null ? +B.deal.minNetAssets       : null;
+      inst.settle             = B.deal.settle    || inst.settlementDate;
+      inst.maturity           = B.deal.maturity  || inst.maturityDate;
+    }
+    if(B.facility){
+      // Mirror the facility.commitment so covenantKpiValue's construction
+      // ratio formulas find it via deal.facility.commitment lookup path.
+      inst.facility = inst.facility || {};
+      inst.facility.commitment = +B.facility.commitment || 0;
+    }
+    // Preserve Builder tranches shape (with face + isPikToggle + interestComponents)
+    // for the PIK-coupon estimator inside covenantKpiValue. The engine-shape
+    // tranches on inst use different field names.
+    if(Array.isArray(B.tranches) && B.tranches.length){
+      inst.tranches = B.tranches;
     }
     // Multi-fund Phase 1 — project fund allocations so downstream consumers
     // (Regulatory scope filter, Portfolio + Watchlist fund pickers) can read
@@ -30333,6 +30925,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     $b('b-holiday').value       = B.facility.holiday;
     $b('b-repayment').value     = B.facility.repayment;
     $b('b-facility-type').value = B.facility.type;
+    // ─── Mezz support fields — auto-open the section if any are populated
+    // so users see them on deal load rather than needing to expand a closed
+    // details panel. Empty deals leave the section collapsed.
+    const setIf = (id, val) => { const el = $b(id); if(el) el.value = (val != null ? val : ''); };
+    setIf('b-structure',       B.deal.structure);
+    setIf('b-lender-role',     B.deal.lenderRole);
+    setIf('b-senior-provider', B.deal.seniorDebtProvider);
+    setIf('b-senior-limit',    B.deal.seniorDebtLimit);
+    setIf('b-aic-value',       B.deal.asIfCompleteValue);
+    setIf('b-tdc',             B.deal.totalDevCost);
+    setIf('b-qps',             B.deal.qualifyingPresales);
+    setIf('b-nrv',             B.deal.nrv);
+    setIf('b-min-nav',         B.deal.minNetAssets);
+    const anyMezz = !!(B.deal.structure || B.deal.lenderRole || B.deal.seniorDebtProvider ||
+                       B.deal.seniorDebtLimit || B.deal.asIfCompleteValue || B.deal.totalDevCost ||
+                       B.deal.qualifyingPresales || B.deal.nrv || B.deal.minNetAssets);
+    const section = document.getElementById('b-construction-section');
+    if(section) section.open = anyMezz;
   }
 
   // ─── Reset ──────────────────────────────────────────────────────────
@@ -30513,7 +31123,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // Wire top-level deal/facility inputs
     ['b-deal-name','b-deal-id','b-counterparty','b-le','b-currency','b-framework',
      'b-settle','b-maturity','b-commitment','b-avail-end','b-day-basis','b-holiday',
-     'b-repayment','b-facility-type'].forEach(id => {
+     'b-repayment','b-facility-type',
+     // Mezz support — new construction/arranger inputs
+     'b-structure','b-lender-role','b-senior-provider','b-senior-limit',
+     'b-aic-value','b-tdc','b-qps','b-nrv','b-min-nav'].forEach(id => {
       $b(id)?.addEventListener('input', recompute);
       $b(id)?.addEventListener('change', recompute);
     });
@@ -30674,6 +31287,701 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   document.addEventListener('DOMContentLoaded', v4Sync);
   window.addEventListener('load', v4Sync);
   v4Sync();
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Mezzanine support (2026-07):
+       (a) Waterfall of Payments engine — reusable across mezz deals
+       (b) IRR-hurdle exit fee calculator (tiered profit share)
+       (c) Barrenjoey RE Mezz sample deal creator + persistence
+
+     The engine is a pure function so it can be invoked from anywhere
+     (Dashboard widget, unit tests, saved-run simulations). The Deal
+     creator writes the sample straight into the Builder state (window.B)
+     and calls SB.saveDeal — round-trips through fetchUserDeals to prove
+     the schema fully captures the model.
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function(){
+  const PCS = window.PCS = window.PCS || {};
+
+  // ─── IRR helper — Newton's method on cash-flow series ─────────────
+  // Used to test tiered exit-fee hurdles (20% IRR → 30% IRR).
+  // cfs: array of {date, amount} with sign convention -out / +in.
+  function xnpv(rate, cfs, date0){
+    const d0 = new Date(date0).getTime();
+    let s = 0;
+    for(const c of cfs){
+      const dt = (new Date(c.date).getTime() - d0) / (365 * 86400000);
+      s += c.amount / Math.pow(1 + rate, dt);
+    }
+    return s;
+  }
+  function xirr(cfs){
+    if(!cfs || cfs.length < 2) return null;
+    const date0 = cfs[0].date;
+    let lo = -0.99, hi = 10;
+    // Bisect for a sign change
+    let flo = xnpv(lo, cfs, date0), fhi = xnpv(hi, cfs, date0);
+    if(flo * fhi > 0) return null; // no root in range
+    for(let i = 0; i < 100; i++){
+      const mid = (lo + hi) / 2;
+      const fmid = xnpv(mid, cfs, date0);
+      if(Math.abs(fmid) < 1e-6) return mid;
+      if(fmid * flo < 0){ hi = mid; fhi = fmid; }
+      else { lo = mid; flo = fmid; }
+    }
+    return (lo + hi) / 2;
+  }
+  PCS.xirr = xirr;
+
+  // ─── Waterfall of Payments engine ─────────────────────────────────
+  //
+  // computeWaterfall(config, cashIn, ctx) returns:
+  //   {
+  //     tiers: [{no, name, recipient, consumed, remainingAfter, notes}],
+  //     residual: number,      // cash left after last tier
+  //     recipients: {name: totalAmount}
+  //   }
+  //
+  // config is the deal's waterfall_config JSONB (an array of tier defs).
+  // ctx carries live balances the engine reads to work out each tier's
+  // need: senior debt outstanding, per-tranche facility principal +
+  // capitalised coupon balance, cost-overrun principal, exit-fee cash-
+  // flow series (for IRR-hurdle tiers), borrower equity contribution.
+  //
+  // Kinds recognised (each tier has kind = one of these):
+  //   'deduction'      — flat expense off the top (sales costs, GST)
+  //   'debt_service'   — pay down a specific balance until zero
+  //   'principal'      — pay down facility principal (pro rata by tranche
+  //                      face if multiple recipients)
+  //   'coupon'         — pay down capitalised coupon balance (pro rata)
+  //   'equity'         — return borrower equity capital
+  //   'irr_hurdle'     — tiered profit share until each hurdle IRR is met
+  //   'residual'       — anything left goes to this recipient
+  //
+  PCS.computeWaterfall = function computeWaterfall(config, cashIn, ctx){
+    ctx = ctx || {};
+    const tiers = (config && Array.isArray(config.tiers)) ? config.tiers : [];
+    const out = { tiers: [], residual: 0, recipients: {} };
+    let remaining = +cashIn || 0;
+
+    const bump = (name, amt) => {
+      if(!name || amt <= 0) return;
+      out.recipients[name] = (out.recipients[name] || 0) + amt;
+    };
+
+    for(const tier of tiers){
+      if(remaining <= 0) {
+        out.tiers.push({
+          no: tier.no, name: tier.name, recipient: tier.recipient,
+          consumed: 0, remainingAfter: 0,
+          notes: 'skipped — no cash left'
+        });
+        continue;
+      }
+
+      let consumed = 0;
+      let notes = '';
+
+      switch(tier.kind){
+
+        case 'deduction': {
+          const need = +tier.amount || 0;
+          consumed = Math.min(need, remaining);
+          bump(tier.recipient || 'Costs', consumed);
+          notes = 'flat deduction · ' + fmt(need) + ' required';
+          break;
+        }
+
+        case 'debt_service': {
+          // Look up outstanding balance for this tier's ref
+          let bal = 0;
+          if(tier.ref === 'senior_debt_limit')     bal = +ctx.seniorDebtOutstanding || 0;
+          else if(tier.ref === 'cost_overrun')     bal = +ctx.costOverrunOutstanding || 0;
+          else if(tier.balanceOverride != null)    bal = +tier.balanceOverride || 0;
+          consumed = Math.min(bal, remaining);
+          bump(tier.recipient || tier.ref, consumed);
+          notes = 'balance ' + fmt(bal) + ' · paid ' + fmt(consumed);
+          break;
+        }
+
+        case 'principal':
+        case 'coupon': {
+          // Distribute pro rata across tranches by facility principal (or
+          // by an explicit split[] if provided).
+          const trancheRefs = (tier.recipients || tier.split || []).length
+            ? (tier.recipients || tier.split)
+            : (ctx.tranches || []).map(t => ({
+                name: t.investorName || t.name,
+                weight: (tier.kind === 'coupon')
+                  ? (+t.capitalisedCouponBalance || 0)
+                  : (+t.principalBalance || 0)
+              }));
+          const weightSum = trancheRefs.reduce((s, x) => s + (+x.weight || 0), 0);
+          const needTotal = trancheRefs.reduce((s, x) => s + (+x.weight || 0), 0);
+          consumed = Math.min(needTotal, remaining);
+          if(weightSum > 0){
+            for(const tr of trancheRefs){
+              const share = consumed * ((+tr.weight || 0) / weightSum);
+              bump(tr.name, share);
+            }
+          }
+          notes = (tier.kind === 'principal' ? 'facility principal' : 'capitalised coupon') +
+                  ' · pro-rata across ' + trancheRefs.length + ' tranche(s) · total ' + fmt(needTotal);
+          break;
+        }
+
+        case 'equity': {
+          const need = +tier.amount || (+ctx.borrowerEquity || 0);
+          consumed = Math.min(need, remaining);
+          bump(tier.recipient || 'Borrower', consumed);
+          notes = 'borrower equity return · ' + fmt(need) + ' required';
+          break;
+        }
+
+        case 'irr_hurdle': {
+          // Iterate tier's own sub-hurdles until each IRR is achieved or
+          // remaining cash is exhausted. Each sub-tier: share_pct of surplus.
+          // Simplified: for each hurdle, consume up to hurdle_amount = ctx.irrHurdleAmounts[tier.no][subIdx].
+          // In a live scenario the hurdle amount is derived from an XIRR
+          // calc — here we accept it as a pre-computed input on ctx.
+          const subTiers = Array.isArray(tier.tiers) ? tier.tiers : [];
+          const hurdleAmounts = (ctx.irrHurdleAmounts && ctx.irrHurdleAmounts[tier.no]) || [];
+          let tierConsumed = 0;
+          const subNotes = [];
+          for(let si = 0; si < subTiers.length; si++){
+            if(remaining - tierConsumed <= 0) break;
+            const st = subTiers[si];
+            const hurdleNeed = +hurdleAmounts[si] || 0;
+            const availAfterPrior = remaining - tierConsumed;
+            const sharePct = (+st.share_pct || 0) / 100;
+            // The share_pct portion of surplus proceeds until hurdle_amount is met
+            const capacity = sharePct > 0 ? hurdleNeed / sharePct : availAfterPrior;
+            const takeFromSurplus = Math.min(capacity, availAfterPrior);
+            const goingToRecipient = takeFromSurplus * sharePct;
+            tierConsumed += takeFromSurplus;
+            bump(tier.recipient || 'Investor B', goingToRecipient);
+            subNotes.push('tier ' + (st.tier || (si+1)) + ': ' + (st.share_pct||0) + '% until ' +
+                          (st.irr_hurdle_pct != null ? st.irr_hurdle_pct + '% IRR' : 'residual') +
+                          ' → ' + fmt(goingToRecipient));
+          }
+          consumed = tierConsumed;
+          notes = subNotes.join(' · ') || 'no sub-tiers configured';
+          break;
+        }
+
+        case 'residual':
+        default: {
+          consumed = remaining;
+          bump(tier.recipient || 'Residual', consumed);
+          notes = 'residual sweep';
+        }
+      }
+
+      remaining -= consumed;
+      out.tiers.push({
+        no: tier.no, name: tier.name, recipient: tier.recipient,
+        kind: tier.kind, consumed: consumed, remainingAfter: remaining,
+        notes: notes
+      });
+    }
+
+    out.residual = remaining;
+    return out;
+  };
+
+  function fmt(n){
+    return (n == null || isNaN(n)) ? '—'
+      : '$' + Math.round(+n).toLocaleString('en-AU');
+  }
+  PCS.fmtAud = fmt;
+
+  // ─── Barrenjoey RE Mezzanine — sample deal creator ────────────────
+  //
+  // buildBarrenjoeyREMezz(overrides) returns the Builder-state object
+  // matching the anonymised term sheet (Example 1 — Real Estate Mezz).
+  // Overrides let a caller swap in real names/values before save.
+  //
+  PCS.buildBarrenjoeyREMezz = function buildBarrenjoeyREMezz(overrides){
+    overrides = overrides || {};
+    const settle = overrides.settle || '2026-04-30';         // target financial close
+    const maturity = overrides.maturity || '2028-11-30';     // 31 months from first utilisation
+    const dealCode = overrides.dealCode || ('BRJ_RE_MEZZ_' + Date.now().toString(36).toUpperCase());
+
+    // Tranche IDs — local Builder-side ids referenced by fees below.
+    const TR_A = 'TR_INVESTORA';
+    const TR_B = 'TR_INVESTORB';
+
+    return {
+      deal: {
+        name:                overrides.name || 'Barrenjoey RE Mezz — Example 1 (anonymised)',
+        dealId:              dealCode,
+        counterparty:        overrides.counterparty || 'Project Co (BorrowerCo)',
+        le:                  overrides.le          || 'Project Co Pty Ltd',
+        currency:            'AUD',
+        framework:           overrides.framework || 'IFRS',
+        settle:              settle,
+        maturity:            maturity,
+        participationPct:    100,
+        // NEW mezz-support fields
+        structure:           'construction_mezz',
+        lenderRole:          'arranger_manager',              // Barrenjoey manages; Investors A/B are the LOR
+        seniorDebtProvider:  overrides.seniorDebtProvider || 'Senior Lender (redacted)',
+        seniorDebtLimit:     overrides.seniorDebtLimit    || 130_000_000,   // illustrative — from the model
+        asIfCompleteValue:   overrides.asIfCompleteValue  || 187_500_000,   // from RLVR NRV
+        totalDevCost:        overrides.totalDevCost       || 181_000_000,   // implied by LTC 92.7% × ~$196.4m debt
+        qualifyingPresales:  overrides.qualifyingPresales || 46_500_000,    // from term sheet
+        nrv:                 overrides.nrv                || 187_500_000,
+        minNetAssets:        15_000_000                                     // guarantor min NAV
+      },
+      facility: {
+        commitment:   28_000_000,                                            // facility principal (not incl. capitalised coupon)
+        availEnd:     '2026-05-30',                                          // 30 days from close
+        dayBasis:     'ACT/365',                                             // actual/365
+        holiday:      'auFederal',
+        repayment:    'bullet',                                              // repaid from project sales at exit
+        type:         'termLoan'                                             // treat as term for accounting
+      },
+      // ─── Two tranches with ASYMMETRIC investor economics ────────
+      tranches: [
+        {
+          id:                TR_A,
+          name:              'Tranche A — Investor A',
+          currency:          'AUD',
+          face:              26_000_000,                                     // $25m project + $1m coupon service
+          drawnInitially:    0,                                              // cost-to-complete over avail period
+          isPikToggle:       true,                                           // capitalised coupon
+          dayBasis:          'ACT/365',
+          investorName:      overrides.investorAName     || 'Investor A (foreign institutional)',
+          investorDomicile:  'foreign',
+          pikCapitalisationFreq: 'monthly',                                  // 16.5% capitalised monthly in arrears
+          couponServicingPct:      6.0,                                      // 6% p.a. cash-serviced from year 2
+          couponServicingCap:      3_060_000,                                // capped at $3.06m of capitalised coupon
+          couponServicingStartYear: 2,                                       // from year two
+          interestComponents: [{
+            id: 'IC_A_COUPON',
+            name: 'Investor A capitalised coupon',
+            baseIndex: 'FIXED',
+            baseValue: 0.165,                                                // 16.5% p.a.
+            terms: [{ tenor:'1M', lookbackDays:0, observationShift:0, lockoutDays:0, dailyCompounding:false, weighted:false }],
+            spreads: [{ from:'', to:'', bps: 0, note:'Investor coupon fully in base' }],
+            ratchet: { kpi:'none', tiers:[] },
+            esgAdjustmentBps: 0,
+            floorBps: 0,
+            capBps: 0,
+            fixings: []
+          }],
+          drawdowns: [                                                       // cost-to-complete, illustrative
+            { date: '2026-04-30', amount:  8_000_000, reason: 'CoC — initial draw' },
+            { date: '2026-08-31', amount:  6_000_000, reason: 'CoC — Q3 progress' },
+            { date: '2026-12-31', amount:  6_000_000, reason: 'CoC — Q4 progress' },
+            { date: '2027-05-31', amount:  5_000_000, reason: 'CoC — pre-topping-out' }
+          ],
+          repayments: []                                                     // bullet at maturity from sale proceeds
+        },
+        {
+          id:                TR_B,
+          name:              'Tranche B — Investor B',
+          currency:          'AUD',
+          face:              2_060_000,                                      // entirely coupon-servicing allocation
+          drawnInitially:    0,
+          isPikToggle:       true,
+          dayBasis:          'ACT/365',
+          investorName:      overrides.investorBName || 'Investor B (domestic)',
+          investorDomicile:  'domestic',
+          pikCapitalisationFreq: 'monthly',
+          interestComponents: [{
+            id: 'IC_B_COUPON',
+            name: 'Investor B capitalised coupon',
+            baseIndex: 'FIXED',
+            baseValue: 0.165,
+            terms: [{ tenor:'1M', lookbackDays:0, observationShift:0, lockoutDays:0, dailyCompounding:false, weighted:false }],
+            spreads: [{ from:'', to:'', bps: 0, note:'Investor coupon fully in base' }],
+            ratchet: { kpi:'none', tiers:[] },
+            esgAdjustmentBps: 0,
+            floorBps: 0,
+            capBps: 0,
+            fixings: []
+          }],
+          drawdowns: [
+            { date: '2026-04-30', amount:  2_060_000, reason: 'Full allocation at close for Investor A coupon servicing' }
+          ],
+          repayments: []
+        }
+      ],
+
+      // ─── Fees — per-tranche attribution + IRR-hurdle exit fees ──
+      fees: [
+        {
+          id: 'FEE_UPFRONT_A',
+          label: 'Upfront Fee — Investor A',
+          kind: 'arrangement',
+          mode: 'fixPct',
+          pct: 0.02,                                                          // 2% of Facility Limit
+          bps: 0, flatAmount: 0,
+          base: 'commitment', frequency: 'oneOff',
+          paymentDate: settle,
+          ifrs: 'ASC310-20-pointInTime',
+          trancheRef: TR_A,                                                   // Investor A only
+          recipient: overrides.investorAName || 'Investor A'
+        },
+        {
+          id: 'FEE_BRJ_ORIG',
+          label: 'Barrenjoey origination fee',
+          kind: 'origination',
+          mode: 'fixPct',
+          pct: 0.0125,                                                        // 1.25% of Facility Limit
+          bps: 0, flatAmount: 0,
+          base: 'commitment', frequency: 'oneOff',
+          paymentDate: settle,
+          ifrs: 'ASC310-20-EIR',
+          recipient: 'Barrenjoey'
+        },
+        {
+          id: 'FEE_BRJ_MGMT',
+          label: 'Barrenjoey base management fee',
+          kind: 'management',
+          mode: 'floatBps',
+          pct: 0, bps: 50, flatAmount: 0,                                     // 0.50% p.a. on drawn funds
+          base: 'funded', frequency: 'annual',
+          paymentDate: null,
+          ifrs: 'ASC606-overTime',
+          recipient: 'Barrenjoey'
+        },
+        {
+          id: 'FEE_BRJ_PERF',
+          label: 'Barrenjoey performance fee',
+          kind: 'performance',
+          mode: 'irrHurdleTiers',                                             // 20% over 16% IRR
+          pct: 0.20, bps: 0, flatAmount: 0,
+          base: 'commitment', frequency: 'oneOff',
+          paymentDate: maturity,
+          ifrs: 'ASC606-overTime',
+          irrHurdlePct: 16.0,
+          recipient: 'Barrenjoey'
+        },
+        {
+          id: 'FEE_EXIT_B',
+          label: 'Investor B tiered exit fees',
+          kind: 'exitFeeIrrHurdle',
+          mode: 'irrHurdleTiers',
+          pct: 0, bps: 0, flatAmount: 0,
+          base: 'commitment', frequency: 'oneOff',
+          paymentDate: maturity,
+          ifrs: 'ASC470-generic',
+          trancheRef: TR_B,
+          recipient: overrides.investorBName || 'Investor B',
+          // The three-tier profit share verbatim from the term sheet:
+          irrHurdleTiers: [
+            { tier:1, share_pct:20.0,  irr_hurdle_pct: 20.0, note:'20% of surplus until Investor B has received 20% IRR' },
+            { tier:2, share_pct:22.5,  irr_hurdle_pct: 30.0, note:'22.5% of surplus until Investor B has received 30% IRR' },
+            { tier:3, share_pct:20.0,  irr_hurdle_pct: null, note:'20% of surplus thereafter, paid as Exit Fee to Borrower' }
+          ]
+        }
+      ],
+
+      // ─── Covenants — mezz-specific construction KPIs + minimums ──
+      covenants: [
+        { id:'CV_LVR',   name:'LVR (Construction)',        category:'maintenance', kpiMetric:'lvrConstruction', direction:'max', threshold:89.4, unit:'%', testFrequency:'monthly',    consequenceOnBreach:'notice',              notes:'Senior + Facility Limit ÷ as-if-complete value (net of GST + selling costs)' },
+        { id:'CV_LTC',   name:'Loan-to-Cost',              category:'maintenance', kpiMetric:'ltc',             direction:'max', threshold:92.7, unit:'%', testFrequency:'monthly',    consequenceOnBreach:'notice',              notes:'Senior + Facility Limit ÷ Total Development Cost (incl. senior finance costs)' },
+        { id:'CV_RLVR',  name:'Residual LVR',              category:'maintenance', kpiMetric:'rlvr',            direction:'max', threshold:86.0, unit:'%', testFrequency:'quarterly',  consequenceOnBreach:'notice',              notes:'(Aggregate Debt − QPS) ÷ (NRV − QPS), where NRV ≥ $187.5m' },
+        { id:'CV_MNA',   name:'Guarantor minimum net assets', category:'maintenance', kpiMetric:'minNetAssets',    direction:'min', threshold:15_000_000, unit:'$', testFrequency:'semiAnnual', consequenceOnBreach:'notice',           notes:'Qualifying assets = cash + liquid Australian real estate (independently valued)' },
+        { id:'CV_PRES',  name:'Minimum qualifying presales', category:'incurrence', kpiMetric:'minPresales',     direction:'min', threshold:46_500_000, unit:'$', testFrequency:'event',      consequenceOnBreach:'sicrTrigger',        notes:'Gross qualifying presales required; aligned to senior facility drawing conditions' }
+      ],
+
+      // ─── Waterfall of Payments — 7-tier cash distribution ────────
+      waterfall: {
+        version: 1,
+        tiers: [
+          { no:1, name:'Sales costs, incentives, GST',      recipient:'Costs',                            kind:'deduction' },
+          { no:2, name:'Senior debt (interest / fees / principal)', recipient:'Senior Lender',            kind:'debt_service', ref:'senior_debt_limit' },
+          { no:3, name:'Cost Overrun Funding (incl. default interest)', recipient:'Cost Overrun Lender', kind:'debt_service', ref:'cost_overrun' },
+          { no:4, name:'Facility principal — pro rata Investor A + B', recipient:'Investors A & B (pro rata)', kind:'principal' },
+          { no:5, name:'Capitalised coupon — pro rata Investor A + B', recipient:'Investors A & B (pro rata)', kind:'coupon' },
+          { no:6, name:'Borrower equity return',            recipient:'Borrower',                          kind:'equity' },
+          { no:7, name:'Tiered exit fees',                  recipient:overrides.investorBName || 'Investor B', kind:'irr_hurdle',
+            tiers: [
+              { tier:1, share_pct:20.0,  irr_hurdle_pct: 20.0 },
+              { tier:2, share_pct:22.5,  irr_hurdle_pct: 30.0 },
+              { tier:3, share_pct:20.0,  irr_hurdle_pct: null }
+            ]
+          }
+        ]
+      }
+    };
+  };
+
+  // ─── Waterfall modal wiring ──────────────────────────────────────
+  // Populate deal picker + per-tranche + hurdle inputs, then run the
+  // engine against user-typed balances.
+
+  function _wfDealsAvailable(){
+    // Both PRESETS (DB-saved deals) and the active B if it has a waterfall
+    const deals = [];
+    if(window.B && window.B.waterfall){
+      deals.push({ key:'__ACTIVE__', label:'Active deal · ' + (window.B.deal?.name || 'unsaved'), source:'B' });
+    }
+    for(const p of (window.PRESETS || [])){
+      const def = (typeof p.build === 'function') ? p.build() : p;
+      if(def && def.waterfall){
+        deals.push({ key: p.key || p.label, label: p.label || p.key, source:'preset', def });
+      }
+    }
+    return deals;
+  }
+
+  function _wfResolveDeal(){
+    const picker = document.getElementById('wf-deal-picker');
+    const sel = picker ? picker.value : '__ACTIVE__';
+    if(sel === '__ACTIVE__' || !sel) return { name:(window.B?.deal?.name||'Active'), def: window.B };
+    const preset = (window.PRESETS || []).find(p => (p.key || p.label) === sel);
+    if(preset){
+      const def = (typeof preset.build === 'function') ? preset.build() : preset;
+      return { name: preset.label, def };
+    }
+    return { name:'Active', def: window.B };
+  }
+
+  function _wfRenderInputs(){
+    const { def } = _wfResolveDeal();
+    if(!def) return;
+    const tranches = Array.isArray(def.tranches) ? def.tranches : [];
+    const tranchesHost = document.getElementById('wf-tranche-inputs');
+    if(tranchesHost){
+      tranchesHost.innerHTML =
+        '<div style="font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Per-tranche balances</div>' +
+        (tranches.length ? tranches.map((t, i) => (
+          '<label style="display:block; font-size:11px; color:var(--n-600); margin-bottom:3px;">' +
+            (t.investorName || t.name || ('Tranche ' + (i+1))) + ' · principal + coupon' +
+          '</label>' +
+          '<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">' +
+            '<input class="wf-tr-principal" data-idx="' + i + '" type="number" min="0" step="100000" placeholder="principal · $" value="' + (t.face || 0) + '"' +
+              ' style="padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; font-variant-numeric:tabular-nums;"/>' +
+            '<input class="wf-tr-coupon" data-idx="' + i + '" type="number" min="0" step="100000" placeholder="capitalised coupon · $" value="' + Math.round((t.face || 0) * 0.20) + '"' +
+              ' style="padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; font-variant-numeric:tabular-nums;"/>' +
+          '</div>'
+        )).join('') : '<div style="font-size:11px; color:var(--n-500); font-style:italic;">Deal has no tranches configured — principal + coupon tiers will be skipped.</div>');
+    }
+    // IRR-hurdle inputs: read from tier 7 (or any irr_hurdle tier) in waterfall
+    const wf = def.waterfall;
+    const hurdleTier = wf && wf.tiers ? wf.tiers.find(t => t.kind === 'irr_hurdle') : null;
+    const hurdleHost = document.getElementById('wf-hurdle-inputs');
+    if(hurdleHost && hurdleTier && Array.isArray(hurdleTier.tiers) && hurdleTier.tiers.length){
+      hurdleHost.innerHTML =
+        '<div style="font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">IRR-hurdle amounts (tier ' + hurdleTier.no + ')</div>' +
+        '<div style="font-size:10.5px; color:var(--n-500); margin-bottom:6px; line-height:1.4;">Cash required from surplus to satisfy each IRR hurdle (leave blank for open-ended tiers).</div>' +
+        hurdleTier.tiers.map((sub, si) => (
+          '<label style="display:block; font-size:11px; color:var(--n-600); margin-bottom:3px;">Sub-tier ' + (sub.tier || (si+1)) +
+            ' · ' + (sub.share_pct || 0) + '% share · ' +
+            (sub.irr_hurdle_pct != null ? sub.irr_hurdle_pct + '% IRR hurdle' : 'residual') + '</label>' +
+          '<input class="wf-hurdle-amt" data-idx="' + si + '" type="number" min="0" step="500000" placeholder="hurdle need · $" ' +
+            (sub.irr_hurdle_pct == null ? 'disabled value=""' : '') +
+            ' style="width:100%; padding:6px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:8px; font-variant-numeric:tabular-nums;' +
+            (sub.irr_hurdle_pct == null ? ' opacity:0.5;' : '') + '"/>'
+        )).join('') +
+        '<div style="font-size:10px; color:var(--n-500); font-style:italic;">Tip: pre-compute these from your target IRR × Investor B\'s outstanding balance.</div>';
+    } else if(hurdleHost) {
+      hurdleHost.innerHTML = '';
+    }
+  }
+
+  window.openWaterfallModal = function openWaterfallModal(){
+    const el = document.getElementById('waterfall-modal');
+    if(!el) return;
+    // Populate deal picker
+    const picker = document.getElementById('wf-deal-picker');
+    if(picker){
+      picker.innerHTML = '';
+      const deals = _wfDealsAvailable();
+      if(!deals.length){
+        picker.innerHTML = '<option value="">— no deals with a waterfall config —</option>';
+      } else {
+        deals.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.key; opt.textContent = d.label;
+          picker.appendChild(opt);
+        });
+      }
+      picker.onchange = _wfRenderInputs;
+    }
+    _wfRenderInputs();
+    el.style.display = 'flex';
+  };
+  window.closeWaterfallModal = function closeWaterfallModal(){
+    const el = document.getElementById('waterfall-modal');
+    if(el) el.style.display = 'none';
+  };
+  window.resetWaterfallInputs = function resetWaterfallInputs(){
+    ['wf-sale-proceeds','wf-costs','wf-senior','wf-overrun','wf-equity'].forEach(id => {
+      const el = document.getElementById(id); if(el) el.value = '';
+    });
+    document.querySelectorAll('#waterfall-modal input.wf-tr-principal, #waterfall-modal input.wf-tr-coupon, #waterfall-modal input.wf-hurdle-amt').forEach(el => el.value = '');
+    document.getElementById('wf-results').innerHTML =
+      '<div class="v4-empty" style="padding:44px 20px;">' +
+        '<div class="v4-empty-icon"><i class="ti ti-arrow-waterfall"></i></div>' +
+        '<div class="v4-empty-title">No distribution yet</div>' +
+        '<div class="v4-empty-body">Enter balances and click <b>Run distribution</b>.</div>' +
+      '</div>';
+    document.getElementById('wf-summary').textContent = '—';
+  };
+
+  window.runWaterfall = function runWaterfall(){
+    const { name, def } = _wfResolveDeal();
+    if(!def || !def.waterfall){
+      if(typeof toast === 'function') toast('No waterfall config on this deal', 4000, {kind:'warning', id:'wf:no-config'});
+      return;
+    }
+    const num = (id) => { const v = parseFloat(document.getElementById(id)?.value); return isFinite(v) ? v : 0; };
+    const saleProceeds = num('wf-sale-proceeds');
+    if(saleProceeds <= 0){
+      if(typeof toast === 'function') toast('Enter a positive sale-proceeds amount', 3000, {kind:'warning', id:'wf:no-proceeds'});
+      return;
+    }
+    // Assemble context from the input pane
+    const trancheInputs = document.querySelectorAll('#wf-tranche-inputs input.wf-tr-principal');
+    const couponInputs  = document.querySelectorAll('#wf-tranche-inputs input.wf-tr-coupon');
+    const trancheCtx = Array.from(trancheInputs).map((el, i) => ({
+      name: (def.tranches && def.tranches[i] && (def.tranches[i].investorName || def.tranches[i].name)) || ('Tranche ' + (i+1)),
+      investorName: def.tranches && def.tranches[i] && def.tranches[i].investorName,
+      principalBalance: parseFloat(el.value) || 0,
+      capitalisedCouponBalance: parseFloat(couponInputs[i]?.value) || 0
+    }));
+    // Override tier 1 amount with the user's entered costs
+    const cfg = JSON.parse(JSON.stringify(def.waterfall));   // clone so we don't mutate saved config
+    const tier1 = (cfg.tiers || []).find(t => t.no === 1);
+    if(tier1) tier1.amount = num('wf-costs');
+    const equityTier = (cfg.tiers || []).find(t => t.kind === 'equity');
+    if(equityTier) equityTier.amount = num('wf-equity');
+
+    // Hurdle amounts
+    const hurdleTier = (cfg.tiers || []).find(t => t.kind === 'irr_hurdle');
+    const irrHurdleAmounts = {};
+    if(hurdleTier){
+      const hurdleEls = document.querySelectorAll('#wf-hurdle-inputs input.wf-hurdle-amt');
+      irrHurdleAmounts[hurdleTier.no] = Array.from(hurdleEls).map(el => parseFloat(el.value) || 0);
+    }
+
+    const ctx = {
+      seniorDebtOutstanding: num('wf-senior'),
+      costOverrunOutstanding: num('wf-overrun'),
+      tranches: trancheCtx,
+      borrowerEquity: num('wf-equity'),
+      irrHurdleAmounts
+    };
+
+    const result = PCS.computeWaterfall(cfg, saleProceeds, ctx);
+    _wfRenderResult(name, saleProceeds, result);
+  };
+
+  function _wfRenderResult(dealName, saleProceeds, result){
+    const host = document.getElementById('wf-results');
+    if(!host) return;
+    const fmt = PCS.fmtAud;
+    // Per-tier cascade table
+    const rowsHtml = result.tiers.map(t => {
+      const kindBadge = t.kind ? (
+        '<span style="display:inline-block; padding:1px 6px; border-radius:9px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green-700,#15803D); font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:0.3px;">' + t.kind + '</span>'
+      ) : '';
+      return (
+        '<tr style="border-top:0.5px solid var(--n-100);">' +
+          '<td style="padding:8px 10px; font-weight:600; color:var(--n-900); font-variant-numeric:tabular-nums;">' + t.no + '</td>' +
+          '<td style="padding:8px 10px; color:var(--n-800);">' + escapeHTML(t.name) + '<div style="font-size:10px; color:var(--n-500); margin-top:2px;">' + escapeHTML(t.notes || '') + '</div></td>' +
+          '<td style="padding:8px 10px; color:var(--n-700);">' + escapeHTML(t.recipient || '—') + '<div style="margin-top:2px;">' + kindBadge + '</div></td>' +
+          '<td style="padding:8px 10px; text-align:right; color:' + (t.consumed > 0 ? 'var(--fis-green-700,#15803D)' : 'var(--n-400)') + '; font-weight:600; font-variant-numeric:tabular-nums;">' + fmt(t.consumed) + '</td>' +
+          '<td style="padding:8px 10px; text-align:right; color:var(--n-500); font-variant-numeric:tabular-nums;">' + fmt(t.remainingAfter) + '</td>' +
+        '</tr>'
+      );
+    }).join('');
+
+    const recipRows = Object.entries(result.recipients)
+      .sort((a,b) => b[1] - a[1])
+      .map(([name, amt]) => (
+        '<tr style="border-top:0.5px solid var(--n-100);">' +
+          '<td style="padding:8px 10px; color:var(--n-800);">' + escapeHTML(name) + '</td>' +
+          '<td style="padding:8px 10px; text-align:right; font-weight:600; color:var(--fis-green-700,#15803D); font-variant-numeric:tabular-nums;">' + fmt(amt) + '</td>' +
+          '<td style="padding:8px 10px; text-align:right; color:var(--n-500); font-variant-numeric:tabular-nums;">' + (saleProceeds > 0 ? ((amt/saleProceeds)*100).toFixed(1) : '0.0') + '%</td>' +
+        '</tr>'
+      )).join('');
+
+    host.innerHTML =
+      '<div style="margin-bottom:14px;">' +
+        '<div style="font-size:10.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px;">Deal</div>' +
+        '<div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">' + escapeHTML(dealName) + '</div>' +
+        '<div style="font-size:11.5px; color:var(--n-600); margin-top:2px;">Sale proceeds <b style="font-variant-numeric:tabular-nums; color:var(--n-900);">' + fmt(saleProceeds) + '</b> cascaded through ' + result.tiers.length + ' tiers · residual <b style="font-variant-numeric:tabular-nums; color:' + (result.residual > 0 ? 'var(--fis-green-700,#15803D)' : 'var(--n-500)') + ';">' + fmt(result.residual) + '</b></div>' +
+      '</div>' +
+
+      '<div style="margin-bottom:16px;">' +
+        '<div style="font-size:10.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px; margin-bottom:6px;">Cascade — tier by tier</div>' +
+        '<div style="border:0.5px solid var(--n-200); border-radius:8px; overflow:hidden; background:var(--n-0);">' +
+          '<table style="width:100%; border-collapse:collapse; font-size:11px; font-variant-numeric:tabular-nums;">' +
+            '<thead style="background:var(--n-50,#FAFAFA);">' +
+              '<tr>' +
+                '<th style="padding:8px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Tier</th>' +
+                '<th style="padding:8px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Rule</th>' +
+                '<th style="padding:8px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Recipient / kind</th>' +
+                '<th style="padding:8px 10px; text-align:right; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Consumed</th>' +
+                '<th style="padding:8px 10px; text-align:right; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Remaining</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' + rowsHtml + '</tbody>' +
+          '</table>' +
+        '</div>' +
+      '</div>' +
+
+      '<div>' +
+        '<div style="font-size:10.5px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.4px; margin-bottom:6px;">Per-recipient totals</div>' +
+        '<div style="border:0.5px solid var(--n-200); border-radius:8px; overflow:hidden; background:var(--n-0);">' +
+          '<table style="width:100%; border-collapse:collapse; font-size:11px; font-variant-numeric:tabular-nums;">' +
+            '<thead style="background:var(--n-50,#FAFAFA);">' +
+              '<tr>' +
+                '<th style="padding:8px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Recipient</th>' +
+                '<th style="padding:8px 10px; text-align:right; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Total</th>' +
+                '<th style="padding:8px 10px; text-align:right; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">% of proceeds</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' + (recipRows || '<tr><td colspan="3" style="padding:12px; text-align:center; color:var(--n-500);">No recipients received any cash</td></tr>') + '</tbody>' +
+          '</table>' +
+        '</div>' +
+      '</div>';
+
+    // Summary chip in footer
+    document.getElementById('wf-summary').textContent =
+      'Distributed ' + fmt(saleProceeds - result.residual) + ' · ' + result.tiers.length + ' tiers · ' + Object.keys(result.recipients).length + ' recipients';
+  }
+
+  // Simple HTML escape used by the render
+  function escapeHTML(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ─── One-shot creator: build + save + verify round-trip ──────────
+  PCS.createBarrenjoeyREMezzInDB = async function createBarrenjoeyREMezzInDB(overrides){
+    if(!window.SB || !window.SB.connected){
+      throw new Error('Supabase not connected — reload the page');
+    }
+    // Save into the live Builder state so downstream fetchUserDeals →
+    // hydrate → render use the same object shape as a hand-built deal.
+    const B = window.B = window.B || {};
+    Object.assign(B, PCS.buildBarrenjoeyREMezz(overrides));
+    const res = await window.SB.saveDeal(B);
+    if(!res.ok){
+      console.error('[PCS] createBarrenjoeyREMezzInDB failed:', res.reason);
+      if(typeof toast === 'function'){
+        toast('RE Mezz save failed: ' + res.reason, 8000, { kind:'error', id:'brj:save' });
+      }
+      throw new Error(res.reason);
+    }
+    console.log('[PCS] RE Mezz saved:', res);
+    if(typeof toast === 'function'){
+      toast('RE Mezz saved to DB · ' + (res.counts?.tranches || 2) + ' tranches, ' +
+            (res.counts?.fees || 5) + ' fees, ' + (res.counts?.covenants || 5) + ' covenants',
+            5000, { kind:'success', id:'brj:save', detail: 'deal_code=' + B.deal.dealId });
+    }
+    return res;
+  };
 })();
 </script>
 </body>

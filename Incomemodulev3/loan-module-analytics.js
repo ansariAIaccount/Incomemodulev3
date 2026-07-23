@@ -706,29 +706,58 @@
                     ' vs threshold ' + latest.thresholdAtBreach +
                     ' · consequences: ' + consequences
           });
-        } else if(c.lastReportedValue != null && c.threshold != null){
-          // Proximity check — only meaningful when we have a fresh reading
-          const val = +c.lastReportedValue, thr = +c.threshold;
-          if(thr !== 0){
-            const dir = (c.direction || 'gte').toLowerCase();
-            // Headroom as fraction of threshold. For >= covenants (min ratio),
-            // headroom = (val - thr) / thr. For <= covenants (max ratio), it's
-            // flipped: (thr - val) / thr.
-            let headroom = null;
-            if(dir === 'gte' || dir === 'min' || dir === '>=' || dir === '>'){
-              headroom = (val - thr) / Math.abs(thr);
-            } else if(dir === 'lte' || dir === 'max' || dir === '<=' || dir === '<'){
-              headroom = (thr - val) / Math.abs(thr);
-            }
-            if(headroom != null && headroom < proximityPct && headroom >= 0){
-              signals.push({
-                type: 'covenant_proximity',
-                severity: 'warning',
-                label: 'Covenant proximity: ' + (c.name || c.kpiMetric),
-                detail: 'Headroom ' + (headroom * 100).toFixed(1) + '% (value ' + val +
-                        ' vs threshold ' + thr + ')'
-              });
-            }
+          continue;
+        }
+
+        // ── Value resolution — three tiers ───────────────────────
+        // 1. c.lastReportedValue — ops-updated value from the QS or
+        //    financial statement (works for any KPI).
+        // 2. covenantKpiValue(kpi, kpis, deal, c) — mechanically
+        //    derived value for construction ratios (LVR / LTC / RLVR)
+        //    from the deal's own reference fields. This is why the
+        //    Watchlist can flag a construction-covenant breach the
+        //    moment the deal is saved, before any manual reporting.
+        // 3. Fall back to null — nothing to test.
+        let val = (c.lastReportedValue != null) ? +c.lastReportedValue : null;
+        if(val == null && typeof covenantKpiValue === 'function'){
+          const derived = covenantKpiValue(c.kpiMetric, inst.financialKpis || null, inst, c);
+          if(derived != null) val = +derived;
+        }
+        if(val == null || c.threshold == null) continue;
+
+        const thr = +c.threshold;
+        const dir = (c.direction || 'gte').toLowerCase();
+        const isMax = (dir === 'lte' || dir === 'max' || dir === '<=' || dir === '<');
+        const isMin = (dir === 'gte' || dir === 'min' || dir === '>=' || dir === '>');
+        const breached = isMax ? val > thr : (isMin ? val < thr : false);
+
+        if(breached){
+          // Live breach detected from a derived / reported value — no
+          // active breachLog entry yet (ops hasn't confirmed), but the
+          // math says the deal is over the line. Flag as critical so
+          // the risk team catches it before month-end reporting.
+          signals.push({
+            type: 'covenant_breach',
+            severity: 'critical',
+            label: 'Covenant breached: ' + (c.name || c.kpiMetric || 'unnamed'),
+            detail: 'Live value ' + (typeof val === 'number' ? val.toFixed(2) : val) +
+                    ' ' + (isMax ? '>' : '<') + ' threshold ' + thr +
+                    ' · derived from deal fields, awaiting ops confirmation'
+          });
+        } else if(thr !== 0){
+          // Proximity check — headroom as fraction of threshold.
+          const headroom = isMin ? (val - thr) / Math.abs(thr)
+                        :  isMax ? (thr - val) / Math.abs(thr)
+                        :  null;
+          if(headroom != null && headroom < proximityPct && headroom >= 0){
+            signals.push({
+              type: 'covenant_proximity',
+              severity: 'warning',
+              label: 'Covenant proximity: ' + (c.name || c.kpiMetric),
+              detail: 'Headroom ' + (headroom * 100).toFixed(1) + '% (value ' +
+                      (typeof val === 'number' ? val.toFixed(2) : val) +
+                      ' vs threshold ' + thr + ')'
+            });
           }
         }
       }
@@ -1529,22 +1558,108 @@
   // Used by the client to auto-update covenant.lastReportedValue after a
   // financials import. Returns null when the covenant KPI isn't derivable
   // from financials (e.g. 'esgScore', 'borrowingBase', 'custom').
-  function covenantKpiValue(kpiMetric, kpis){
-    if(!kpis) return null;
+  // ─── Covenant KPI resolver ────────────────────────────────────
+  // Now accepts a third `deal` argument so construction-mezz KPIs
+  // (LVR / LTC / RLVR / min-NAV / min-presales) can be computed
+  // mechanically from the deal's own fields — Watchlist was silently
+  // treating them as clear because the map didn't know how to
+  // evaluate them.
+  //
+  // For P&L / balance-sheet KPIs, this reads from the `kpis` object
+  // produced by the Financials import (DSCR, ICR, leverage, etc.).
+  // For construction ratios it reads senior_debt_limit + facility
+  // commitment + as_if_complete_value + total_dev_cost + QPS + NRV.
+  // For min-NAV / min-presales, it reads the covenant's own
+  // last_reported_value (updated by ops each month from the QS or
+  // the guarantor's financial statements).
+  function covenantKpiValue(kpiMetric, kpis, deal, covenant){
     const m = String(kpiMetric || '').toLowerCase().replace(/[_\s-]/g, '');
-    const map = {
-      dscr:              kpis.dscr,
-      interestcoverage:  kpis.interest_coverage,
-      icr:               kpis.interest_coverage,
-      leverage:          kpis.leverage_ratio,
-      leverageratio:     kpis.leverage_ratio,
-      netleverage:       kpis.net_leverage_ratio,
-      netleverageratio:  kpis.net_leverage_ratio,
-      currentratio:      kpis.current_ratio,
-      debttoequity:      kpis.debt_to_equity,
-      quickratio:        kpis.quick_ratio
+
+    // P&L / balance-sheet KPIs — from Financials import
+    const finMap = {
+      dscr:              kpis && kpis.dscr,
+      interestcoverage:  kpis && kpis.interest_coverage,
+      icr:               kpis && kpis.interest_coverage,
+      fccr:              kpis && (kpis.fccr || kpis.fixed_charge_coverage),
+      leverage:          kpis && kpis.leverage_ratio,
+      leverageratio:     kpis && kpis.leverage_ratio,
+      netleverage:       kpis && kpis.net_leverage_ratio,
+      netleverageratio:  kpis && kpis.net_leverage_ratio,
+      currentratio:      kpis && kpis.current_ratio,
+      debttoequity:      kpis && kpis.debt_to_equity,
+      quickratio:        kpis && kpis.quick_ratio,
+      minnetworth:       kpis && (kpis.net_worth || kpis.equity)
     };
-    return m in map ? map[m] : null;
+    if(m in finMap) return finMap[m];
+
+    // Construction-mezz KPIs — derived from the deal's own reference
+    // fields set on Deal Setup → Construction / arranger — mezz support.
+    // Facility limit = principal commitment + capitalised coupon accrued
+    // to date. For a rough breach check at any point we use the total
+    // commitment; a more precise per-date value could compute the
+    // outstanding balance from the schedule. Barrenjoey's threshold
+    // formula uses the FACILITY LIMIT (investor commitment + coupon),
+    // so we approximate by summing commitment + est. peak capitalised
+    // coupon if available; otherwise just commitment.
+    if(deal){
+      const senior = +deal.seniorDebtLimit    || +deal.senior_debt_limit    || 0;
+      const facilityCommitment =
+        (deal.facility && +deal.facility.commitment) ||
+        +deal.commitment || 0;
+      // Term-sheet "Facility Limit" for mezz construction deals =
+      // investor commitment + capitalised coupon at exit. If the caller
+      // stored an explicit estimate use it; otherwise compute one from
+      // the PIK tranches so LVR / LTC / RLVR reflect the real max
+      // exposure that Barrenjoey's covenants test against.
+      //
+      // Estimator: sum over PIK-toggled tranches of
+      //   face_value × baseValue (coupon %) × years_to_maturity
+      // Simple compound approximation — good to a few percent for
+      // demo purposes. Precise number requires running the schedule.
+      let estCoupon = +deal.estCapitalisedCoupon || +deal.facilityLimitCoupon || 0;
+      if(estCoupon === 0 && Array.isArray(deal.tranches) && deal.settle && deal.maturity){
+        const years = Math.max(0, (new Date(deal.maturity) - new Date(deal.settle)) / (365.25 * 86400000));
+        for(const t of deal.tranches){
+          if(!t.isPikToggle) continue;
+          const face = +t.face || 0;
+          const ic = (t.interestComponents || [])[0];
+          const rate = ic ? (+ic.baseValue || 0) : 0;
+          if(face > 0 && rate > 0 && years > 0){
+            estCoupon += face * rate * years;
+          }
+        }
+      }
+      const facilityLimit = facilityCommitment + estCoupon;
+      const aic   = +deal.asIfCompleteValue  || +deal.as_if_complete_value || 0;
+      const tdc   = +deal.totalDevCost       || +deal.total_development_cost || 0;
+      const qps   = +deal.qualifyingPresales || +deal.qualifying_presales || 0;
+      const nrv   = +deal.nrv                || +deal.net_realisation_value || 0;
+
+      if(m === 'lvrconstruction' || m === 'lvr'){
+        if(aic > 0) return ((senior + facilityLimit) / aic) * 100;   // return as %
+        return null;
+      }
+      if(m === 'ltc'){
+        if(tdc > 0) return ((senior + facilityLimit) / tdc) * 100;
+        return null;
+      }
+      if(m === 'rlvr' || m === 'residuallvr'){
+        const denom = (nrv - qps);
+        if(denom > 0) return ((senior + facilityLimit - qps) / denom) * 100;
+        return null;
+      }
+    }
+
+    // KPIs backed by a manually-reported value on the covenant itself
+    // (updated by ops each test cycle). Watchlist can still evaluate
+    // breach when the ops team has populated `lastReportedValue`.
+    if(m === 'minnetassets' || m === 'minpresales'){
+      if(covenant && covenant.lastReportedValue != null) return +covenant.lastReportedValue;
+      if(covenant && covenant.last_reported_value != null) return +covenant.last_reported_value;
+      return null;
+    }
+
+    return null;
   }
 
   // ─────────────────────────────────────────────────────────────────────────

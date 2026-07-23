@@ -781,7 +781,217 @@ const FAQ_KB = [
   ],
   deal:'libra2',
   section:'Stage 2 + Evidence Pack',
-  followUps:['accounting-owns','ecl-formula','sicr','dpd-trigger'] }
+  followUps:['accounting-owns','ecl-formula','sicr','dpd-trigger'] },
+
+// ═══════════════════════════════════════════════════════════════
+// V4 additions (2026-07) — new features shipped since the original
+// KB was written. AI extraction (Credit Agreements / Borrower
+// Financials / Loan Agent Notices), Watchlist, Portfolio analytics,
+// Regulatory, Manage funds, Loan status preset on Stage 2, interest
+// floor/ceiling, ⌘K command palette, fetch watchdog, toast stack.
+// ═══════════════════════════════════════════════════════════════
+
+{ id:'v4-navigation',
+  q:'How do I navigate the app? Where do I find features?',
+  tags:['navigation','sidebar','menu','tabs','navigate','find','feature','v4','ui','layout'],
+  answer:'The v4 UI uses a fixed left sidebar with two sections. <strong>Pipeline</strong> is the linear flow every deal moves through: <em>Loan builder</em> → <em>Cashflow</em> → <em>Accounting</em> → <em>Dashboard</em>. <strong>Tools</strong> is the cross-cutting workflows: <em>Notices</em> (loan-agent inbox), <em>Watchlist</em> (early-warning), <em>Portfolio</em> (analytics), <em>Regulatory</em> (fund-scoped reports), <em>Financials</em> (borrower financials AI extract), <em>Credit agreements</em> (CA library), <em>Manage funds</em>. The top breadcrumb bar shows the active deal picker; the loan-status chip (Performing / Watchlist / Non-performing) mirrors the Stage 2 preset. Press <strong>⌘K</strong> anywhere to open the command palette — fuzzy search across every deal and 16 curated actions.',
+  demoSteps:[
+    'Look at the left sidebar — Pipeline (4 items) + Tools (7 items).',
+    'Click any Pipeline item to open that stage.',
+    'Click any Tools item to open the corresponding modal.',
+    'Press ⌘K (Ctrl+K on Windows) → type "run" to see Run Accounting; ↵ to activate.'
+  ],
+  deal:null,
+  section:'Sidebar + ⌘K',
+  followUps:['v4-cmdk','v4-loan-status','v4-tools'] },
+
+{ id:'v4-cmdk',
+  q:'What can the ⌘K command palette do?',
+  tags:['cmdk','command','palette','shortcut','keyboard','search','v4','cmd-k','ctrl-k'],
+  answer:'⌘K opens a full-screen fuzzy search overlay over the whole app. It searches across (a) every deal in your library — pick one to make it active — and (b) 16 curated actions like <em>Run accounting</em>, <em>Sync cashflow</em>, <em>Post JE</em>, <em>Open watchlist</em>, <em>Import financials</em>, <em>Import credit agreement</em>, <em>Open notices</em>, <em>Open portfolio</em>, <em>Go to Dashboard</em>. Arrow keys navigate, ↵ activates, Esc closes. Useful for jumping between deals without leaving the current stage.',
+  demoSteps:[
+    'Press ⌘K.',
+    'Type a partial deal name (e.g. "cypress") — matching deals appear.',
+    'Type an action verb (e.g. "run") — Run Accounting appears.',
+    'Press ↵ to activate, or ↑/↓ to pick a different match.'
+  ],
+  deal:null,
+  section:'⌘K palette',
+  followUps:['v4-navigation'] },
+
+{ id:'v4-loan-status',
+  q:'What is the Loan status dropdown on Stage 2? How does it work?',
+  tags:['loan status','performing','non-performing','watchlist','preset','stage 2','dropdown','sicr'],
+  answer:'The consolidated <strong>Loan status</strong> dropdown at the top of Stage 2 → Treatment overrides is a one-click preset that flips the three underlying credit-risk switches (suspended interest, watchlist override, covenant breach) into one of three coherent business postures: <strong>Performing</strong> (accrual on, no stage override), <strong>Watchlist</strong> (SICR forced to Stage 2 qualitatively), or <strong>Non-performing</strong> (Stage 3 forced, interest suspended). If you hand-edit any of those switches out of a preset shape, the dropdown drops to <strong>Custom</strong> automatically. The top-bar chip mirrors the value so the whole app tells the same story. No new persistence — the preset is derived from <code>inst.ifrs.suspendedInterest</code> + <code>watchlistOverride</code> on the fly.',
+  demoSteps:[
+    'Open Stage 2 → Treatment overrides sub-tab.',
+    'The Loan status dropdown sits above the switch grid, with a FIS-green accent bar.',
+    'Change it to <em>Non-performing</em>. Watch: Suspended interest flips to On; Watchlist / SICR flips to On; top-bar chip goes red.',
+    'A success toast confirms "Loan status → Non-performing".',
+    'Hand-toggle any switch back; dropdown becomes "Custom".'
+  ],
+  deal:null,
+  section:'Stage 2 · Treatment overrides',
+  followUps:['sicr','ecl-formula','v4-navigation'] },
+
+{ id:'v4-floor-ceiling',
+  q:'How do I set an interest rate floor or ceiling (cap)?',
+  tags:['floor','ceiling','cap','interest','rate','floor bps','cap bps','private credit'],
+  answer:'Each interest component (IC) card in the Loan builder → Tranches section has <strong>Floor (bps)</strong> and <strong>Cap (bps)</strong> inputs. The engine computes the effective coupon as <code>max(floor, min(cap, base + margin + ratchet + ESG))</code>, so floors protect the lender during rate cuts and caps protect the borrower during rate spikes. Both values persist on <code>interest_components.floor_bps</code> / <code>cap_bps</code> in the DB. If you upload a Credit Agreement PDF, the CA extractor reads <code>rate_floor_bps</code> and <code>rate_ceiling_bps</code> (or <code>rate_cap_bps</code>) and the mapper writes them straight to the tranche IC when you click <em>Create deal from CA</em>.',
+  demoSteps:[
+    'Open Loan builder → Tranches → expand a tranche → Interest Components.',
+    'Enter 200 in Floor (bps) — the coupon will never drop below 2% + base.',
+    'Enter 850 in Cap (bps) — the coupon will never rise above 8.5%.',
+    'Run accounting; the coupon column in the daily schedule shows the clamped rate.'
+  ],
+  deal:null,
+  section:'Loan builder · Tranches · IC card',
+  followUps:['v4-ca-extract','how-engine-generates-jes'] },
+
+{ id:'v4-ca-extract',
+  q:'How do I import a Credit Agreement PDF? What does the AI extract?',
+  tags:['credit agreement','ca','nia','ai','pdf','extraction','import','borrower','facility','margin','floor','ceiling','ratchet'],
+  answer:'Open Tools → Credit agreements → <em>Add new CA</em>. Upload the signed loan agreement PDF. AI extracts (in a review pane with source PDF on the left): borrower name / entity, facility name and type (term loan A/B / revolver / delayed-draw / bridge / second-lien), principal, currency, effective / maturity dates, purpose, base rate (SOFR / TERM_SOFR / SONIA / EURIBOR / FIXED / PRIME), tenor, day count, initial margin (bps), margin ratchet grid, <strong>rate floor (bps)</strong>, <strong>rate ceiling / cap (bps)</strong>, amortisation type + schedule, fees (name / mode / amount / bps / frequency / treatment), covenants (name / KPI / direction / threshold / test frequency / step-downs / consequences), prepay triggers, events of default, governing law. Every field is editable next to the PDF. Click <em>Create deal from CA</em> to promote — the mapper writes to <code>tranche.interestComponents[0]</code> with correct base-index translation and both floor + cap landing on the IC card.',
+  demoSteps:[
+    'Tools → Credit agreements → <em>Add new CA</em>.',
+    'Drop a signed CA PDF; AI parses fields.',
+    'Review the two-pane modal — PDF on left, extracted fields on right.',
+    'Fix any low-confidence values.',
+    'Click <em>Create deal from CA</em> → Builder opens with the whole deal pre-populated including floor/cap.'
+  ],
+  deal:null,
+  section:'Tools · Credit agreements',
+  followUps:['v4-floor-ceiling','v4-financials-extract'] },
+
+{ id:'v4-financials-extract',
+  q:'How do I import borrower financial statements? What KPIs does it compute?',
+  tags:['financials','borrower','financial statements','pdf','extract','ai','dscr','icr','leverage','covenant','ratio','quarterly','annual'],
+  answer:'Open Tools → Financials → <em>Import financials</em>. Upload a quarterly / annual borrower PDF. AI extracts Balance Sheet, P&L, Cash Flow into a review pane (source PDF on left, editable fields on right). It auto-computes covenant KPIs — <strong>DSCR</strong> (EBITDA / debt service), <strong>ICR</strong> (EBITDA / interest expense), <strong>Leverage</strong> (Net Debt / EBITDA) — from the extracted figures. Save → these KPIs auto-update matching covenants on the deal and feed the Watchlist covenant-breach / covenant-proximity signals. The Financials modal lists past snapshots per deal so you can trend a KPI period-over-period.',
+  demoSteps:[
+    'Tools → Financials → <em>Import financials</em>.',
+    'Upload Q1 / Q2 / annual PDF.',
+    'Review extraction; toggle any values.',
+    'Click <em>Save + update covenants</em>.',
+    'Open Watchlist → the deal now shows its covenant status against the fresh KPIs.'
+  ],
+  deal:null,
+  section:'Tools · Financials',
+  followUps:['v4-watchlist','v4-ca-extract'] },
+
+{ id:'v4-notices',
+  q:'What is the Loan Agent Notices inbox? How does notice matching work?',
+  tags:['notices','loan agent','notice','pdf','drawdown','interest','repayment','rate reset','reconciliation','match','tied','broken'],
+  answer:'Tools → Notices is a cross-deal inbox for loan-agent notices — drawdown, interest, repayment, rate reset, fee, waiver, amendment, default. Two entry paths: <em>Derive</em> generates expected notices from every deal\'s cashflow schedule; <em>Import PDF</em> AI-extracts a real notice PDF into structured fields (type, deal/tranche, reference, effective_date, amount, breakdown). <strong>Notice matching / reconciliation</strong> then compares each notice against <code>journal_entries</code> for the same (deal_id, effective_date) with a ~1% amount tolerance, and colours the notice <em>tied</em> (green — cash JE matches), <em>partial</em> (amber — off by more than tolerance), or <em>broken</em> (red — no matching JE). Notice detail pane shows the source PDF, the extracted breakdown, the timeline, and matched JEs.',
+  demoSteps:[
+    'Tools → Notices → filter to a deal.',
+    'Click <em>Derive</em> to generate expected notices from cashflow.',
+    'Or click <em>Import PDF</em> → drop a real notice → AI extracts fields.',
+    'Click any notice row → detail pane shows PDF + fields + JE match status.',
+    'Green tied dot means the notice reconciled to a JE within tolerance.'
+  ],
+  deal:null,
+  section:'Tools · Notices',
+  followUps:['v4-financials-extract','v4-watchlist'] },
+
+{ id:'v4-watchlist',
+  q:'What is the Watchlist? Which signals does it monitor?',
+  tags:['watchlist','early warning','early-warning','signals','risk','covenant','ecl','maturity','overdue','default interest','mandatory prepayment','scoring'],
+  answer:'Tools → Watchlist is a cross-portfolio early-warning screen that scans every deal you can access and scores it by severity. Signals: <em>Covenant breach</em> (violated threshold), <em>Covenant proximity</em> (headroom &lt; 10%), <em>ECL Stage 2 / Stage 3</em> (SICR or impaired), <em>Maturity &lt; 30 days</em> critical / <em>&lt; 90 days</em> warning, <em>Overdue notices</em> (past effective_date with no JE match), <em>Default interest accruing</em>, <em>Mandatory prepayment triggered</em>. Filters: fund allocation · severity (Critical / Warning & up / Clear) · signal type. Top KPI strip: Deals / Critical / Warning / Info / Clear with severity-colored left rails. Row-expand shows every signal per deal. CSV export supported.',
+  demoSteps:[
+    'Tools → Watchlist.',
+    'KPI cards show current severity distribution.',
+    'Filter to <em>Critical only</em> — see the deals that need attention now.',
+    'Click a row to expand and see every signal contributing to the score.',
+    'Export CSV for the risk committee pack.'
+  ],
+  deal:null,
+  section:'Tools · Watchlist',
+  followUps:['sicr','ecl-formula','v4-financials-extract','v4-portfolio'] },
+
+{ id:'v4-portfolio',
+  q:'What does the Portfolio Analytics tool compute?',
+  tags:['portfolio','analytics','ytm','wal','dv01','duration','concentration','maturity ladder','yield','benchmark','fund filter','cross loan'],
+  answer:'Tools → Portfolio computes cross-loan analytics across every deal you can access: <strong>Loans</strong> (count), <strong>Total Notional</strong>, <strong>WT-AVG YTM</strong> (weighted-average yield to maturity), <strong>WT-AVG WAL</strong> (weighted-average life), <strong>WT-AVG Mod Duration</strong> (spread sensitivity), <strong>Portfolio DV01</strong> (£ per 1bp move). Concentration bars: framework (IFRS / USGAAP / AASB), currency (USD / EUR / GBP / AUD), team. Maturity ladder buckets: 1-2Y / 2-3Y / 3-5Y / 5-7Y / 7-10Y / N/A. Per-loan table below with FW / CCY / Notional / Coupon / Spread / YTM / YTW / WAL / Mod Dur / DV01 / Maturity. The <strong>Fund filter</strong> scopes everything to a specific fund\'s allocations; the <strong>Benchmark %</strong> input adjusts YTM display (spread to benchmark).',
+  demoSteps:[
+    'Tools → Portfolio.',
+    'Watch the KPI strip populate (loans + wt-avg metrics).',
+    'Change Benchmark % to see YTM change.',
+    'Filter by fund from the dropdown → concentration bars and per-loan table both re-scope.',
+    'Click CSV to export the current view.'
+  ],
+  deal:null,
+  section:'Tools · Portfolio',
+  followUps:['v4-manage-funds','v4-watchlist'] },
+
+{ id:'v4-manage-funds',
+  q:'How do funds and fund allocations work?',
+  tags:['fund','funds','manage funds','allocation','multi-fund','pe fund','domicile','regulator','nav','carry'],
+  answer:'Tools → Manage funds is the CRUD for fund entities. Each fund has an ID, name, domicile (e.g. Cayman / Luxembourg / Delaware), and regulator scope (AIFMD / SEC / ASIC / etc.). In the Loan builder → <em>Funds & Allocations</em> section, split a deal across multiple funds by percentage — the split drives (a) the fund filter on Portfolio + Watchlist, (b) fund-scoped Regulatory reports (right regulator per fund), and (c) per-fund NAV / carry / commitment aggregations. RLS: everyone can READ funds; only owner + admin can UPDATE / DELETE.',
+  demoSteps:[
+    'Tools → Manage funds.',
+    'Create a fund with domicile + regulator.',
+    'Open Loan builder → scroll to Funds & Allocations.',
+    'Add allocation rows with fund + percentage (must sum to 100%).',
+    'Save deal → the allocation flows to Portfolio filter + Regulatory scoping.'
+  ],
+  deal:null,
+  section:'Tools · Manage funds',
+  followUps:['v4-portfolio','v4-regulatory'] },
+
+{ id:'v4-regulatory',
+  q:'What Regulatory reports does the module produce?',
+  tags:['regulatory','reports','aifmd','form pf','asic','regulation','filing','disclosure','fund scoped'],
+  answer:'Tools → Regulatory produces fund-scoped regulatory reports based on each fund\'s domicile + regulator (set in Manage funds). Example scope: <strong>AIFMD Annex IV</strong> for EU AIFs (large / small variants), <strong>Form PF</strong> for US private funds (sections 1-4 by AUM tier), <strong>ASIC</strong> for AU regulated funds. Filter by fund to pull only that fund\'s deals, positions, and exposures. Reports render to browser tables and can be exported to XLSX / CSV.',
+  demoSteps:[
+    'Tools → Regulatory.',
+    'Fund filter → pick a fund → the domicile drives which report template loads.',
+    'Preview the report → review line items.',
+    'Export to XLSX for the filing.'
+  ],
+  deal:null,
+  section:'Tools · Regulatory',
+  followUps:['v4-manage-funds','v4-portfolio'] },
+
+{ id:'v4-fetch-watchdog',
+  q:'Why did I see a "Request timed out — connection freed" toast? What is the fetch watchdog?',
+  tags:['watchdog','timeout','fetch','connection','chrome','pool','frozen','hang','slow','toast'],
+  answer:'The fetch watchdog protects against Chrome\'s 6-connection-per-origin pool exhaustion. Every fetch to Supabase or the local ingest server (:3033) gets an auto-timeout: <strong>15s</strong> default, <strong>45s</strong> for uploads to <code>/api/extract/*</code> or <code>/api/notice/*</code>. If a request runs &gt; 8s a warning toast surfaces the URL. If it times out an error toast fires <em>"Request timed out — connection freed"</em> and the connection slot is released — without this, hung sockets would accumulate until the app appears frozen. In DevTools: <code>window.__fetchWatchdog.calls</code> counts guarded requests; check the console for <code>[fetch-watchdog] TIMEOUT killed hung request → connection pool freed: &lt;url&gt;</code> to identify the flaky endpoint. If you get a timeout, the endpoint is genuinely slow — the app remains responsive.',
+  demoSteps:[
+    'DevTools → Console → paste <code>window.__fetchWatchdog.calls</code> — shows count of guarded requests.',
+    'If a warning toast fires ("Request running long"), the URL in the detail line is the slow endpoint.',
+    'If an error toast fires ("Request timed out"), the request was aborted after 15s and the slot released.',
+    'Hard-refresh (Cmd+Shift+R) only needed if something bypassed the watchdog.'
+  ],
+  deal:null,
+  section:'Global · fetch watchdog',
+  followUps:['v4-toast'] },
+
+{ id:'v4-toast',
+  q:'How do toasts work? What do the different colors mean?',
+  tags:['toast','notification','snackbar','success','warning','error','info','stack','dismiss'],
+  answer:'v4 toasts stack in the bottom-right corner, newest on top. Four kinds distinguished by the left accent rail and icon: <strong>Success</strong> (FIS-green + ti-circle-check) for confirmations, <strong>Warning</strong> (amber + ti-alert-triangle) for slow requests / advisories — these persist until you click ×, <strong>Error</strong> (red + ti-alert-circle) for failures — auto-hides after 8s, <strong>Info</strong> (blue + ti-info-circle). Programmatic: <code>toast(msg, ms, {kind, detail, id, persistent})</code>. The <code>detail</code> shows a monospace second line (URLs, batch IDs). <code>toast.dismiss(id)</code> closes a keyed toast so a slow-request warning can update in place instead of stacking.',
+  demoSteps:[
+    'Save a deal → success toast bottom-right.',
+    'Simulate a slow request → warning toast with the URL.',
+    'DevTools console: <code>toast("Test", 4000, {kind:"info", detail:"hello.example.com"})</code>.'
+  ],
+  deal:null,
+  section:'Global · toast stack',
+  followUps:['v4-fetch-watchdog'] },
+
+{ id:'v4-dashboard',
+  q:'What does the Dashboard show?',
+  tags:['dashboard','overview','snapshot','kpi','sparkline','lifecycle','timeline','coverage','v4'],
+  answer:'The Dashboard (last pipeline tab) is a single-deal snapshot of the active deal. Three hero KPI cards with sparklines: <strong>Peak balance</strong>, <strong>Utilization</strong> (drawn / commitment), <strong>Total income</strong> (interest + fees). Below: five compact secondary cards (framework / EIR / avg margin / current stage / JE coverage), a <strong>balance & carrying value over time</strong> chart with drawdown / interest / fee overlay, a <strong>lifecycle timeline</strong> (settlement → drawdowns → coupon dates → maturity), and JE coverage (posted vs expected). No active deal? Pick one from the Deals ▾ breadcrumb or ⌘K.',
+  demoSteps:[
+    'Sidebar → Dashboard.',
+    'Pick a deal from the Deals ▾ picker if none is active.',
+    'Watch the three hero KPI cards + sparklines populate.',
+    'Scroll to the balance chart; verify drawdown / interest / fee overlays.'
+  ],
+  deal:null,
+  section:'Pipeline · Dashboard',
+  followUps:['v4-navigation','how-engine-generates-jes'] }
 
 ];
 
