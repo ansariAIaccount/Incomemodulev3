@@ -1617,11 +1617,19 @@
       // Simple compound approximation — good to a few percent for
       // demo purposes. Precise number requires running the schedule.
       let estCoupon = +deal.estCapitalisedCoupon || +deal.facilityLimitCoupon || 0;
-      if(estCoupon === 0 && Array.isArray(deal.tranches) && deal.settle && deal.maturity){
+      // Prefer _builderTranches (safe Builder-shape mirror) — falls back to
+      // deal.tranches for legacy multi-tranche wrappers (Suffolk Solar, Volt).
+      // Historically we read deal.tranches, but on Barrenjoey RE Mezz that
+      // ALSO fed the accounting engine's multi-tranche recursion, double-
+      // counting balance and pushing utilisation to 193.3%. The Builder now
+      // stores its shape on _builderTranches to keep the two paths separate.
+      const trancheList = Array.isArray(deal._builderTranches) ? deal._builderTranches
+                        : (Array.isArray(deal.tranches) ? deal.tranches : null);
+      if(estCoupon === 0 && trancheList && deal.settle && deal.maturity){
         const years = Math.max(0, (new Date(deal.maturity) - new Date(deal.settle)) / (365.25 * 86400000));
-        for(const t of deal.tranches){
+        for(const t of trancheList){
           if(!t.isPikToggle) continue;
-          const face = +t.face || 0;
+          const face = +t.face || +t.faceValue || 0;
           const ic = (t.interestComponents || [])[0];
           const rate = ic ? (+ic.baseValue || 0) : 0;
           if(face > 0 && rate > 0 && years > 0){

@@ -6592,7 +6592,7 @@
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
 <script src="loan-module-engine.js"></script>
 <script src="loan-module-instruments.js"></script>
-<script src="loan-module-analytics.js?v=firstag-livestock-covenants-v5"></script>
+<script src="loan-module-analytics.js?v=fix-multitranche-utilisation-v6"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
@@ -30028,10 +30028,16 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       inst.facility.commitment = +B.facility.commitment || 0;
     }
     // Preserve Builder tranches shape (with face + isPikToggle + interestComponents)
-    // for the PIK-coupon estimator inside covenantKpiValue. The engine-shape
-    // tranches on inst use different field names.
+    // for the PIK-coupon estimator inside covenantKpiValue. Stored on
+    // `_builderTranches` — NOT `inst.tranches` — because the accounting engine
+    // treats `inst.tranches` as a wrapper (Suffolk-solar / Volt-multi-loan
+    // convention) and recursively builds a per-tranche schedule where each
+    // sub inherits the parent's full principalSchedule → row-wise aggregation
+    // double-counts every draw → utilisation blows past 100%. Bug was 193.3%
+    // on Barrenjoey RE Mezz ($27.06m drawn × 2 tranches ≈ $54m peak vs $28m
+    // commitment). Covenant estimator now reads _builderTranches.
     if(Array.isArray(B.tranches) && B.tranches.length){
-      inst.tranches = B.tranches;
+      inst._builderTranches = B.tranches;
     }
     // Multi-fund Phase 1 — project fund allocations so downstream consumers
     // (Regulatory scope filter, Portfolio + Watchlist fund pickers) can read
