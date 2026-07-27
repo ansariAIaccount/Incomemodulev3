@@ -1653,7 +1653,58 @@
     // KPIs backed by a manually-reported value on the covenant itself
     // (updated by ops each test cycle). Watchlist can still evaluate
     // breach when the ops team has populated `lastReportedValue`.
-    if(m === 'minnetassets' || m === 'minpresales'){
+    if(m === 'minnetassets'){
+      // Prefer the guarantor-registry total when populated (Deal Setup →
+      // Guarantors & NAV covenant). This is the live value the ops team
+      // maintains as each 6-monthly NAV certificate arrives.
+      if(deal){
+        const gTotal = +deal.guarantorsQualifyingAssetsTotal
+                    || +deal.guarantors_qualifying_assets_total || 0;
+        if(gTotal > 0) return gTotal;
+        // Fallback: sum from an inline guarantors array on the deal.
+        if(Array.isArray(deal.guarantors) && deal.guarantors.length){
+          const s = deal.guarantors.reduce((acc, g) =>
+            acc + (+g.qualifyingAssetsTotal || +g.qualifying_assets_total || 0), 0);
+          if(s > 0) return s;
+        }
+      }
+      if(covenant && covenant.lastReportedValue != null) return +covenant.lastReportedValue;
+      if(covenant && covenant.last_reported_value != null) return +covenant.last_reported_value;
+      return null;
+    }
+    if(m === 'minpresales'){
+      if(covenant && covenant.lastReportedValue != null) return +covenant.lastReportedValue;
+      if(covenant && covenant.last_reported_value != null) return +covenant.last_reported_value;
+      return null;
+    }
+
+    // ─── FirstAg Livestock — borrowing base KPIs ──────────────────────
+    // deal.bbInventory (cached from bb_inventory_computed) has days_on_feed
+    // per row. Aging covenant fires on the max days_on_feed among rows
+    // matching the contracted/uncontracted subset. Metric value returned
+    // is days (integer) — Watchlist compares against covenant threshold.
+    if(m === 'livestockagingcontracted' || m === 'livestockaginguncontracted'){
+      const wantContracted = (m === 'livestockagingcontracted');
+      const inv = (deal && (deal.bbInventory || deal.bb_inventory)) || [];
+      if(!inv.length) return null;
+      const filtered = inv.filter(r =>
+        !r.is_receivable && (wantContracted ? r.is_contracted : !r.is_contracted));
+      if(!filtered.length) return null;
+      return filtered.reduce((mx, r) => Math.max(mx, +r.days_on_feed || 0), 0);
+    }
+    if(m === 'utilisationcount'){
+      // Live number of open utilisations (drawn tranches / draws not yet
+      // repaid). For MVP demo we count distinct inventory rows tagged as
+      // "utilisation" via row.utilisation_id, falling back to head count.
+      const inv = (deal && (deal.bbInventory || deal.bb_inventory)) || [];
+      const utils = new Set();
+      inv.forEach(r => { if(r.utilisation_id) utils.add(r.utilisation_id); });
+      return utils.size || (deal && deal.openUtilisationsCount) || 0;
+    }
+    if(m === 'tradecreditthreshold' || m === 'significantdisposalpct' ||
+       m === 'permittedindebtednesscap' || m === 'insurancemaintenance'){
+      // Manual-reporting KPIs — surfaced via covenant.lastReportedValue by
+      // ops until a live integration exists.
       if(covenant && covenant.lastReportedValue != null) return +covenant.lastReportedValue;
       if(covenant && covenant.last_reported_value != null) return +covenant.last_reported_value;
       return null;

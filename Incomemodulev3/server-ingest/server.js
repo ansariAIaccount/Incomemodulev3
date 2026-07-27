@@ -624,7 +624,13 @@ app.post('/api/extract/credit-agreement', upload.single('file'), async (req, res
 });
 
 // ──────── Boot ───────────────────────────────────────────────────────
-app.listen(PORT, () => {
+// Bind to 0.0.0.0 (IPv4 all-interfaces) instead of the Node default
+// (IPv6 :: with V6ONLY off — but that varies by OS/kernel version).
+// This ensures curl / browser fetches to http://localhost:PORT work
+// on macOS, where `localhost` resolves to 127.0.0.1 first and gives up
+// if the server is only listening on ::. Users hit "Failed to connect
+// after 0 ms" without this and the fix is non-obvious.
+app.listen(PORT, '0.0.0.0', () => {
   console.log('════════════════════════════════════════════');
   console.log('Document Ingestion Service listening on port', PORT);
   console.log('  AI extract:      ', AI_CONFIGURED ? ANTHROPIC_MODEL : 'mock mode (no ANTHROPIC_API_KEY)');

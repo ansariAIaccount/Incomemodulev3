@@ -1150,14 +1150,52 @@ function buildSchedule(instr){
 //                        SOFR loans following the ARRC fallback).
 //   • dailyCompounding — true → daily-compounded;
 //                        false → simple-arithmetic average of fixings.
+//   • dayCount         — day-count basis for the compound factor and
+//                        annualisation. 'ACT/360' (default), 'ACT/365',
+//                        'ACT/365F' or 'ACT/365L' all pick the corresponding
+//                        year-days denominator. '30/360' isn't meaningful at
+//                        the daily-factor level (30/360 is a period-based
+//                        convention) — it falls back to ACT/360.
 //
 // Input requires an actual fixings series on instr.rfr.fixings = [{date,rate}].
 // When the series is empty or missing, returns null and the caller falls back
 // to `instr.rfr.baseRate` (preserves legacy behaviour).
 //
-// The "period" for compounding is heuristic — uses tenor: '3M'→90d, '1M'→30d
-// etc., back from the as-of date. Real loans would tie this to coupon-period
-// boundaries; this is a reasonable approximation for daily accrual.
+// Tenor parsing accepts any of: "1D".."999D" · "1W".."52W" · "1M".."60M"
+// · "1Y".."30Y" (case-insensitive, whitespace-tolerant). Falls back to 90d
+// when the tenor string can't be parsed.
+
+// Exported for reuse by other engine helpers and tests.
+function tenorToDays(tenor){
+  if(tenor == null) return 90;
+  // Numeric input (e.g. 45) → treat as days
+  if(typeof tenor === 'number' && isFinite(tenor)) return Math.max(1, Math.round(tenor));
+  const s = String(tenor).trim().toUpperCase().replace(/\s+/g,'');
+  // Common shortcuts
+  if(s === 'ON' || s === 'O/N') return 1;   // overnight
+  if(s === 'TN' || s === 'T/N') return 1;   // tom-next
+  if(s === 'SN' || s === 'S/N') return 2;   // spot-next
+  // "<n><unit>" — n can be int, unit one of D/W/M/Y
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*([DWMY])$/);
+  if(!m) return 90;
+  const n = parseFloat(m[1]);
+  const u = m[2];
+  if(u === 'D') return Math.max(1, Math.round(n));
+  if(u === 'W') return Math.max(1, Math.round(n * 7));
+  // Months use 30.4375 (avg calendar-month length) so 6M → 183, 18M → 548, 2M → 61
+  if(u === 'M') return Math.max(1, Math.round(n * 30.4375));
+  if(u === 'Y') return Math.max(1, Math.round(n * 365));
+  return 90;
+}
+
+// Day-count denominator for compound factor + annualisation.
+function dayCountDenom(dayCount){
+  const s = (dayCount || 'ACT/360').toString().trim().toUpperCase().replace(/\s+/g,'');
+  if(s === 'ACT/365' || s === 'ACT/365F' || s === 'ACT/365L' || s === '365/365' || s === 'A/365') return 365;
+  // ACT/360, 30/360, A/360 and unknown → 360
+  return 360;
+}
+
 function computeCompoundedRFR(asOfDate, instr){
   const rfr = instr && instr.rfr;
   if(!rfr || !Array.isArray(rfr.fixings) || rfr.fixings.length === 0) return null;
@@ -1165,8 +1203,8 @@ function computeCompoundedRFR(asOfDate, instr){
   const obsShift   = +rfr.observationShift || 0;
   const lockout    = +rfr.lockoutDays      || 0;
   const compounded = !!rfr.dailyCompounding;
-  // Tenor → period length in calendar days (approx).
-  const tenorDays = { '1M':30, '3M':90, '6M':180, '12M':365 }[rfr.tenor || '3M'] || 90;
+  const tenorDays  = tenorToDays(rfr.tenor);
+  const denom      = dayCountDenom(rfr.dayCount);
   // Observation window: [periodStart − obsShift, asOf − lookback], with the
   // last `lockout` days inside that window held flat at the rate observed on
   // (periodEnd − lockout).
@@ -1192,8 +1230,9 @@ function computeCompoundedRFR(asOfDate, instr){
   for(let d = new Date(periodStart); d <= periodEnd; d = addDays(d, 1)){
     const rate = (d > lockoutCutoff && lockout > 0) ? lockoutRate : fixingAt(d);
     if(compounded){
-      // Daily compounding: (1 + r × 1/360) factor
-      product *= (1 + rate / 360);
+      // Daily compounding: (1 + r × 1/denom) factor — denom matches the
+      // dayCount basis (360 for ACT/360, 365 for ACT/365).
+      product *= (1 + rate / denom);
     } else {
       sum += rate;
     }
@@ -1201,8 +1240,8 @@ function computeCompoundedRFR(asOfDate, instr){
   }
   if(count === 0) return null;
   if(compounded){
-    // Annualise: (product − 1) × 360 / count
-    return (product - 1) * 360 / count;
+    // Annualise: (product − 1) × denom / count — same basis as the factor.
+    return (product - 1) * denom / count;
   }
   return sum / count;
 }
@@ -1817,6 +1856,51 @@ function lookupMarginBps(dateISO){
         } else {
           amt = baseAmt * effectiveRate * dcf;
         }
+      } else if(f.mode === 'undrawnRamp'){
+        // ─── Undrawn fee ramp (FirstAg Livestock Phase 2) ────────────
+        //
+        // During the ramp period, the undrawn balance is calculated as if
+        // the facility limit were f.rampFacilityLimit (not the actual
+        // commitment). The ramp ends when EITHER f.rampMonths elapses
+        // since instr.startDate, OR outstanding balance exceeds
+        // f.rampCancellationTriggerAmt — whichever comes first.
+        //
+        // After the ramp, undrawn reverts to the standard (cap − drawnBalance).
+        //
+        // Rate can come from f.bps (bps p.a., preferred for FirstAg-style
+        // "40% of margin" = 280 bps), from f.rate (decimal p.a.), or from
+        // a scheduled ratchet if provided.
+        let effectiveRate = f.rate || 0;
+        if(f.bps != null) effectiveRate = (+f.bps) / 10000;
+        if(Array.isArray(f.feeRateSchedule) && f.feeRateSchedule.length){
+          for(const step of f.feeRateSchedule){
+            const fr = step.from || '0000-01-01';
+            const to = step.to   || '9999-12-31';
+            if(todayISO >= fr && todayISO <= to){ effectiveRate = step.rate; break; }
+          }
+        }
+        // Determine whether we're inside the ramp on the current accrual day.
+        let inRamp = false;
+        const rampLimit = +f.rampFacilityLimit || 0;
+        if(rampLimit > 0 && rampLimit < commitment){
+          const startISO = instr.startDate || instr.settleDate;
+          const rampMonths = +f.rampMonths || 0;
+          const trigger   = +f.rampCancellationTriggerAmt || 0;
+          // Loan-balance trigger — once outstanding exceeds the trigger, ramp ends
+          const belowTrigger = trigger > 0 ? drawnBalance < trigger : true;
+          // Time trigger — inside the ramp-months window from start
+          let insideRampMonths = true;
+          if(startISO && rampMonths > 0){
+            const start = new Date(startISO);
+            const rampEnd = new Date(start);
+            rampEnd.setMonth(rampEnd.getMonth() + rampMonths);
+            insideRampMonths = new Date(todayISO) <= rampEnd;
+          }
+          inRamp = insideRampMonths && belowTrigger;
+        }
+        const effectiveCap = inRamp ? rampLimit : commitment;
+        const undrawn = Math.max(0, effectiveCap - drawnBalance);
+        amt = undrawn * effectiveRate * dcf;
       } else if(f.mode === 'flat' || f.mode === 'fixed'){
         // Spread flat amount linearly across accrual window
         // 'fixed' is the v3 builder's mapping of 'fixAmount'; treat identical to 'flat'.
