@@ -15673,6 +15673,36 @@ function runAccountingImpl(){
   // This matters when the user loads an Excel that resolves to a different
   // instrument than what's selected in the active-deal picker.
   const inst = INSTRUMENTS.find(i => i.id === M.portfData.instrument?.id) || currentInstrument();
+  // ─── Auto-repair missing dates on the instrument ───
+  // For DB-hydrated deals (Barrenjoey RE Mezz, FirstAg) the registerBuilder
+  // Instrument path may register the inst BEFORE B.deal.settle / .maturity
+  // are populated (order-of-operations race between loadPresetByObject and
+  // Stage 1 nav). Mirror from B.deal here so the whole pipeline downstream
+  // (buildSchedule → summarize → computeEIR → renderCapabilityCards → EIR
+  // trace → JE builder) sees valid dates on every run.
+  if(inst && window.B && window.B.deal){
+    if(!inst.settlementDate && window.B.deal.settle){
+      inst.settlementDate = window.B.deal.settle;
+      console.log('[V3 accounting] auto-repaired inst.settlementDate =', window.B.deal.settle);
+    }
+    if(!inst.maturityDate && window.B.deal.maturity){
+      inst.maturityDate = window.B.deal.maturity;
+      console.log('[V3 accounting] auto-repaired inst.maturityDate =', window.B.deal.maturity);
+    }
+    if(!inst.faceValue && Array.isArray(window.B.tranches) && window.B.tranches.length){
+      const totalFace = window.B.tranches.reduce((s, t) => s + (+t.face || 0), 0);
+      if(totalFace > 0){
+        inst.faceValue = totalFace;
+        console.log('[V3 accounting] auto-repaired inst.faceValue =', totalFace);
+      }
+    }
+  }
+  // Bail out cleanly if there's still no usable instrument shape.
+  if(!inst || !inst.settlementDate || !inst.maturityDate){
+    toast('Cannot run accounting — deal is missing settlement date or maturity date. Check Stage 0 → Deal Setup.', 8000, { kind:'error' });
+    console.error('[V3 accounting] aborting — inst:', inst?.id, 'settle:', inst?.settlementDate, 'maturity:', inst?.maturityDate);
+    return;
+  }
   // Keep the dropdown + Treatment panel in sync so capability cards, FV display,
   // ECL settings and mod events reflect the deal we're actually accounting for.
   if(inst.id !== M.instrumentId){
@@ -15700,9 +15730,18 @@ function runAccountingImpl(){
   const bm = inst.ifrs?.businessModel || 'HoldToCollect';
   $('ifrs-classification').textContent = cls;
   $('ifrs-recognition').textContent = `${sppi} · ${bm} business model · ECL Stage ${inst.ifrs?.ecLStage || 1}`;
-  // EIR
+  // EIR — auto-repair for missing dates already ran up-front (before
+  // buildSchedule). If computeEIR still returns null, something else is off.
   const eir = computeEIR(inst);
-  if(eir.effectiveYield != null){
+  if(!eir){
+    // Diagnose in console so we can trace which field is missing.
+    console.warn('[V3 accounting] computeEIR returned null for', inst?.id,
+      '· settlementDate=', inst?.settlementDate,
+      '· maturityDate=',   inst?.maturityDate,
+      '· framework=',      inst?.accountingFramework);
+    $('ifrs-eir').textContent = '—';
+    $('ifrs-eir-note').textContent = 'EIR unavailable — check settlementDate + maturityDate on the instrument';
+  } else if(eir.effectiveYield != null){
     $('ifrs-eir').textContent = fmtPct(eir.effectiveYield, 4);
     $('ifrs-eir-note').textContent = `${eir.method} method · ${eir.note || ''}`;
   } else {
@@ -23015,7 +23054,10 @@ function renderECLTemplates(inst, summary){
 // (F) Modification Before/After + Audit Run History ------------------------
 function renderModificationHistory(inst, summary){
   const ccy = inst.currency || 'GBP';
-  const eir = computeEIR(inst);
+  // computeEIR can return null for multi-tranche deals whose children all
+  // fail to yield an EIR (e.g. Barrenjoey RE Mezz — see console warning at
+  // runAccountingImpl). Guard here so the Evidence Pack still renders.
+  const eir = computeEIR(inst) || { couponRate: 0, effectiveYield: null };
   // Modification before/after — show what would re-trigger EIR and the engine's mod events
   const mods = summary.modEvents || [];
   const modRows = mods.length ? mods.map(m => `

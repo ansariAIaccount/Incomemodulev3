@@ -204,7 +204,14 @@ function aggregateChildEIRs(childResults, childRecords, kind){
   let totalFace = 0, weightedCoupon = 0, weightedYield = 0, withYield = 0;
   for(let i = 0; i < childResults.length; i++){
     const r = childResults[i];
-    const f = (childRecords[i] && childRecords[i].faceValue) || 0;
+    // Accept either `faceValue` (engine shape) or `face` (Builder shape) —
+    // v4 projects B.tranches directly onto inst.tranches so covenant KPI
+    // computes can see PIK toggles, and those tranches use `face`.
+    // Without this fallback, aggregateChildEIRs saw totalFace=0 and
+    // returned null → computeEIR returned null → Run Accounting crashed
+    // for any multi-tranche DB-loaded deal (Barrenjoey RE Mezz).
+    const rec = childRecords[i];
+    const f = (rec && (rec.faceValue != null ? +rec.faceValue : +rec.face)) || 0;
     if(f <= 0) continue;
     totalFace += f;
     weightedCoupon += (r.couponRate || 0) * f;
