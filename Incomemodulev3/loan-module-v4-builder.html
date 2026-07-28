@@ -1596,6 +1596,10 @@
   <button class="v4-sb-item" onclick="window.openBorrowingBaseModal && window.openBorrowingBaseModal()">
     <i class="ti ti-scale" aria-hidden="true"></i>Borrowing base
   </button>
+  <!-- Rate curves — workspace-level benchmark fixings (BBSY, SOFR, SONIA…). -->
+  <button class="v4-sb-item" onclick="window.openRateFixingsModal && window.openRateFixingsModal()">
+    <i class="ti ti-chart-line" aria-hidden="true"></i>Rate curves
+  </button>
 
   <div class="v4-sb-spacer"></div>
 
@@ -1761,6 +1765,8 @@
     { id:'open-ca',          label:'Open credit agreements',hint:'Browse · AI-extract from PDF',         icon:'ti-file-certificate', fn:() => window.openCreditAgreementsListModal && window.openCreditAgreementsListModal() },
     { id:'open-funds',       label:'Manage funds',          hint:'Create / edit fund allocations',       icon:'ti-wallet',       fn:() => window.openManageFundsModal && window.openManageFundsModal() },
     { id:'open-waterfall',   label:'Open waterfall',        hint:'Cash distribution simulator (mezz)',   icon:'ti-hierarchy-2', fn:() => window.openWaterfallModal && window.openWaterfallModal() },
+    { id:'open-rate-curves', label:'Open rate curves',      hint:'BBSY · SOFR · SONIA · €STR · EURIBOR · BBSW', icon:'ti-chart-line', fn:() => window.openRateFixingsModal && window.openRateFixingsModal() },
+    { id:'open-borrowing-base', label:'Open borrowing base', hint:'FirstAg-style revolving BB facility', icon:'ti-scale', fn:() => window.openBorrowingBaseModal && window.openBorrowingBaseModal() },
     { id:'new-manual',       label:'New deal — build manually',hint:'Blank Builder',                    icon:'ti-edit',         fn:() => window.handleHeaderManualClick && window.handleHeaderManualClick() },
     { id:'new-isin',         label:'New deal — from security master', hint:'ISIN lookup',              icon:'ti-database',      fn:() => window.handleHeaderIsinClick && window.handleHeaderIsinClick() },
     { id:'goto-builder',     label:'Go to Loan builder',    hint:'Stage 0',                              icon:'ti-notebook',     fn:() => document.querySelector('.tab-btn[data-tab="builder"]')?.click() },
@@ -2820,7 +2826,23 @@
       </span>
       <h3 style="font-size:13px; font-weight:600; color:var(--n-900); letter-spacing:-0.15px; margin:0;">Forward cashflow stream</h3>
       <span id="cf-stage1-chip" class="chip gray" style="font-size:10px; font-variant-numeric:tabular-nums;">0 periods</span>
-      <span style="font-size:10.5px; color:var(--n-500); margin-left:auto;">Click any row to expand · click any rate to see its calculation</span>
+      <!-- Period picker — auto-defaults to the deal's natural cadence
+           (weekly for 7D revolvers, monthly for PIK cap, quarterly otherwise). -->
+      <label style="display:inline-flex; align-items:center; gap:5px; font-size:10.5px; color:var(--n-600); margin-left:auto;">
+        <i class="ti ti-calendar-time" style="font-size:12px; color:var(--n-500);"></i>
+        Period:
+        <select id="cf-period-picker" class="b-input" style="padding:2px 6px; font-size:10.5px; min-width:110px;" onchange="if(typeof window.__onCfPeriodChange==='function') window.__onCfPeriodChange(this.value)">
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="semiAnnual">Semi-annual</option>
+          <option value="annual">Annual</option>
+        </select>
+      </label>
+      <button onclick="window.openRateFixingsModal && window.openRateFixingsModal()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Shortcut to workspace Rate curves (also in the sidebar).">
+        <i class="ti ti-chart-line" style="font-size:12px;"></i>Rate curves
+      </button>
+      <span style="font-size:10.5px; color:var(--n-500);">Click any row to expand</span>
     </div>
     <div id="cf-stage1-kpis" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2"></div>
     <div id="cf-stage1-host" style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px; font-size:11px; max-height:600px; overflow-y:auto; font-variant-numeric:tabular-nums;">
@@ -5457,6 +5479,76 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════
+     Rate fixings modal — import BBSY/SOFR/SONIA/etc. daily fixings.
+     Feeds computeCompoundedRFR in the engine so cashflows use true
+     daily-compounded-in-arrears (ARRC / LMA convention) instead of the
+     snapshot baseRate fallback.
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="rate-fixings-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeRateFixingsModal && window.closeRateFixingsModal()"></div>
+  <div class="json-modal-pn" style="width:min(1000px,96vw); max-height:92vh;">
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200); flex-wrap:wrap;">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-chart-line" style="font-size:18px;"></i>
+      </div>
+      <div style="flex:1; min-width:220px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Rate curves — workspace benchmark fixings</div>
+        <div style="font-size:11px; color:var(--n-500); margin-top:2px;">Shared across every deal. Import daily BBSY / SOFR / SONIA / €STR / EURIBOR / BBSW fixings — any deal whose interest component references the index reads from here for daily-compounded-in-arrears calc.</div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeRateFixingsModal && window.closeRateFixingsModal()" title="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="json-modal-b" style="padding:14px 16px; max-height:calc(92vh - 130px); overflow-y:auto;">
+      <!-- Top row — index picker + summary -->
+      <div style="display:grid; grid-template-columns:200px 1fr auto; gap:10px; align-items:end; margin-bottom:14px;">
+        <div>
+          <label class="b-label" style="font-size:10.5px;">Benchmark index</label>
+          <select id="rfx-index" class="b-input" onchange="window.__rfxRefresh && window.__rfxRefresh()">
+            <option value="BBSY">BBSY (Australia)</option>
+            <option value="BBSW">BBSW (Australia)</option>
+            <option value="SOFR">SOFR (US)</option>
+            <option value="TermSOFR">Term SOFR (US)</option>
+            <option value="SONIA">SONIA (UK)</option>
+            <option value="ESTR">€STR (Euro)</option>
+            <option value="EURIBOR">EURIBOR (Euro)</option>
+          </select>
+        </div>
+        <div id="rfx-summary" style="font-size:11px; color:var(--n-600); padding:8px 12px; background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:8px; align-self:end;">—</div>
+        <div style="align-self:end;">
+          <button onclick="window.__rfxSeedSample && window.__rfxSeedSample()" class="mat-btn outline !py-1 !px-2 text-[11px]" title="Seed 90 days of illustrative fixings for demo purposes">
+            <i class="ti ti-flask" style="font-size:12px;"></i>Seed sample 90d
+          </button>
+        </div>
+      </div>
+
+      <!-- Import panel -->
+      <div style="background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:8px; padding:12px 14px; margin-bottom:14px;">
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <div style="font-size:10.5px; text-transform:uppercase; color:var(--n-600); font-weight:600; letter-spacing:0.4px; flex:1;">Import fixings</div>
+          <input id="rfx-file" type="file" accept=".csv,.txt" style="display:none;" onchange="window.__rfxOnFile && window.__rfxOnFile(event)"/>
+          <button onclick="document.getElementById('rfx-file').click()" class="mat-btn outline !py-1 !px-2 text-[10.5px]"><i class="ti ti-file-upload" style="font-size:12px;"></i>Upload CSV</button>
+          <button onclick="window.__rfxApplyImport && window.__rfxApplyImport()" class="mat-btn primary !py-1 !px-3 text-[10.5px]"><i class="ti ti-check" style="font-size:12px;"></i>Apply import</button>
+        </div>
+        <textarea id="rfx-csv" placeholder="Paste CSV — one row per line: date,rate&#10;e.g.&#10;2026-04-01,4.35&#10;2026-04-02,4.36&#10;2026-04-03,0.0437&#10;&#10;Rates can be decimal (0.0435) or percent (4.35). Auto-detected." style="width:100%; height:120px; padding:8px; font-family:ui-monospace,SFMono-Regular,monospace; font-size:11px; border:0.5px solid var(--n-300); border-radius:6px; background:var(--n-0); resize:vertical;"></textarea>
+        <div id="rfx-preview" style="margin-top:8px; font-size:10.5px; color:var(--n-500);"></div>
+      </div>
+
+      <!-- Existing fixings list -->
+      <div>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+          <div style="font-size:10.5px; text-transform:uppercase; color:var(--n-600); font-weight:600; letter-spacing:0.4px; flex:1;">Stored fixings for selected index</div>
+          <button onclick="window.__rfxDeleteAll && window.__rfxDeleteAll()" class="mat-btn outline !py-0.5 !px-2 text-[10.5px]" style="color:#B91C1C; border-color:#FCA5A5;" title="Delete all fixings for the selected index"><i class="ti ti-trash" style="font-size:11px;"></i>Delete all</button>
+        </div>
+        <div id="rfx-list" style="max-height:280px; overflow-y:auto; border:0.5px solid var(--n-200); border-radius:8px; background:var(--n-0);"></div>
+      </div>
+    </div>
+    <div class="json-modal-f">
+      <span id="rfx-footer-note" class="text-[11px] text-gray-500 mr-auto">Admins can import. All authenticated users can read.</span>
+      <button class="mat-btn outline" onclick="window.closeRateFixingsModal && window.closeRateFixingsModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
      Borrowing Base modal — FirstAg Livestock revolving-BB facility.
      Left pane: deal-level config summary + inventory list (add/edit).
      Right pane: live computed base amount (PCS.computeBorrowingBase),
@@ -7578,6 +7670,64 @@ window.SB = (function(){
   }
   async function deleteBBCertificate(id){
     const { error } = await _client.from('bb_certificate').delete().eq('id', id);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Shared RFR-index fixings (BBSY, SOFR, SONIA, €STR, EURIBOR, BBSW).
+  // Any deal whose interest component uses one of these indices reads
+  // from this table via listFixings(index, from, to). computeCompounded
+  // RFR (engine) then walks the series day-by-day per ARRC / LMA
+  // convention.
+  // ═══════════════════════════════════════════════════════════════════
+  async function listFixings(rfrIndex, fromDate, toDate){
+    if(!_client || !_connected || !rfrIndex) return [];
+    try {
+      let q = _client.from('rfr_index_fixings')
+        .select('id, rfr_index, fix_date, rate, source, imported_at')
+        .eq('rfr_index', rfrIndex)
+        .order('fix_date', { ascending: true });
+      if(fromDate) q = q.gte('fix_date', fromDate);
+      if(toDate)   q = q.lte('fix_date', toDate);
+      const { data, error } = await _withDbTimeout('listFixings', q, 15000);
+      if(error){ console.error('[SB] listFixings:', error); return []; }
+      return data || [];
+    } catch(err){ console.error('[SB] listFixings threw:', err); return []; }
+  }
+  async function bulkUpsertFixings(rows){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!Array.isArray(rows) || !rows.length) return { ok:true, inserted:0 };
+    // Normalise + validate. Reject rows without index/date/rate.
+    const payload = rows.map(r => ({
+      rfr_index: (r.rfr_index || r.rfrIndex || '').toString().trim(),
+      fix_date:  r.fix_date || r.fixDate || r.date,
+      rate:      +r.rate,
+      source:    r.source || 'manual import',
+      imported_by: _currentUser ? _currentUser.id : null
+    })).filter(r => r.rfr_index && r.fix_date && isFinite(r.rate));
+    if(!payload.length) return { ok:false, reason:'no valid rows to import' };
+    try {
+      const { data, error } = await _client
+        .from('rfr_index_fixings')
+        .upsert(payload, { onConflict: 'rfr_index,fix_date' })
+        .select();
+      if(error){ console.error('[SB] bulkUpsertFixings:', error); return { ok:false, reason: error.message }; }
+      return { ok:true, inserted: (data || []).length, rows: data };
+    } catch(err){ console.error('[SB] bulkUpsertFixings threw:', err); return { ok:false, reason: err.message || String(err) }; }
+  }
+  async function deleteFixing(id){
+    if(!_client || !_connected || !id) return { ok:false, reason:'not connected or missing id' };
+    const { error } = await _client.from('rfr_index_fixings').delete().eq('id', id);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+  async function deleteFixingsRange(rfrIndex, fromDate, toDate){
+    if(!_client || !_connected || !rfrIndex) return { ok:false, reason:'index required' };
+    let q = _client.from('rfr_index_fixings').delete().eq('rfr_index', rfrIndex);
+    if(fromDate) q = q.gte('fix_date', fromDate);
+    if(toDate)   q = q.lte('fix_date', toDate);
+    const { error } = await q;
     if(error) return { ok:false, reason: error.message };
     return { ok:true };
   }
@@ -10192,6 +10342,7 @@ window.SB = (function(){
     listBBOfftakers, upsertBBOfftaker, deleteBBOfftaker,
     listBBInventory, upsertBBInventory, deleteBBInventory,
     listBBCertificates, upsertBBCertificate, approveBBCertificate, rejectBBCertificate, deleteBBCertificate,
+    listFixings, bulkUpsertFixings, deleteFixing, deleteFixingsRange,
     listTeamMembers, addUserToTeam, removeUserFromTeam, updateDealTeam,
     // Loan agent notices (Tier 1 #3)
     fetchNotices, upsertNotice, bulkInsertNotices, updateNoticeStatus, updateNoticeFields, deleteNotice, wipeAutoDerivedNoticesForDeal,
@@ -28943,12 +29094,78 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // ─── Compute forward cashflows (TRANSPARENT) ────────────────────────
   // Produces an array of period rows. Each row contains every component's
   // contribution and the formula text so the user can drill in.
+  // ─── Period frequency helpers (Cashflow tab picker) ───────────────
+  //
+  // The Cashflow tab defaults to a sensible per-deal frequency (weekly for
+  // revolvers with 7D interest tenor, monthly for PIK-capitalisation deals,
+  // quarterly for standard term loans). The user can override via the
+  // dropdown; the choice persists in localStorage under `cf-period-months`
+  // so switching tabs / decks doesn't reset.
+  const CF_FREQ_MAP = {
+    weekly:      { months: null, weeks: 1, label:'Weekly' },
+    monthly:     { months: 1,    label:'Monthly' },
+    quarterly:   { months: 3,    label:'Quarterly' },
+    semiAnnual:  { months: 6,    label:'Semi-annual' },
+    annual:      { months: 12,   label:'Annual' }
+  };
+  function _defaultCashflowFreq(){
+    // Auto-default based on the deal shape.
+    //   • 7-day interest tenor  → weekly       (FirstAg style)
+    //   • PIK monthly cap      → monthly      (Barrenjoey RE Mezz)
+    //   • Otherwise            → quarterly
+    try {
+      const t0 = B.tranches[0];
+      const ic0 = t0 && (t0.interestComponents || [])[0];
+      const tenor = ic0 && ic0.terms && ic0.terms[0] && ic0.terms[0].tenor;
+      if(tenor && /^\s*(\d+)\s*D\s*$/i.test(tenor)){
+        const days = parseInt(RegExp.$1, 10);
+        if(days <= 7) return 'weekly';
+        if(days <= 15) return 'weekly';
+      }
+      // PIK / capitalised coupon → match the capitalisation frequency
+      const pikFreq = t0 && t0.pikCapitalisationFreq;
+      if(pikFreq === 'monthly')    return 'monthly';
+      if(pikFreq === 'quarterly')  return 'quarterly';
+      if(pikFreq === 'semi')       return 'semiAnnual';
+      if(pikFreq === 'annual')     return 'annual';
+      // Revolvers with short tenor → monthly (safer than quarterly for cadence viz)
+      if(B.facility && (B.facility.type === 'revolver' || B.facility.type === 'revolvingBorrowingBase')){
+        return 'monthly';
+      }
+    } catch(_){}
+    return 'quarterly';
+  }
+  function _resolveCashflowFreq(){
+    // Read user's picker choice or fall back to the auto-default.
+    const pick = $b('cf-period-picker');
+    if(pick && pick.value && CF_FREQ_MAP[pick.value]) return pick.value;
+    try { const stored = localStorage.getItem('cf-period-months'); if(stored && CF_FREQ_MAP[stored]) return stored; } catch(_){}
+    return _defaultCashflowFreq();
+  }
+
   function computeCashflows(){
     const t0 = (B.deal.settle && B.facility.commitment >= 0 && B.tranches.length) ? B.deal.settle : null;
     if(!t0 || !B.deal.maturity){ return []; }
-    // Aggregate per-tranche schedule into period buckets — quarterly by default
-    const periods = enumeratePeriods(B.deal.settle, B.deal.maturity, 3);
+    const freqKey = _resolveCashflowFreq();
+    const spec = CF_FREQ_MAP[freqKey] || CF_FREQ_MAP.quarterly;
+    const periods = spec.weeks
+      ? enumeratePeriodsWeekly(B.deal.settle, B.deal.maturity, spec.weeks)
+      : enumeratePeriods(B.deal.settle, B.deal.maturity, spec.months);
     return periods.map((p, i) => computePeriod(p, i));
+  }
+
+  function enumeratePeriodsWeekly(start, end, weeks){
+    const s = new Date(start);
+    const e = new Date(end);
+    const out = [];
+    let cur = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+    while(cur < e){
+      const nxt = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + (weeks * 7));
+      const periodEnd = (nxt > e) ? e : nxt;
+      out.push({ start: toISO(cur), end: toISO(periodEnd) });
+      cur = periodEnd;
+    }
+    return out;
   }
 
   function enumeratePeriods(start, end, monthsPerPeriod){
@@ -32321,6 +32538,80 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     renderTranches(); renderFees(); recompute();
   }
 
+  // ─── Hydrate deal's RFR fixings from shared curves ─────────────────
+  // When a deal whose interest component references a supported index
+  // (BBSY / SOFR / SONIA / etc.) loads, fetch that index's daily fixings
+  // from `rfr_index_fixings` and stash them on
+  // B.tranches[i].interestComponents[0].fixings so builderToInstrument
+  // hands them off to inst.rfr.fixings, which lets the engine's
+  // computeCompoundedRFR walk the series (daily-compounded-in-arrears)
+  // instead of falling back to the snapshot baseRate.
+  //
+  // Cache in memory keyed by index so switching deals reuses fixings.
+  // Fires on deal-code change (same poll pattern used elsewhere).
+  const _rfxCache = {};       // { BBSY: [{date, rate}], ... }
+  const _rfxSupported = new Set(['BBSY','BBSW','SOFR','TermSOFR','SONIA','ESTR','EURIBOR']);
+  let _rfxLastDealKey = '';
+  async function _rfxHydrateActiveDeal(){
+    if(!window.B || !Array.isArray(window.B.tranches) || !window.B.tranches.length) return;
+    const dealKey = B.deal && B.deal.dealId || '';
+    if(dealKey === _rfxLastDealKey) return;
+    _rfxLastDealKey = dealKey;
+    // Determine which indices this deal uses
+    const indices = new Set();
+    B.tranches.forEach(t => (t.interestComponents || []).forEach(ic => {
+      if(ic && ic.baseIndex && _rfxSupported.has(ic.baseIndex)) indices.add(ic.baseIndex);
+    }));
+    if(!indices.size) return;
+    // Fetch each index we haven't cached
+    for(const idx of indices){
+      if(_rfxCache[idx]) continue;
+      try {
+        if(window.SB && window.SB.listFixings){
+          const rows = await window.SB.listFixings(idx);
+          _rfxCache[idx] = rows.map(r => ({ date: r.fix_date, rate: +r.rate }));
+          console.log('[rfx] cached', rows.length, 'fixings for', idx);
+        }
+      } catch(err){ console.warn('[rfx] listFixings failed for', idx, err); }
+    }
+    // Stamp onto B.tranches so the next builderToInstrument picks them up
+    B.tranches.forEach(t => (t.interestComponents || []).forEach(ic => {
+      if(ic && ic.baseIndex && _rfxCache[ic.baseIndex]){
+        ic.fixings = _rfxCache[ic.baseIndex];
+      }
+    }));
+    // Trigger a recompute so the cashflow rows reflect the hydrated fixings
+    if(typeof recompute === 'function') recompute();
+  }
+  setInterval(_rfxHydrateActiveDeal, 1500);
+
+  // ─── Cashflow period picker — change handler + auto-default sync ──
+  // Fires when the user picks a different frequency in the Cashflow tab
+  // header. Persists to localStorage so switching tabs preserves the
+  // choice, then re-runs recompute() which regenerates the rows through
+  // computeCashflows() (which now honours the picker).
+  window.__onCfPeriodChange = function(value){
+    try { localStorage.setItem('cf-period-months', value); } catch(_){}
+    if(typeof recompute === 'function') recompute();
+  };
+  // Sync the picker's <select> value to the resolved default whenever the
+  // active deal changes. Called from the deal-load path (via a 1500ms poll
+  // — the same pattern the Dashboard uses) so switching decks re-defaults
+  // if the user hasn't manually locked in a choice.
+  let _lastCfDealKey = '';
+  setInterval(() => {
+    const pick = $b('cf-period-picker');
+    if(!pick) return;
+    const key = (window.B && window.B.deal && window.B.deal.dealId) || '';
+    if(key === _lastCfDealKey) return;
+    _lastCfDealKey = key;
+    // Prefer a persisted choice; otherwise use the deal's natural default.
+    let target = null;
+    try { target = localStorage.getItem('cf-period-months'); } catch(_){}
+    if(!target || !CF_FREQ_MAP[target]) target = _defaultCashflowFreq();
+    if(pick.value !== target){ pick.value = target; }
+  }, 1500);
+
   // ─── Stage 1 — Cashflow Generation view (consumes builder output) ───
   function renderStage1Cashflows(rows){
     const host = $b('cf-stage1-host');
@@ -35137,6 +35428,185 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   };
 
   function _fmt(n){ return (n == null || isNaN(n)) ? '—' : '$' + Math.round(+n).toLocaleString('en-AU'); }
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Rate fixings modal JS — CSV import, list, delete, seed sample.
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const escape = s => (s == null ? '' : String(s).replace(/"/g,'&quot;'));
+
+  let _lastParsed = null;   // last successful CSV parse — used by Apply
+
+  window.openRateFixingsModal = async function(){
+    const el = $('rate-fixings-modal');
+    if(!el) return;
+    el.style.display = 'flex';
+    // Default index picker to the active deal's baseIndex if we can detect it.
+    try {
+      const t0 = window.B && window.B.tranches && window.B.tranches[0];
+      const bi = t0 && (t0.interestComponents || [])[0] && t0.interestComponents[0].baseIndex;
+      const supported = ['BBSY','BBSW','SOFR','TermSOFR','SONIA','ESTR','EURIBOR'];
+      if(bi && supported.indexOf(bi) >= 0){
+        const sel = $('rfx-index');
+        if(sel) sel.value = bi;
+      }
+    } catch(_){}
+    await window.__rfxRefresh();
+  };
+  window.closeRateFixingsModal = function(){
+    const el = $('rate-fixings-modal'); if(el) el.style.display = 'none';
+  };
+
+  window.__rfxRefresh = async function(){
+    const idx = $('rfx-index')?.value;
+    const listEl = $('rfx-list');
+    const sumEl  = $('rfx-summary');
+    if(!listEl || !sumEl) return;
+    listEl.innerHTML = '<div style="padding:14px; text-align:center; color:var(--n-500); font-size:11px;">Loading…</div>';
+    if(!window.SB?.listFixings){ listEl.innerHTML = '<div style="padding:14px; text-align:center; color:var(--n-500); font-size:11px;">Not connected.</div>'; return; }
+    const rows = await window.SB.listFixings(idx);
+    if(!rows.length){
+      listEl.innerHTML = '<div style="padding:20px; text-align:center; color:var(--n-500); font-size:11px; font-style:italic;">No fixings stored for ' + idx + ' yet. Import a CSV above or click Seed sample 90d.</div>';
+      sumEl.textContent = '0 fixings for ' + idx;
+      return;
+    }
+    const first = rows[0].fix_date, last = rows[rows.length-1].fix_date;
+    const latest = rows[rows.length-1].rate;
+    sumEl.innerHTML = '<b>' + rows.length + '</b> fixings · ' + first + ' → ' + last + ' · latest <b>' + (+latest * 100).toFixed(4) + '%</b>';
+    // Show last 60 rows (most recent first)
+    const recent = rows.slice(-60).reverse();
+    listEl.innerHTML =
+      '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+        '<thead><tr style="background:var(--n-100); position:sticky; top:0; z-index:1;">' +
+          '<th style="padding:5px 8px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:var(--n-600); font-weight:600;">Date</th>' +
+          '<th style="padding:5px 8px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:var(--n-600); font-weight:600;">Rate</th>' +
+          '<th style="padding:5px 8px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:var(--n-600); font-weight:600;">Source</th>' +
+          '<th style="padding:5px 8px; text-align:right; font-size:9.5px; color:var(--n-600); font-weight:600; width:40px;"></th>' +
+        '</tr></thead>' +
+        '<tbody>' + recent.map(r => (
+          '<tr style="border-top:0.5px solid var(--n-100);">' +
+            '<td style="padding:4px 8px; font-family:ui-monospace,SFMono-Regular,monospace;">' + r.fix_date + '</td>' +
+            '<td style="padding:4px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600;">' + (+r.rate * 100).toFixed(4) + '%</td>' +
+            '<td style="padding:4px 8px; color:var(--n-500);">' + escape(r.source || '') + '</td>' +
+            '<td style="padding:4px 8px; text-align:right;"><button onclick="window.__rfxDeleteOne(\'' + r.id + '\')" class="text-red-600 text-[10px]" title="Delete"><i class="ti ti-x"></i></button></td>' +
+          '</tr>'
+        )).join('') + '</tbody>' +
+      '</table>' +
+      (rows.length > 60 ? '<div style="padding:6px; text-align:center; color:var(--n-500); font-size:10px; font-style:italic; background:var(--n-50,#FAFAFA);">Showing 60 most recent of ' + rows.length + ' fixings.</div>' : '');
+  };
+
+  window.__rfxOnFile = function(evt){
+    const file = evt.target.files && evt.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = e => { const ta = $('rfx-csv'); if(ta){ ta.value = e.target.result; _rfxPreview(); } };
+    reader.readAsText(file);
+  };
+
+  function _rfxPreview(){
+    const csv = $('rfx-csv')?.value || '';
+    const parsed = _parseCsv(csv);
+    _lastParsed = parsed;
+    const p = $('rfx-preview');
+    if(!p) return;
+    if(!parsed.ok){ p.innerHTML = '<span style="color:#B91C1C;">' + parsed.err + '</span>'; return; }
+    const min = parsed.rows.reduce((m, r) => r.rate < m ? r.rate : m, parsed.rows[0].rate);
+    const max = parsed.rows.reduce((m, r) => r.rate > m ? r.rate : m, parsed.rows[0].rate);
+    p.innerHTML = 'Parsed <b>' + parsed.rows.length + '</b> rows · ' + parsed.rows[0].date + ' → ' + parsed.rows[parsed.rows.length-1].date +
+                  ' · range <b>' + (min*100).toFixed(4) + '% → ' + (max*100).toFixed(4) + '%</b>' +
+                  (parsed.assumedPercent ? ' · <span style="color:#B45309;">interpreted as %</span>' : ' · <span style="color:var(--n-500);">decimal</span>');
+  }
+  // Live-preview on paste / edit
+  document.addEventListener('input', e => { if(e.target && e.target.id === 'rfx-csv') _rfxPreview(); });
+
+  function _parseCsv(text){
+    text = (text || '').trim();
+    if(!text) return { ok:false, err:'Paste CSV or upload a file.' };
+    const rows = [];
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    // Sniff header — if first line contains 'date' or 'rate', skip it.
+    if(/^[a-z]/i.test(lines[0]) && !/^\d{4}-\d{2}-\d{2}/.test(lines[0])) lines.shift();
+    let assumedPercent = false;
+    for(const line of lines){
+      const parts = line.split(/[,;\t]/).map(x => x.trim());
+      if(parts.length < 2) continue;
+      const [d, r] = parts;
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok:false, err:'Bad date "' + d + '" — expected YYYY-MM-DD.' };
+      let rate = parseFloat(r);
+      if(!isFinite(rate)) return { ok:false, err:'Bad rate "' + r + '" — must be numeric.' };
+      // Heuristic: rates > 1 are almost certainly in percent — normalise to decimal.
+      if(Math.abs(rate) > 1){ rate = rate / 100; assumedPercent = true; }
+      rows.push({ date:d, rate });
+    }
+    if(!rows.length) return { ok:false, err:'No valid rows parsed.' };
+    return { ok:true, rows, assumedPercent };
+  }
+
+  window.__rfxApplyImport = async function(){
+    _rfxPreview();
+    if(!_lastParsed || !_lastParsed.ok){
+      if(typeof toast === 'function') toast('Fix the CSV first', 3000, { kind:'warning' });
+      return;
+    }
+    const idx = $('rfx-index')?.value;
+    const payload = _lastParsed.rows.map(r => ({ rfr_index: idx, fix_date: r.date, rate: r.rate, source: 'csv import' }));
+    const res = await window.SB.bulkUpsertFixings(payload);
+    if(!res.ok){ if(typeof toast === 'function') toast('Import failed: ' + res.reason, 6000, { kind:'error' }); return; }
+    if(typeof toast === 'function') toast('Imported ' + res.inserted + ' fixings for ' + idx, 3000, { kind:'success' });
+    $('rfx-csv').value = '';
+    _lastParsed = null;
+    $('rfx-preview').innerHTML = '';
+    await window.__rfxRefresh();
+    // Nudge cashflows to re-render with the new fixings
+    try { if(typeof window.recompute === 'function') window.recompute(); } catch(_){}
+  };
+
+  window.__rfxDeleteOne = async function(id){
+    if(!confirm('Delete this fixing?')) return;
+    const res = await window.SB.deleteFixing(id);
+    if(!res.ok){ if(typeof toast === 'function') toast('Delete failed: ' + res.reason, 5000, { kind:'error' }); return; }
+    await window.__rfxRefresh();
+    try { if(typeof window.recompute === 'function') window.recompute(); } catch(_){}
+  };
+
+  window.__rfxDeleteAll = async function(){
+    const idx = $('rfx-index')?.value;
+    if(!confirm('Delete ALL fixings for ' + idx + '? This cannot be undone.')) return;
+    const res = await window.SB.deleteFixingsRange(idx);
+    if(!res.ok){ if(typeof toast === 'function') toast('Delete failed: ' + res.reason, 5000, { kind:'error' }); return; }
+    if(typeof toast === 'function') toast('Deleted all ' + idx + ' fixings', 3000, { kind:'success' });
+    await window.__rfxRefresh();
+    try { if(typeof window.recompute === 'function') window.recompute(); } catch(_){}
+  };
+
+  // Seed 90 days of illustrative fixings for the selected index. Uses the
+  // active deal's current baseRate as the centre and adds daily noise
+  // within ±5 bps so the compounded-RFR calc has variation to work with.
+  window.__rfxSeedSample = async function(){
+    const idx = $('rfx-index')?.value;
+    // Guess a sensible centre rate per index
+    const centres = { BBSY:0.0435, BBSW:0.0432, SOFR:0.0533, TermSOFR:0.0530, SONIA:0.0525, ESTR:0.0405, EURIBOR:0.0410 };
+    const centre = centres[idx] || 0.05;
+    const today = new Date();
+    const rows = [];
+    for(let i = 89; i >= 0; i--){
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      // Weekend skip (fixings only publish on business days)
+      const dow = d.getDay();
+      if(dow === 0 || dow === 6) continue;
+      const noise = ((Math.random() - 0.5) * 0.0010);   // ±5 bps
+      rows.push({ rfr_index: idx, fix_date: d.toISOString().slice(0,10), rate: +(centre + noise).toFixed(6), source: 'sample seed' });
+    }
+    const res = await window.SB.bulkUpsertFixings(rows);
+    if(!res.ok){ if(typeof toast === 'function') toast('Seed failed: ' + res.reason, 5000, { kind:'error' }); return; }
+    if(typeof toast === 'function') toast('Seeded ' + res.inserted + ' sample ' + idx + ' fixings', 3000, { kind:'success' });
+    await window.__rfxRefresh();
+    try { if(typeof window.recompute === 'function') window.recompute(); } catch(_){}
+  };
 })();
 </script>
 
