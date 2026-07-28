@@ -27230,6 +27230,65 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
 
   // Expose for the EIR Trace and other dynamic re-renders
   window.renderDashboard = renderDashboard;
+
+  // ─── Auto-refresh Dashboard on active-deal change ─────────────────────
+  // The Dashboard tab-activation handler only fires on tab click. If the
+  // user is ALREADY on Dashboard and swaps the active deal via the modal
+  // picker, header dropdown, session restore, etc., the DOM stays stuck.
+  // Poll for M.instrumentId / B._presetKey changes and re-render in place.
+  // Cheap: string compare + one DOM lookup every 1500ms. No SB calls.
+  (function(){
+    let lastKey = '';
+    let initialised = false;
+    function _tick(){
+      // Only re-render when the Dashboard tab is actually visible. The tab
+      // pane is a `<section id="dashboard" class="stage-tab-content">` — CSS
+      // shows it via `.tab-visible` (see .stage-tab-content { display:none }).
+      const dashPane = document.getElementById('dashboard');
+      if(!dashPane) return;
+      const isDashActive = dashPane.classList.contains('tab-visible')
+        || dashPane.classList.contains('active')       // legacy fallback
+        || (dashPane.offsetParent !== null && dashPane.getBoundingClientRect().height > 0);
+      if(!isDashActive) return;
+      // Compose a stable "active deal" key from any signal.
+      const curKey = (typeof M !== 'undefined' && M && M.instrumentId ? M.instrumentId : '')
+                   + '|' + (window.B && window.B._presetKey ? window.B._presetKey : '')
+                   + '|' + (window.B && window.B.deal && window.B.deal.dealId ? window.B.deal.dealId : '');
+      // First tick just captures the current key without re-rendering — we
+      // only want to react to CHANGES from the initial state.
+      if(!initialised){
+        lastKey = curKey;
+        initialised = true;
+        return;
+      }
+      if(curKey !== lastKey){
+        console.log('[dashboard] deal changed', lastKey, '→', curKey, '· re-rendering');
+        lastKey = curKey;
+        // Sync M.instrumentId to whatever deal is actually loaded — otherwise
+        // currentInstrument() returns the STALE inst from the previous load.
+        // (Observed: user picks FirstAg then Barrenjoey → B updates but
+        // M.instrumentId stayed on FIRSTAG, so Dashboard rendered old data.)
+        try {
+          const dealId = (window.B && window.B.deal && window.B.deal.dealId) || null;
+          if(dealId && typeof M !== 'undefined' && M && Array.isArray(INSTRUMENTS)){
+            const target = INSTRUMENTS.find(i => i && (i.id === dealId || i._presetKey === dealId || i.id === 'v2:'+dealId));
+            if(target && target.id !== M.instrumentId){
+              console.log('[dashboard] syncing M.instrumentId:', M.instrumentId, '→', target.id);
+              M.instrumentId = target.id;
+            } else if(!target && typeof window.registerBuilderInstrument === 'function'){
+              // The instrument isn't in INSTRUMENTS yet — register it from B.
+              console.log('[dashboard] registerBuilderInstrument() — target not found in INSTRUMENTS for dealId', dealId);
+              try { window.registerBuilderInstrument(); } catch(_){}
+            }
+          }
+        } catch(err){ console.warn('[dashboard] M.instrumentId sync failed:', err); }
+        try { renderDashboard(); }
+        catch(err){ console.warn('[dashboard] auto-refresh failed:', err); }
+      }
+    }
+    setInterval(_tick, 1500);
+    document.addEventListener('DOMContentLoaded', _tick);
+  })();
 })();
 
 /* ============================================================================
