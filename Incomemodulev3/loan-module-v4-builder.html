@@ -2593,6 +2593,22 @@
               No prepayment without investor consent
             </label>
           </div>
+          <!-- Dual-book (secondary framework). Common when an AU fund sells
+               to US LPs (IFRS primary + US GAAP secondary) or a subsidiary
+               reports under local GAAP but rolls up to a group in IFRS. -->
+          <div><label class="b-label">Secondary reporting framework (optional)</label>
+            <select id="b-secondary-framework" class="b-input">
+              <option value="">— none · single book —</option>
+              <option value="IFRS">IFRS</option>
+              <option value="USGAAP">US GAAP</option>
+              <option value="ASPE">ASPE (Canada)</option>
+              <option value="AASB">AASB (Australia)</option>
+            </select>
+            <div class="text-[10px] text-gray-500 mt-1">When set, Accounting runs the engine twice and produces side-by-side JEs. Use for dual-GAAP reporting (e.g. AU fund with US LPs).</div>
+          </div>
+          <div><label class="b-label">Secondary framework — purpose (optional)</label>
+            <input id="b-secondary-framework-purpose" type="text" placeholder="e.g. US LP reporting · AASB group consolidation" class="b-input"/>
+          </div>
         </div>
       </div>
     </details>
@@ -2623,6 +2639,31 @@
           </div>
           <!-- Guarantor list — rendered by window.__renderGuarantorsList() -->
           <div id="b-guarantors-list"></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- ─── REPORTING REQUIREMENTS ─── borrower obligations with
+         cadence, next-due date, and auto-notice generation on overdue /
+         due-soon. Applies to any deal. Notice status is computed in the
+         DB view deal_reporting_computed. -->
+    <details class="builder-section" id="b-reporting-section">
+      <summary>
+        <div class="builder-section-icon icon-emerald"><i class="ti ti-calendar-event" style="font-size:20px;"></i></div>
+        <div>
+          <div class="builder-section-title">Reporting requirements</div>
+          <div class="builder-section-subtitle">Borrower obligations · monthly PCG · quarterly / annual FS · compliance cert · info-rights pass-through. Auto-emits notices when due-soon or overdue.</div>
+        </div>
+      </summary>
+      <div class="builder-section-body">
+        <div id="b-reporting-empty" class="text-[11px] text-gray-500 italic">Save the deal first, then reopen this panel to add reporting requirements.</div>
+        <div id="b-reporting-body" style="display:none;">
+          <div id="b-reporting-summary" style="padding:10px 12px; background:var(--n-50,#FAFAFA); border-radius:8px; border:0.5px solid var(--n-200); margin-bottom:12px; font-size:11.5px;">—</div>
+          <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+            <button onclick="window.addReportingRequirementUI && window.addReportingRequirementUI()" class="mat-btn primary !py-1 !px-3 text-[11px]"><i class="ti ti-plus"></i>Add requirement</button>
+            <button onclick="window.__sweepReportingNoticesUI && window.__sweepReportingNoticesUI()" class="mat-btn outline !py-1 !px-3 text-[11px]" title="Sweep now: emit notices for any due-soon or overdue reports"><i class="ti ti-bell-ringing" style="font-size:12px;"></i>Sweep now</button>
+          </div>
+          <div id="b-reporting-list"></div>
         </div>
       </div>
     </details>
@@ -7722,6 +7763,56 @@ window.SB = (function(){
     if(error) return { ok:false, reason: error.message };
     return { ok:true };
   }
+  // ═══════════════════════════════════════════════════════════════════
+  // Reporting cadence — deal_reporting_requirements + sweep
+  // ═══════════════════════════════════════════════════════════════════
+  async function listReportingRequirements(dealUuid){
+    if(!_client || !_connected || !dealUuid) return [];
+    const { data, error } = await _client.from('deal_reporting_computed')
+      .select('*').eq('deal_id', dealUuid).order('next_due_date', { ascending: true });
+    if(error){ console.error('[SB] listReportingRequirements:', error); return []; }
+    return data || [];
+  }
+  async function upsertReportingRequirement(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!row.deal_id) return { ok:false, reason:'deal_id required' };
+    if(!row.report_type || !row.cadence) return { ok:false, reason:'report_type + cadence required' };
+    if(!row.label) row.label = row.report_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    if(row.created_by === undefined && _currentUser && !row.id) row.created_by = _currentUser.id;
+    const { data, error } = await _client.from('deal_reporting_requirements').upsert(row).select().single();
+    if(error){ console.error('[SB] upsertReportingRequirement:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, row: data };
+  }
+  async function deleteReportingRequirement(id){
+    const { error } = await _client.from('deal_reporting_requirements').delete().eq('id', id);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+  async function markReportingReceived(id, receivedDate){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    // Advance next_due_date by the cadence, mark last_received_at.
+    const { data: cur, error: e1 } = await _client.from('deal_reporting_requirements').select('*').eq('id', id).single();
+    if(e1) return { ok:false, reason: e1.message };
+    const cadenceMonths = { monthly:1, quarterly:3, half_yearly:6, annual:12 }[cur.cadence] || 0;
+    const nextDue = new Date(cur.next_due_date || receivedDate);
+    if(cadenceMonths > 0) nextDue.setMonth(nextDue.getMonth() + cadenceMonths);
+    const patch = {
+      last_received_at: receivedDate,
+      last_received_by: _currentUser ? _currentUser.id : null,
+      next_due_date: cadenceMonths > 0 ? nextDue.toISOString().slice(0,10) : cur.next_due_date
+    };
+    const { data, error } = await _client.from('deal_reporting_requirements').update(patch).eq('id', id).select().single();
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, row: data };
+  }
+  async function sweepReportingNotices(){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { data, error } = await _client.rpc('sweep_reporting_notices');
+    if(error){ console.error('[SB] sweep_reporting_notices:', error); return { ok:false, reason: error.message }; }
+    const r = Array.isArray(data) ? data[0] : data;
+    return { ok:true, inserted: r?.inserted_count || 0, checked: r?.checked_count || 0 };
+  }
+
   async function deleteFixingsRange(rfrIndex, fromDate, toDate){
     if(!_client || !_connected || !rfrIndex) return { ok:false, reason:'index required' };
     let q = _client.from('rfr_index_fixings').delete().eq('rfr_index', rfrIndex);
@@ -9046,6 +9137,8 @@ window.SB = (function(){
         prepayment_consent_required:B.deal.prepaymentConsentRequired != null ? !!B.deal.prepaymentConsentRequired : null,
         governing_law_jurisdiction: B.deal.governingLawJurisdiction                                         || null,
         s128f_public_offer:         B.deal.s128fPublicOffer          != null ? !!B.deal.s128fPublicOffer          : null,
+        secondary_framework:         B.deal.secondaryFramework           || null,
+        secondary_framework_purpose: B.deal.secondaryFrameworkPurpose    || null,
         // FirstAg borrowing-base sizing (gap E)
         backgrounding_sublimit:        B.deal.backgroundingSublimit       != null ? +B.deal.backgroundingSublimit       : null,
         backgrounding_sublimit_days:   B.deal.backgroundingSublimitDays   != null ? +B.deal.backgroundingSublimitDays   : null,
@@ -9724,6 +9817,8 @@ window.SB = (function(){
             prepaymentConsentRequired:   row.prepayment_consent_required != null ? !!row.prepayment_consent_required : null,
             governingLawJurisdiction:    row.governing_law_jurisdiction  || null,
             s128fPublicOffer:            row.s128f_public_offer          != null ? !!row.s128f_public_offer          : null,
+            secondaryFramework:          row.secondary_framework         || null,
+            secondaryFrameworkPurpose:   row.secondary_framework_purpose || null,
             // FirstAg borrowing-base sizing (gap E)
             backgroundingSublimit:       row.backgrounding_sublimit         != null ? +row.backgrounding_sublimit         : null,
             backgroundingSublimitDays:   row.backgrounding_sublimit_days    != null ? +row.backgrounding_sublimit_days    : null,
@@ -10343,6 +10438,7 @@ window.SB = (function(){
     listBBInventory, upsertBBInventory, deleteBBInventory,
     listBBCertificates, upsertBBCertificate, approveBBCertificate, rejectBBCertificate, deleteBBCertificate,
     listFixings, bulkUpsertFixings, deleteFixing, deleteFixingsRange,
+    listReportingRequirements, upsertReportingRequirement, deleteReportingRequirement, markReportingReceived, sweepReportingNotices,
     listTeamMembers, addUserToTeam, removeUserFromTeam, updateDealTeam,
     // Loan agent notices (Tier 1 #3)
     fetchNotices, upsertNotice, bulkInsertNotices, updateNoticeStatus, updateNoticeFields, deleteNotice, wipeAutoDerivedNoticesForDeal,
@@ -15973,6 +16069,23 @@ function runAccountingImpl(){
   // engine generates journals — otherwise the KPIs / JE rows are stale.
   M.schedule = buildSchedule(inst);
   M.summary = summarize(M.schedule, inst.settlementDate, inst.maturityDate);
+
+  // ─── Dual-book (secondary framework) ─────────────────────────────
+  // When the deal has secondaryFramework set, run the engine a SECOND
+  // time under that framework and stash the resulting schedule +
+  // summary on M.secondarySchedule / M.secondarySummary. Rendered
+  // side-by-side in the accounting panel below.
+  M.secondarySchedule = null;
+  M.secondarySummary  = null;
+  const secFwk = (window.B && window.B.deal && window.B.deal.secondaryFramework) || inst.secondaryFramework;
+  if(secFwk && secFwk !== inst.accountingFramework){
+    try {
+      const shadow = Object.assign({}, inst, { accountingFramework: secFwk });
+      M.secondarySchedule = buildSchedule(shadow);
+      M.secondarySummary  = summarize(M.secondarySchedule, inst.settlementDate, inst.maturityDate);
+      console.log('[dual-book] secondary schedule built for', secFwk, '· rows', M.secondarySchedule.length);
+    } catch(err){ console.warn('[dual-book] secondary buildSchedule failed:', err); }
+  }
   // Refresh capability cards now that the deal has been processed
   renderCapabilityCards(inst);
   renderChangeHandlingPanel(inst);
@@ -15999,6 +16112,73 @@ function runAccountingImpl(){
   } else {
     $('ifrs-eir').textContent = fmtPct(eir.couponRate, 4) + ' (coupon, no amort)';
     $('ifrs-eir-note').textContent = eir.note || 'Drawn at par — EIR = coupon';
+  }
+  // ─── Dual-book side-by-side summary card ─────────────────────────
+  // Injected under #ifrs-eir-note when secondaryFramework is set. Shows
+  // primary vs secondary EIR + total interest + total fees so the user
+  // sees the diff between the two GAAP treatments at a glance.
+  const dualHost = $('ifrs-dual-book') || (function(){
+    const parent = $('ifrs-eir-note')?.parentElement;
+    if(!parent) return null;
+    const d = document.createElement('div');
+    d.id = 'ifrs-dual-book';
+    d.style.cssText = 'margin-top:10px;';
+    parent.appendChild(d);
+    return d;
+  })();
+  if(dualHost){
+    if(!M.secondarySchedule || !M.secondarySummary){
+      dualHost.innerHTML = '';
+    } else {
+      const primFwk = inst.accountingFramework || 'IFRS';
+      const secFwk2 = secFwk;
+      const secInst = Object.assign({}, inst, { accountingFramework: secFwk2 });
+      const secEir  = computeEIR(secInst) || { couponRate: 0, effectiveYield: null, method: '—' };
+      const primInt = +M.summary.totalCashAccrual || 0;
+      const secInt  = +M.secondarySummary.totalCashAccrual || 0;
+      const primFee = +M.summary.totalFees || 0;
+      const secFee  = +M.secondarySummary.totalFees || 0;
+      const purpose = (window.B?.deal?.secondaryFrameworkPurpose) || '';
+      const diff = (a, b) => (a - b);
+      const fmtDelta = d => (Math.abs(d) < 0.005) ? '—' : (d > 0 ? '+' : '') + fmtMoney(d, inst.currency || 'GBP');
+      dualHost.innerHTML =
+        '<div style="margin-top:8px; padding:10px 12px; background:linear-gradient(180deg, #EEF2FF 0%, var(--n-0) 100%); border:0.5px solid #C7D2FE; border-radius:8px;">' +
+          '<div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">' +
+            '<i class="ti ti-books" style="font-size:14px; color:#4338CA;"></i>' +
+            '<div style="font-size:10.5px; text-transform:uppercase; color:#4338CA; font-weight:700; letter-spacing:0.4px;">Dual-book comparison</div>' +
+            (purpose ? '<div style="font-size:10.5px; color:var(--n-500);"> · ' + purpose + '</div>' : '') +
+          '</div>' +
+          '<table style="width:100%; font-size:11px; border-collapse:collapse;">' +
+            '<thead><tr style="border-bottom:0.5px solid #C7D2FE;">' +
+              '<th style="padding:4px 6px; text-align:left; color:var(--n-500); font-weight:600; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px;">Metric</th>' +
+              '<th style="padding:4px 6px; text-align:right; color:var(--n-800); font-weight:600;">' + primFwk + ' (primary)</th>' +
+              '<th style="padding:4px 6px; text-align:right; color:var(--n-800); font-weight:600;">' + secFwk2 + ' (secondary)</th>' +
+              '<th style="padding:4px 6px; text-align:right; color:var(--n-500); font-weight:600; font-size:9.5px;">Δ</th>' +
+            '</tr></thead>' +
+            '<tbody>' +
+              '<tr style="border-top:0.5px solid #E0E7FF;"><td style="padding:4px 6px; color:var(--n-700);">EIR (effective yield)</td>' +
+                '<td style="padding:4px 6px; text-align:right; font-variant-numeric:tabular-nums;">' + (eir.effectiveYield != null ? fmtPct(eir.effectiveYield, 4) : fmtPct(eir.couponRate, 4) + ' <span style="color:var(--n-500); font-size:10px;">(coupon)</span>') + '</td>' +
+                '<td style="padding:4px 6px; text-align:right; font-variant-numeric:tabular-nums;">' + (secEir.effectiveYield != null ? fmtPct(secEir.effectiveYield, 4) : fmtPct(secEir.couponRate, 4) + ' <span style="color:var(--n-500); font-size:10px;">(coupon)</span>') + '</td>' +
+                '<td style="padding:4px 6px; text-align:right; color:var(--n-500); font-size:10px;">—</td>' +
+              '</tr>' +
+              '<tr style="border-top:0.5px solid #E0E7FF;"><td style="padding:4px 6px; color:var(--n-700);">Total interest (life)</td>' +
+                '<td style="padding:4px 6px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtMoney(primInt, inst.currency || 'GBP') + '</td>' +
+                '<td style="padding:4px 6px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtMoney(secInt, inst.currency || 'GBP') + '</td>' +
+                '<td style="padding:4px 6px; text-align:right; color:' + (Math.abs(diff(primInt, secInt)) > 100 ? '#B45309' : 'var(--n-500)') + '; font-variant-numeric:tabular-nums;">' + fmtDelta(diff(primInt, secInt)) + '</td>' +
+              '</tr>' +
+              '<tr style="border-top:0.5px solid #E0E7FF;"><td style="padding:4px 6px; color:var(--n-700);">Total fees (life)</td>' +
+                '<td style="padding:4px 6px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtMoney(primFee, inst.currency || 'GBP') + '</td>' +
+                '<td style="padding:4px 6px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtMoney(secFee, inst.currency || 'GBP') + '</td>' +
+                '<td style="padding:4px 6px; text-align:right; color:' + (Math.abs(diff(primFee, secFee)) > 100 ? '#B45309' : 'var(--n-500)') + '; font-variant-numeric:tabular-nums;">' + fmtDelta(diff(primFee, secFee)) + '</td>' +
+              '</tr>' +
+            '</tbody>' +
+          '</table>' +
+          '<div style="margin-top:6px; font-size:10px; color:var(--n-500);">' +
+            'Same instrument, run twice — engine dispatches to ' + secFwk2 + '-specific EIR method (' + (secFwk2 === 'USGAAP' ? 'Interest AT 4-method calculator' : 'IRR-style bisection') + '). ' +
+            'Where deltas are non-zero, expect a footnote in the audit pack.' +
+          '</div>' +
+        '</div>';
+    }
   }
   // Fair value — for AmortisedCost the asset isn't carried at FV on balance sheet,
   // but IFRS 7 §25 still requires FV disclosure with a Level tag in the notes.
@@ -29819,6 +29999,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.deal.governingLawJurisdiction = $b('b-governing-law')?.value || null;
     B.deal.s128fPublicOffer         = !!$b('b-s128f')?.checked;
     B.deal.prepaymentConsentRequired= !!$b('b-prepay-consent')?.checked;
+    B.deal.secondaryFramework       = $b('b-secondary-framework')?.value || null;
+    B.deal.secondaryFrameworkPurpose= $b('b-secondary-framework-purpose')?.value || null;
   }
   function updateBuilderStatus(){
     const valid = B.deal.name && B.deal.settle && B.deal.maturity && B.tranches.length && B.tranches.some(t => t.face > 0);
@@ -32467,6 +32649,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(s128Chk) s128Chk.checked = !!B.deal.s128fPublicOffer;
     const ppChk = document.getElementById('b-prepay-consent');
     if(ppChk) ppChk.checked = !!B.deal.prepaymentConsentRequired;
+    const sfSel = document.getElementById('b-secondary-framework');
+    if(sfSel) sfSel.value = B.deal.secondaryFramework || '';
+    setIf('b-secondary-framework-purpose', B.deal.secondaryFrameworkPurpose);
     const legalSection = document.getElementById('b-legal-section');
     if(legalSection){
       legalSection.open = !!(B.deal.targetFinancialCloseDate || B.deal.intercreditorDeedRef ||
@@ -34694,6 +34879,19 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         console.warn('[PCS] guarantor seed errors:', results.filter(r => !r.ok).map(r => r.reason));
       }
     }
+    // Reporting requirements — term sheet Info Requirements
+    if(dealUuid && window.SB.upsertReportingRequirement){
+      const today = new Date();
+      const isoIn = d => { const x = new Date(today); x.setDate(x.getDate() + d); return x.toISOString().slice(0,10); };
+      const reqs = [
+        { report_type:'monthly_pcg',     label:'Monthly PCG report + minutes',       cadence:'monthly',   due_offset_days:14, grace_days:7,  next_due_date: isoIn(5) },
+        { report_type:'monthly_sales',   label:'Monthly sales report',               cadence:'monthly',   due_offset_days:14, grace_days:7,  next_due_date: isoIn(-2) },
+        { report_type:'quarterly_fs',    label:'Quarterly unaudited FS',             cadence:'quarterly', due_offset_days:45, grace_days:15, next_due_date: isoIn(30) },
+        { report_type:'annual_fs',       label:'Annual audited FS (Borrower + Contractor)', cadence:'annual', due_offset_days:90, grace_days:30, next_due_date: isoIn(180) },
+        { report_type:'compliance_cert', label:'Annual compliance certificate',      cadence:'annual',    due_offset_days:90, grace_days:15, next_due_date: isoIn(180) }
+      ];
+      await Promise.all(reqs.map(r => window.SB.upsertReportingRequirement({ ...r, deal_id: dealUuid, is_active: true })));
+    }
     return res;
   };
 
@@ -34967,8 +35165,20 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const gResults = await Promise.all(guarantors.map(g => window.SB.upsertDealGuarantor(g)));
       console.log('[PCS] FirstAg guarantors seeded:', gResults.filter(r => r.ok).length + '/' + gResults.length);
     }
+    // Reporting requirements — Facility Terms Item 19
+    if(window.SB.upsertReportingRequirement){
+      const today = new Date();
+      const isoIn = d => { const x = new Date(today); x.setDate(x.getDate() + d); return x.toISOString().slice(0,10); };
+      const reqs = [
+        { report_type:'annual_fs',            label:'Annual audited FS (per entity + consolidated)', cadence:'annual',      due_offset_days:90, grace_days:30, next_due_date: isoIn(90) },
+        { report_type:'half_yearly_fs',       label:'Half-yearly consolidated FS (unaudited)',       cadence:'half_yearly', due_offset_days:90, grace_days:15, next_due_date: isoIn(45) },
+        { report_type:'quarterly_management', label:'Consolidated management accounts',              cadence:'quarterly',   due_offset_days:14, grace_days:7,  next_due_date: isoIn(-3) },
+        { report_type:'compliance_cert',      label:'Compliance certificate (with annual FS)',       cadence:'annual',      due_offset_days:90, grace_days:15, next_due_date: isoIn(90) }
+      ];
+      await Promise.all(reqs.map(r => window.SB.upsertReportingRequirement({ ...r, deal_id: dealUuid, is_active: true })));
+    }
 
-    if(typeof toast === 'function') toast('FirstAg seeded · ' + acResults.length + ' asset classes, ' + locations.length + ' locations, ' + offtakers.length + '+1 offtakers, ' + inventory.length + ' inventory rows, 5 guarantors, 1 approved cert (base ' + fmt(result.baseAmount) + ')', 8000, { kind:'success', id:'firstag:seed' });
+    if(typeof toast === 'function') toast('FirstAg seeded · ' + acResults.length + ' asset classes, ' + locations.length + ' locations, ' + offtakers.length + '+1 offtakers, ' + inventory.length + ' inventory rows, 5 guarantors, 4 reporting reqs, 1 approved cert (base ' + fmt(result.baseAmount) + ')', 8000, { kind:'success', id:'firstag:seed' });
 
     return res;
 
@@ -35607,6 +35817,226 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     await window.__rfxRefresh();
     try { if(typeof window.recompute === 'function') window.recompute(); } catch(_){}
   };
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Reporting requirements — Deal Setup panel + auto-sweep.
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function(){
+  const escape = s => (s == null ? '' : String(s).replace(/"/g,'&quot;'));
+
+  // Report-type presets — label + default cadence + default due offset (days
+  // after period-end) + default grace. Used by the "Add requirement" quick
+  // picker and by the sample seeders.
+  const REPORT_TYPES = {
+    monthly_pcg:            { label:'Monthly PCG report + minutes',    cadence:'monthly',     dueOffsetDays:14, graceDays:7 },
+    monthly_sales:          { label:'Monthly sales report',            cadence:'monthly',     dueOffsetDays:14, graceDays:7 },
+    quarterly_management:   { label:'Quarterly management accounts',   cadence:'quarterly',   dueOffsetDays:14, graceDays:14 },
+    quarterly_fs:           { label:'Quarterly financial statements',  cadence:'quarterly',   dueOffsetDays:45, graceDays:15 },
+    half_yearly_fs:         { label:'Half-yearly financial statements',cadence:'half_yearly', dueOffsetDays:90, graceDays:15 },
+    annual_fs:              { label:'Annual audited financial statements', cadence:'annual',  dueOffsetDays:90, graceDays:30 },
+    compliance_cert:        { label:'Annual compliance certificate',   cadence:'annual',      dueOffsetDays:90, graceDays:15 },
+    info_rights_passthrough:{ label:'Info-rights pass-through from senior', cadence:'quarterly', dueOffsetDays:30, graceDays:15 }
+  };
+  window.__REPORT_TYPES = REPORT_TYPES;
+
+  function _dealUuid(){
+    if(window.B?._dbDealId) return window.B._dbDealId;
+    if(typeof _resolveActiveDealDbId === 'function') return _resolveActiveDealDbId();
+    return null;
+  }
+
+  function _statusBadge(status){
+    const map = {
+      overdue:  { bg:'#FEE2E2', fg:'#991B1B', label:'OVERDUE' },
+      due_soon: { bg:'#FEF3C7', fg:'#92400E', label:'DUE SOON' },
+      pending:  { bg:'#EFF6FF', fg:'#1E40AF', label:'PENDING' },
+      received: { bg:'#DCFCE7', fg:'#166534', label:'RECEIVED' },
+      inactive: { bg:'#F1F5F9', fg:'#64748B', label:'INACTIVE' }
+    };
+    const c = map[status] || map.pending;
+    return '<span style="padding:2px 8px; background:' + c.bg + '; color:' + c.fg + '; border-radius:999px; font-size:9.5px; font-weight:700; letter-spacing:0.3px;">' + c.label + '</span>';
+  }
+
+  let _repCache = [];
+
+  window.__renderReportingRequirements = async function(){
+    const empty = document.getElementById('b-reporting-empty');
+    const body  = document.getElementById('b-reporting-body');
+    const list  = document.getElementById('b-reporting-list');
+    const sum   = document.getElementById('b-reporting-summary');
+    if(!empty || !body || !list) return;
+    const dealId = _dealUuid();
+    if(!dealId){
+      empty.style.display = ''; body.style.display = 'none';
+      empty.textContent = 'Save the deal first, then reopen this panel to add reporting requirements.';
+      return;
+    }
+    empty.style.display = 'none'; body.style.display = '';
+    if(!window.SB?.listReportingRequirements){
+      list.innerHTML = '<div class="text-[11px] text-gray-500 italic">Not connected.</div>';
+      return;
+    }
+    list.innerHTML = '<div class="text-[11px] text-gray-500 italic">Loading requirements…</div>';
+    _repCache = await window.SB.listReportingRequirements(dealId);
+    _renderList();
+    _renderSummary();
+  };
+
+  function _renderSummary(){
+    const sum = document.getElementById('b-reporting-summary');
+    if(!sum) return;
+    const overdue  = _repCache.filter(r => r.status === 'overdue').length;
+    const dueSoon  = _repCache.filter(r => r.status === 'due_soon').length;
+    const received = _repCache.filter(r => r.status === 'received').length;
+    const total    = _repCache.length;
+    sum.innerHTML =
+      '<div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center;">' +
+        '<div><span style="font-size:10px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.3px;">Total</span> <b style="margin-left:4px;">' + total + '</b></div>' +
+        '<div><span style="font-size:10px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.3px;">Overdue</span> <b style="margin-left:4px; color:' + (overdue?'#B91C1C':'var(--n-800)') + ';">' + overdue + '</b></div>' +
+        '<div><span style="font-size:10px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.3px;">Due soon</span> <b style="margin-left:4px; color:' + (dueSoon?'#B45309':'var(--n-800)') + ';">' + dueSoon + '</b></div>' +
+        '<div><span style="font-size:10px; text-transform:uppercase; color:var(--n-500); font-weight:600; letter-spacing:0.3px;">Received (current period)</span> <b style="margin-left:4px; color:var(--fis-green-700,#15803D);">' + received + '</b></div>' +
+      '</div>';
+  }
+
+  function _renderList(){
+    const list = document.getElementById('b-reporting-list');
+    if(!list) return;
+    if(!_repCache.length){
+      list.innerHTML = '<div class="v4-empty" style="padding:20px;"><div class="v4-empty-icon"><i class="ti ti-calendar-off"></i></div><div class="v4-empty-title">No reporting requirements yet</div><div class="v4-empty-body">Add one above. Common types: monthly PCG, quarterly FS, annual audit, compliance cert.</div></div>';
+      return;
+    }
+    list.innerHTML =
+      '<table style="width:100%; border-collapse:collapse; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px; overflow:hidden; font-size:11px;">' +
+        '<thead><tr style="background:var(--n-100); color:var(--n-600); font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px;">' +
+          '<th style="padding:5px 8px; text-align:left; font-weight:600;">Report</th>' +
+          '<th style="padding:5px 8px; text-align:left; font-weight:600; width:110px;">Cadence</th>' +
+          '<th style="padding:5px 8px; text-align:left; font-weight:600; width:120px;">Next due</th>' +
+          '<th style="padding:5px 8px; text-align:left; font-weight:600; width:120px;">Last received</th>' +
+          '<th style="padding:5px 8px; text-align:center; font-weight:600; width:100px;">Status</th>' +
+          '<th style="padding:5px 8px; text-align:right; font-weight:600; width:180px;">Actions</th>' +
+        '</tr></thead>' +
+        '<tbody>' + _repCache.map((r, i) => (
+          '<tr style="border-top:0.5px solid var(--n-100);">' +
+            '<td style="padding:6px 8px;">' +
+              '<div style="font-weight:600; color:var(--n-800);">' + escape(r.label) + '</div>' +
+              '<div style="font-size:10px; color:var(--n-500);">' + escape(r.report_type) + (r.notes ? ' · ' + escape(r.notes) : '') + '</div>' +
+            '</td>' +
+            '<td style="padding:6px 8px; color:var(--n-700); font-size:10.5px;">' + escape(r.cadence) + '</td>' +
+            '<td style="padding:6px 8px; font-family:ui-monospace,SFMono-Regular,monospace; font-size:10.5px; color:var(--n-800);">' + (r.next_due_date || '—') + '</td>' +
+            '<td style="padding:6px 8px; font-family:ui-monospace,SFMono-Regular,monospace; font-size:10.5px; color:' + (r.last_received_at ? 'var(--fis-green-700,#15803D)' : 'var(--n-400)') + ';">' + (r.last_received_at || '—') + '</td>' +
+            '<td style="padding:6px 8px; text-align:center;">' + _statusBadge(r.status) + '</td>' +
+            '<td style="padding:6px 8px; text-align:right; white-space:nowrap;">' +
+              '<button onclick="window.__markReportingReceived(\'' + r.id + '\')" class="mat-btn outline !py-0.5 !px-2 text-[10px]" title="Mark as received today (advances next-due)">' +
+                '<i class="ti ti-check" style="font-size:11px;"></i>Received' +
+              '</button>' +
+              ' <button onclick="window.__editReportingRequirement(\'' + r.id + '\')" class="mat-btn outline !py-0.5 !px-2 text-[10px]" title="Edit"><i class="ti ti-pencil" style="font-size:11px;"></i></button>' +
+              ' <button onclick="window.__deleteReportingRequirement(\'' + r.id + '\')" class="mat-btn outline !py-0.5 !px-2 text-[10px]" style="color:#B91C1C; border-color:#FCA5A5;" title="Delete"><i class="ti ti-trash" style="font-size:11px;"></i></button>' +
+            '</td>' +
+          '</tr>'
+        )).join('') + '</tbody>' +
+      '</table>';
+  }
+
+  window.addReportingRequirementUI = async function(){
+    const dealId = _dealUuid();
+    if(!dealId){ if(typeof toast === 'function') toast('Save the deal first', 3000, { kind:'warning' }); return; }
+    // Simple picker — use prompt with a menu of common types.
+    const opts = Object.keys(REPORT_TYPES).map((k, i) => (i+1) + '. ' + REPORT_TYPES[k].label + ' (' + k + ')').join('\n');
+    const raw = prompt('Which report type?\n\n' + opts + '\n\n9. Custom (enter type)\n\nEnter number or type key:', '1');
+    if(!raw) return;
+    let key = null;
+    const num = parseInt(raw, 10);
+    if(isFinite(num) && num >= 1 && num <= Object.keys(REPORT_TYPES).length){
+      key = Object.keys(REPORT_TYPES)[num - 1];
+    } else if(REPORT_TYPES[raw]){
+      key = raw;
+    } else if(num === 9 || raw === '9'){
+      key = prompt('Enter custom report type (lowercase, underscores):') || null;
+    } else {
+      key = raw;
+    }
+    if(!key) return;
+    const preset = REPORT_TYPES[key] || { label: key.replace(/_/g,' '), cadence:'quarterly', dueOffsetDays:30, graceDays:15 };
+    // Default next_due = today + due_offset_days
+    const nextDue = new Date();
+    nextDue.setDate(nextDue.getDate() + preset.dueOffsetDays);
+    const res = await window.SB.upsertReportingRequirement({
+      deal_id: dealId,
+      report_type: key,
+      label: preset.label,
+      cadence: preset.cadence,
+      due_offset_days: preset.dueOffsetDays,
+      grace_days: preset.graceDays,
+      next_due_date: nextDue.toISOString().slice(0,10),
+      is_active: true
+    });
+    if(!res.ok){ if(typeof toast === 'function') toast('Add failed: ' + res.reason, 5000, { kind:'error' }); return; }
+    if(typeof toast === 'function') toast('Requirement added', 2500, { kind:'success' });
+    await window.__renderReportingRequirements();
+  };
+
+  window.__markReportingReceived = async function(id){
+    const today = new Date().toISOString().slice(0,10);
+    const dateStr = prompt('Received on (YYYY-MM-DD):', today);
+    if(!dateStr) return;
+    const res = await window.SB.markReportingReceived(id, dateStr);
+    if(!res.ok){ if(typeof toast === 'function') toast('Failed: ' + res.reason, 5000, { kind:'error' }); return; }
+    if(typeof toast === 'function') toast('Marked received · next due advanced', 2500, { kind:'success' });
+    await window.__renderReportingRequirements();
+  };
+
+  window.__editReportingRequirement = async function(id){
+    const r = _repCache.find(x => x.id === id);
+    if(!r) return;
+    const nextDue = prompt('Next due date (YYYY-MM-DD):', r.next_due_date || '');
+    if(nextDue === null) return;
+    const patch = { id, deal_id: r.deal_id, report_type: r.report_type, cadence: r.cadence,
+      due_offset_days: r.due_offset_days, grace_days: r.grace_days,
+      label: r.label, is_active: r.is_active, notes: r.notes,
+      next_due_date: nextDue || null };
+    const res = await window.SB.upsertReportingRequirement(patch);
+    if(!res.ok){ if(typeof toast === 'function') toast('Failed: ' + res.reason, 5000, { kind:'error' }); return; }
+    await window.__renderReportingRequirements();
+  };
+
+  window.__deleteReportingRequirement = async function(id){
+    if(!confirm('Delete this reporting requirement?')) return;
+    const res = await window.SB.deleteReportingRequirement(id);
+    if(!res.ok){ if(typeof toast === 'function') toast('Delete failed: ' + res.reason, 5000, { kind:'error' }); return; }
+    await window.__renderReportingRequirements();
+  };
+
+  window.__sweepReportingNoticesUI = async function(){
+    const res = await window.SB.sweepReportingNotices();
+    if(!res.ok){ if(typeof toast === 'function') toast('Sweep failed: ' + res.reason, 5000, { kind:'error' }); return; }
+    if(typeof toast === 'function'){
+      toast('Reporting sweep · ' + res.inserted + ' notice' + (res.inserted===1?'':'s') + ' emitted (' + res.checked + ' due-soon / overdue checked)', 4500, { kind:'success' });
+    }
+    await window.__renderReportingRequirements();
+  };
+
+  // Auto-open + auto-refresh on section toggle + deal change
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('b-reporting-section')?.addEventListener('toggle', e => {
+      if(e.target.open) window.__renderReportingRequirements();
+    });
+    let lastKey = '';
+    setInterval(() => {
+      const cur = window.B?.deal?.dealId || '';
+      if(cur !== lastKey){
+        lastKey = cur;
+        if(document.getElementById('b-reporting-section')?.open) window.__renderReportingRequirements();
+      }
+    }, 2000);
+    // Background sweep — hourly. Cheap RPC that only inserts new notices.
+    if(window.SB){
+      setTimeout(() => { window.SB.sweepReportingNotices && window.SB.sweepReportingNotices().then(r => r.ok && r.inserted && console.log('[reporting] auto-sweep emitted', r.inserted, 'notices')); }, 15000);
+      setInterval(() => { window.SB.sweepReportingNotices && window.SB.sweepReportingNotices().then(r => r.ok && r.inserted && console.log('[reporting] auto-sweep emitted', r.inserted, 'notices')); }, 3600000);
+    }
+  });
 })();
 </script>
 
