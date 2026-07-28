@@ -6480,14 +6480,14 @@
 
 <div id="active-deal-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" data-close-active-deal="1"></div>
-  <div class="json-modal-pn" style="width:min(1080px,96vw); max-height:90vh;">
+  <div class="json-modal-pn" style="width:min(1360px,98vw); max-height:92vh;">
     <div class="json-modal-h">
       <div>
         <div class="font-semibold text-[14px] flex items-center gap-2">
-          <span class="material-icons-outlined text-[18px]" style="color:#16a34a">folder_open</span>
-          Select an Active Deal
+          <i class="ti ti-notebook" style="font-size:18px; color:#16a34a;"></i>
+          Select an active deal
         </div>
-        <div class="text-[11px] text-gray-500">Preset library — pick a scenario to load into the Builder &amp; downstream pipeline.</div>
+        <div class="text-[11px] text-gray-500">DB-saved deals + preset scenarios. Pick one to load into the Builder and downstream pipeline.</div>
       </div>
       <div class="flex items-center gap-2">
         <input id="active-deal-search" type="text" placeholder="Search by name, framework, team…"
@@ -6697,13 +6697,92 @@ window.SB = (function(){
     if(_connected){
       chip.className = 'chip green';
       chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">cloud_done</span> ' + typeLabel + ' · ' + PROJECT_LABEL;
-      chip.title = 'Connected · ' + typeLabel + ' backend\n· ' + _stats.presetsLoaded + ' deals loaded\n· ' + _stats.runsSaved + ' runs persisted\n· ' + _stats.overridesSaved + ' overrides\n· ' + _stats.sessionsSaved + ' sessions';
+      chip.title = 'Connected · ' + typeLabel + ' backend\n· ' + _stats.presetsLoaded + ' deals loaded\n· ' + _stats.runsSaved + ' runs persisted\n· ' + _stats.overridesSaved + ' overrides\n· ' + _stats.sessionsSaved + ' sessions\n\nClick to force reconnect.';
     } else {
-      chip.className = 'chip amber';
-      chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">cloud_off</span> ' + typeLabel + ' offline';
-      chip.title = 'Disconnected (' + typeLabel + ') · ' + (_lastError ? String(_lastError).slice(0, 200) : 'no client');
+      chip.className = 'chip red';
+      chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">cloud_off</span> ' + typeLabel + ' offline · click to reconnect';
+      chip.title = 'Disconnected (' + typeLabel + ') · ' + (_lastError ? String(_lastError).slice(0, 200) : 'no client') + '\n\nClick to reconnect.';
+    }
+    // Wire click-to-reconnect once. The chip may render before init finishes,
+    // so we set style + onclick every call (cheap, idempotent).
+    chip.style.cursor = 'pointer';
+    chip.onclick = async () => {
+      chip.title = 'Reconnecting…';
+      chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">sync</span> reconnecting…';
+      try {
+        const ok = await init();
+        if(typeof toast === 'function'){
+          toast(ok ? 'Reconnected to DB' : 'Reconnect failed — check network + settings',
+                4000, { kind: ok ? 'success' : 'error', id: 'sb:reconnect' });
+        }
+      } catch(err){
+        console.error('[SB] manual reconnect failed:', err);
+        if(typeof toast === 'function') toast('Reconnect failed: ' + (err.message || err), 6000, { kind:'error', id:'sb:reconnect' });
+      }
+      updateStatusChip();
+    };
+  }
+
+  // ─── DB health-check + auto-reconnect ──────────────────────────────
+  // Every 30s fires a cheap ping (SELECT 1 via user_profiles). Two
+  // consecutive failures flip _connected to false, update the chip,
+  // and attempt a silent reconnect. Prevents the "app appears fine but
+  // every RPC times out" case that hits when the socket has died
+  // (Wi-Fi drop, laptop suspend, Chrome tab throttle, auth refresh
+  // silent-fail, etc.) but nothing in the app noticed.
+  let _healthFailStreak = 0;
+  let _lastHealthCheckAt = 0;
+  async function _dbHealthPing(){
+    if(!_client) return false;
+    try {
+      // ~15s watchdog wraps this via window.fetch (supabase-js honours
+      // the routed fetch). A dead socket triggers TimeoutError → catch.
+      const { error } = await _client.from('user_profiles').select('id').limit(1);
+      _lastHealthCheckAt = Date.now();
+      if(error) throw error;
+      return true;
+    } catch(err){
+      console.warn('[SB] health ping failed:', err && err.message ? err.message : err);
+      return false;
     }
   }
+  async function _dbHealthLoop(){
+    // Skip when the tab is hidden — Chrome throttles bg timers heavily and
+    // firing a ping every 30s in a bg tab wastes a connection slot.
+    if(document.hidden) return;
+    const ok = await _dbHealthPing();
+    if(ok){
+      _healthFailStreak = 0;
+      if(!_connected){
+        // Silent recovery — was offline, now back.
+        _connected = true;
+        updateStatusChip();
+        console.log('[SB] health ping recovered — connection re-established');
+        if(typeof toast === 'function') toast('DB connection restored', 3000, { kind:'success', id:'sb:health' });
+      }
+    } else {
+      _healthFailStreak++;
+      if(_healthFailStreak >= 2 && _connected){
+        console.warn('[SB] health check failed 2x — flipping to disconnected + trying reconnect');
+        _connected = false;
+        _lastError = 'Health check failed — connection may be stale';
+        updateStatusChip();
+        if(typeof toast === 'function') toast('DB connection lost — reconnecting…', 5000, { kind:'warning', id:'sb:health' });
+        // Attempt silent reconnect
+        try {
+          const ok = await init();
+          if(ok && typeof toast === 'function') toast('DB connection restored', 3000, { kind:'success', id:'sb:health' });
+        } catch(err){ console.error('[SB] silent reconnect failed:', err); }
+      }
+    }
+  }
+  // Kick the loop after page load, then every 30s. Also fire on
+  // visibilitychange (unhide) so a returning-from-sleep tab checks immediately.
+  setTimeout(_dbHealthLoop, 10000);
+  setInterval(_dbHealthLoop, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden && (Date.now() - _lastHealthCheckAt) > 15000) _dbHealthLoop();
+  });
 
   async function init(){
     // Wait for the ES-module-loaded createClient to be available.
@@ -16178,88 +16257,193 @@ function openActiveDealModal(){
       const hay = (p.label + ' ' + p.team + ' ' + (p.tag||'') + ' ' + p.key + ' ' + (p.dealCode||'')).toLowerCase();
       return hay.indexOf(q) >= 0;
     });
-    // Try to detect framework via the preset's built deal (cheap one-shot)
-    const fwOf = p => {
-      try { return (p.build().deal.framework || 'IFRS'); } catch(_){ return 'IFRS'; }
+    // Extract cached metadata from each preset's built deal shape. Cheap
+    // one-shot per card — result is memoised on p._meta so re-renders on
+    // search are instant.
+    const metaOf = p => {
+      if(p._meta) return p._meta;
+      let meta = { framework:'IFRS', structure:null, commitment:0, currency:'',
+                   settle:'', maturity:'', tranches:0, fees:0, covenants:0, dealCode:p.dealCode || p.key };
+      try {
+        const built = p.build();
+        const d = built.deal || {}, f = built.facility || {};
+        meta.framework  = d.framework || 'IFRS';
+        meta.structure  = d.structure || null;
+        meta.commitment = +f.commitment || (built.tranches || []).reduce((s,t) => s + (+t.face || +t.faceValue || 0), 0) || 0;
+        meta.currency   = d.currency || '';
+        meta.settle     = d.settle || '';
+        meta.maturity   = d.maturity || '';
+        meta.tranches   = (built.tranches || []).length;
+        meta.fees       = (built.fees || []).length;
+        meta.covenants  = (built.covenants || []).length;
+        meta.dealCode   = d.dealId || meta.dealCode;
+        meta.facilityType = f.type || null;
+      } catch(_){}
+      p._meta = meta;
+      return meta;
     };
     const currentVal = (document.getElementById('sel-instrument') || {}).value || '';
+
     const fwBadge = fw => {
       const fwColors = {
-        IFRS: { bg:'#dbeafe', fg:'#1e40af', label:'IFRS' },
-        USGAAP:{bg:'#fee2e2', fg:'#991b1b', label:'US GAAP' },
-        ASPE:  { bg:'#dcfce7', fg:'#166534', label:'ASPE' },
-        AASB:  { bg:'#fef3c7', fg:'#92400e', label:'AASB · AU' }
+        IFRS:   { bg:'#dbeafe', fg:'#1e40af', label:'IFRS' },
+        USGAAP: { bg:'#fee2e2', fg:'#991b1b', label:'US GAAP' },
+        ASPE:   { bg:'#dcfce7', fg:'#166534', label:'ASPE' },
+        AASB:   { bg:'#fef3c7', fg:'#92400e', label:'AASB · AU' }
       };
       const c = fwColors[fw] || fwColors.IFRS;
-      return '<span style="background:' + c.bg + '; color:' + c.fg + '; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:700; letter-spacing:0.3px; white-space:nowrap;">' + c.label + '</span>';
+      return '<span style="background:' + c.bg + '; color:' + c.fg + '; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:700; letter-spacing:0.3px; white-space:nowrap;">' + c.label + '</span>';
     };
+
+    const structureBadge = (structure, facType) => {
+      // Prefer the deal.structure label; fall back to facility.type for older deals
+      const key = structure || (facType === 'revolvingBorrowingBase' ? 'revolving_borrowing_base' : facType === 'revolver' ? 'revolver' : null);
+      const map = {
+        construction_mezz:       { bg:'#f3e8ff', fg:'#6b21a8', label:'Construction mezz' },
+        revolving_borrowing_base:{ bg:'#dcfce7', fg:'#166534', label:'Revolving BB' },
+        revolver:                { bg:'#e0f2fe', fg:'#075985', label:'Revolver' },
+        corporate_term:          { bg:'#f1f5f9', fg:'#334155', label:'Corporate term' },
+        bilateral:               { bg:'#fef3c7', fg:'#92400e', label:'Bilateral' },
+        term:                    { bg:'#f1f5f9', fg:'#334155', label:'Term' },
+        delayed_draw:            { bg:'#e0e7ff', fg:'#3730a3', label:'Delayed-draw' },
+        borrowing_base:          { bg:'#dcfce7', fg:'#166534', label:'Borrowing base' }
+      };
+      const c = map[key] || null;
+      if(!c) return '';
+      return '<span style="background:' + c.bg + '; color:' + c.fg + '; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:600; white-space:nowrap;">' + c.label + '</span>';
+    };
+
+    const fmtMoneyShort = (n, ccy) => {
+      if(!n || isNaN(n)) return '—';
+      const sym = ccy === 'USD' ? '$' : ccy === 'EUR' ? '€' : ccy === 'GBP' ? '£' : ccy === 'AUD' ? 'A$' : (ccy ? ccy + ' ' : '$');
+      if(n >= 1e9) return sym + (n/1e9).toFixed(2) + 'bn';
+      if(n >= 1e6) return sym + (n/1e6).toFixed(1) + 'm';
+      if(n >= 1e3) return sym + (n/1e3).toFixed(0) + 'k';
+      return sym + Math.round(n).toLocaleString('en-AU');
+    };
+
+    const monthsBetween = (a, b) => {
+      if(!a || !b) return null;
+      const da = new Date(a), db = new Date(b);
+      if(!(da.getTime() && db.getTime())) return null;
+      return Math.round((db - da) / (365.25 * 86400000 / 12));
+    };
+
     if(!filtered.length){
-      body.innerHTML = '<div class="text-[12px] text-gray-500 italic p-3">No deals match — try clearing the search or switching the Team filter.</div>';
+      body.innerHTML = '<div class="v4-empty" style="padding:32px;"><div class="v4-empty-icon"><i class="ti ti-search-off"></i></div><div class="v4-empty-title">No deals match</div><div class="v4-empty-body">Try clearing the search or switching the Team filter.</div></div>';
       count.textContent = '0 of ' + list.length + ' deals · team: ' + team;
       return;
     }
-    // Group by tag. "Saved (DB)" first (your live DB deals), then the canned
-    // library Simple → Complex.
-    const groupOrder = ['Saved (DB)','Simple','Simple+','Medium','Complex'];
-    const groups = {};
-    filtered.forEach(p => {
-      // Stash any unknown tag under "Other" so it still renders.
-      const t = groupOrder.indexOf(p.tag) >= 0 ? p.tag : (p.source === 'db' ? 'Saved (DB)' : (p.tag || 'Other'));
-      (groups[t] = groups[t] || []).push(p);
+
+    // Flat, sortable data grid. DB-saved deals first, then everything else
+    // alphabetically. No complexity classification — just a professional table
+    // of the deals with the fields ops actually need.
+    filtered.sort((a, b) => {
+      const aDb = a.source === 'db' ? 0 : 1;
+      const bDb = b.source === 'db' ? 0 : 1;
+      if(aDb !== bDb) return aDb - bDb;
+      return (a.label || '').localeCompare(b.label || '');
     });
-    // Append any "Other" bucket at the end so nothing is silently dropped.
-    const order = groupOrder.concat(Object.keys(groups).filter(k => groupOrder.indexOf(k) < 0));
-    let html = '';
-    for(const g of order){
-      if(!groups[g]) continue;
-      const isDB = (g === 'Saved (DB)');
-      html += '<div style="margin-bottom:10px;">';
-      html += '<div style="font-size:11px; font-weight:700; ' + (isDB ? 'color:#065f46; background:linear-gradient(to right, #d1fae5 0%, transparent 80%); border-radius:6px; padding:6px 10px;' : 'color:#6b7280; padding:6px 4px;') + ' text-transform:uppercase; letter-spacing:1px;">' + (isDB ? '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px; margin-right:4px; color:#059669;">cloud_done</span>' : '') + g + ' scenarios · ' + groups[g].length + '</div>';
-      html += '<div style="display:grid; grid-template-columns:1fr; gap:6px;">';
-      for(const p of groups[g]){
-        const fw = fwOf(p);
-        const stars = '★'.repeat(p.complexity || 1) + '☆'.repeat(Math.max(0, 5 - (p.complexity || 1)));
-        const shareTag = (p.participationPct && p.participationPct < 100)
-          ? '<span style="background:#f3e8ff; color:#6b21a8; padding:1px 6px; border-radius:6px; font-size:10px; margin-left:6px;">' + p.participationPct + '% share</span>'
-          : '';
-        const selectedVal = 'v2:' + p.key;
-        const isCurrent = currentVal === selectedVal;
-        html +=
-          '<div data-deal-key="' + p.key + '" style="background:white; border:1px solid ' + (isCurrent?'#16a34a':'#e5e7eb') + '; ' +
-            'border-radius:10px; padding:10px 12px; display:flex; align-items:center; gap:10px; cursor:pointer; ' +
-            'transition:all 0.15s; ' + (isCurrent?'box-shadow:0 0 0 2px rgba(22,163,74,0.15);':'') + '" ' +
-            'onmouseover="this.style.borderColor=\'#21295C\'; this.style.background=\'#f8fafc\';" ' +
-            'onmouseout="this.style.borderColor=\'' + (isCurrent?'#16a34a':'#e5e7eb') + '\'; this.style.background=\'white\';">' +
-            '<div style="flex:1; min-width:0;">' +
-              '<div style="font-size:13px; font-weight:600; color:#111827; display:flex; align-items:center; gap:8px;">' +
-                '<span style="color:#f59e0b; font-size:11px;">' + stars + '</span>' +
-                '<span>' + p.label + '</span>' + shareTag +
-                (isCurrent ? '<span class="chip green" style="font-size:9.5px;">current</span>' : '') +
-              '</div>' +
-              '<div style="font-size:11px; color:#6b7280; margin-top:3px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">' +
-                fwBadge(fw) +
-                '<span>· ' + p.team + '</span>' +
-                '<span>· ' + g + '</span>' +
-                '<span style="color:#9ca3af;">· key: ' + p.key + '</span>' +
-              '</div>' +
+
+    // Build the grid — single table, sticky header, hover row highlight, current-deal row highlighted.
+    const rows = filtered.map(p => {
+      const m = metaOf(p);
+      const selectedVal = 'v2:' + p.key;
+      const isCurrent = currentVal === selectedVal;
+      const isDBDeal = p.source === 'db';
+      const shareTag = (p.participationPct && p.participationPct < 100)
+        ? ' <span style="background:#f3e8ff; color:#6b21a8; padding:1px 5px; border-radius:4px; font-size:9px; font-weight:600; vertical-align:1px;">' + p.participationPct + '%</span>'
+        : '';
+      const termMonths = monthsBetween(m.settle, m.maturity);
+      const rowBg = isCurrent ? '#ecfdf5' : '#ffffff';
+      const rowBorder = isCurrent ? '#86efac' : '#f1f5f9';
+      return (
+        '<tr data-deal-key="' + p.key + '" ' +
+            'style="background:' + rowBg + '; border-bottom:1px solid ' + rowBorder + '; transition:background 0.12s;" ' +
+            'onmouseover="this.style.background=\'#f1f5f9\'" ' +
+            'onmouseout="this.style.background=\'' + rowBg + '\'">' +
+          // 1. Source pill
+          '<td style="padding:8px 10px; vertical-align:middle;">' +
+            (isDBDeal
+              ? '<span style="background:#ecfdf5; color:#065f46; padding:2px 7px; border-radius:6px; font-size:9.5px; font-weight:700; letter-spacing:0.3px;"><i class="ti ti-cloud-check" style="font-size:10px; vertical-align:-1px; margin-right:2px;"></i>DB</span>'
+              : '<span style="background:#f8fafc; color:#64748b; padding:2px 7px; border-radius:6px; font-size:9.5px; font-weight:700; letter-spacing:0.3px;">PRESET</span>') +
+          '</td>' +
+          // 2. Deal name + code
+          '<td style="padding:8px 10px; vertical-align:middle; max-width:280px;">' +
+            '<div style="font-size:12px; font-weight:600; color:#111827; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + p.label.replace(/"/g,"&quot;") + '">' +
+              p.label + shareTag +
+              (isCurrent ? ' <span style="background:#16a34a; color:white; padding:1px 6px; border-radius:999px; font-size:9px; font-weight:700; letter-spacing:0.3px; vertical-align:2px;">CURRENT</span>' : '') +
             '</div>' +
-            (p.source === 'db' ?
-              '<button data-delete-key="' + p.key + '" data-delete-deal-id="' + (p.dealId || '') + '" data-delete-deal-code="' + (p.dealCode || '') + '" ' +
-                'class="mat-btn outline !py-1 !px-2 text-[11px]" ' +
-                'style="flex-shrink:0; color:#dc2626; border-color:#fecaca;" ' +
-                'title="Delete this deal from the database (cascade)">' +
-                '<span class="material-icons-outlined text-[14px]">delete</span>' +
-              '</button>'
-            : '') +
-            '<button data-load-key="' + p.key + '" class="mat-btn ' + (isCurrent?'outline':'primary') + ' !py-1 !px-3 text-[11px]" style="flex-shrink:0;">' +
-              '<span class="material-icons-outlined text-[14px]">' + (isCurrent?'check_circle':'play_arrow') + '</span>' +
+            '<div style="font-size:10px; color:#94a3b8; font-family:ui-monospace, SFMono-Regular, monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + (m.dealCode || p.key) + '">' +
+              (m.dealCode || p.key) +
+            '</div>' +
+          '</td>' +
+          // 3. Structure
+          '<td style="padding:8px 10px; vertical-align:middle;">' +
+            (structureBadge(m.structure, m.facilityType) || '<span style="color:#94a3b8; font-size:10.5px;">—</span>') +
+          '</td>' +
+          // 4. Framework
+          '<td style="padding:8px 10px; vertical-align:middle;">' + fwBadge(m.framework) + '</td>' +
+          // 5. Team
+          '<td style="padding:8px 10px; vertical-align:middle; font-size:11px; color:#475569;">' + (p.team || '—') + '</td>' +
+          // 6. Commitment
+          '<td style="padding:8px 10px; vertical-align:middle; text-align:right; font-size:12px; font-weight:600; color:#111827; font-variant-numeric:tabular-nums; white-space:nowrap;">' +
+            fmtMoneyShort(m.commitment, m.currency) +
+            (m.currency ? ' <span style="color:#94a3b8; font-weight:normal; font-size:10px;">' + m.currency + '</span>' : '') +
+          '</td>' +
+          // 7. Term
+          '<td style="padding:8px 10px; vertical-align:middle; font-size:10.5px; font-family:ui-monospace, SFMono-Regular, monospace; color:#475569; white-space:nowrap;">' +
+            (m.settle && m.maturity
+              ? m.settle + ' → ' + m.maturity +
+                (termMonths ? '<div style="font-size:9.5px; color:#94a3b8; font-family:inherit; margin-top:1px;">' + termMonths + ' months</div>' : '')
+              : '<span style="color:#94a3b8;">—</span>') +
+          '</td>' +
+          // 8. Content counts (T/F/C)
+          '<td style="padding:8px 10px; vertical-align:middle; text-align:center; font-size:10.5px; color:#64748b; white-space:nowrap;">' +
+            '<span style="display:inline-flex; gap:8px; font-variant-numeric:tabular-nums;">' +
+              '<span title="Tranches"><i class="ti ti-stack-2" style="font-size:11px; vertical-align:-2px; color:#94a3b8;"></i> ' + (m.tranches || 0) + '</span>' +
+              '<span title="Fees"><i class="ti ti-receipt" style="font-size:11px; vertical-align:-2px; color:#94a3b8;"></i> ' + (m.fees || 0) + '</span>' +
+              '<span title="Covenants"><i class="ti ti-shield-check" style="font-size:11px; vertical-align:-2px; color:#94a3b8;"></i> ' + (m.covenants || 0) + '</span>' +
+            '</span>' +
+          '</td>' +
+          // 9. Actions
+          '<td style="padding:6px 10px; vertical-align:middle; text-align:right; white-space:nowrap;">' +
+            '<button data-load-key="' + p.key + '" class="mat-btn ' + (isCurrent?'outline':'primary') + ' !py-1 !px-2.5 text-[10.5px]">' +
+              '<i class="ti ti-' + (isCurrent?'refresh':'player-play') + '" style="font-size:11px; vertical-align:-1px; margin-right:2px;"></i>' +
               (isCurrent ? 'Reload' : 'Load') +
             '</button>' +
-          '</div>';
-      }
-      html += '</div></div>';
-    }
-    body.innerHTML = html;
+            (isDBDeal ?
+              ' <button data-delete-key="' + p.key + '" data-delete-deal-id="' + (p.dealId || '') + '" data-delete-deal-code="' + (p.dealCode || '') + '" ' +
+                'class="mat-btn outline !py-1 !px-2 text-[10.5px]" ' +
+                'style="color:#b91c1c; border-color:#fecaca; margin-left:4px;" ' +
+                'title="Delete this deal from the database (cascade)">' +
+                '<i class="ti ti-trash" style="font-size:11px;"></i>' +
+              '</button>'
+            : '') +
+          '</td>' +
+        '</tr>'
+      );
+    }).join('');
+
+    body.innerHTML =
+      '<div style="border:0.5px solid var(--n-200); border-radius:8px; overflow:hidden;">' +
+        '<table style="width:100%; border-collapse:collapse; background:#ffffff;">' +
+          '<thead>' +
+            '<tr style="background:#f8fafc; border-bottom:1px solid #e2e8f0;">' +
+              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b; width:60px;">Source</th>' +
+              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Deal name</th>' +
+              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Structure</th>' +
+              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Framework</th>' +
+              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Team</th>' +
+              '<th style="padding:8px 10px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Commitment</th>' +
+              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Term</th>' +
+              '<th style="padding:8px 10px; text-align:center; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;" title="Tranches · Fees · Covenants">T / F / C</th>' +
+              '<th style="padding:8px 10px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Actions</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>';
     count.textContent = filtered.length + ' of ' + list.length + ' deals · team: ' + team;
   }
   render(search ? search.value : '');
@@ -16315,6 +16499,11 @@ function loadActiveDealByKey(key){
       setTimeout(() => {
         try { if(typeof runAccounting === 'function') runAccounting(); }
         catch(err){ console.error('Auto-run on DB preset switch failed:', err); }
+        // Also refresh Dashboard so if the user is already on that tab they
+        // see the new deal's KPIs, covenants, and cashflow chart — not stuck
+        // on the previously-loaded deal's data.
+        try { if(typeof window.renderDashboard === 'function') window.renderDashboard(); }
+        catch(err){ console.error('Auto-render dashboard on DB preset switch failed:', err); }
       }, 100);
       return loaded;
     }
@@ -16328,6 +16517,11 @@ function loadActiveDealByKey(key){
   sel.dispatchEvent(new Event('change', { bubbles:true }));
   closeActiveDealModal();
   refreshActiveDealChip();
+  // Same refresh for legacy presets — the sel.dispatchEvent above may or may
+  // not trigger a dashboard render depending on the change handler's scope.
+  setTimeout(() => {
+    try { if(typeof window.renderDashboard === 'function') window.renderDashboard(); } catch(_){}
+  }, 100);
 }
 
 // Update the "active-deal-chip" in the header to reflect the currently-loaded
