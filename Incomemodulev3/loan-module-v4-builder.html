@@ -7134,18 +7134,40 @@ window.SB = (function(){
 
   // Fetch notices for a set of deal IDs (or all if empty). Returns notices
   // sorted by effective_date ascending. RLS filters by ownership.
+  //
+  // 20s timeout (up from 12s) — with 247 notices across 8 deals plus RLS
+  // filtering the query genuinely takes 10-14s on cold cache. Auto-retries
+  // once on timeout in case a concurrent poll blocked the connection pool.
   async function fetchNotices(dealIds){
     if(!_client || !_connected) return [];
-    try {
+    const _run = async () => {
       let q = _client.from('loan_notices').select('*').order('effective_date', { ascending: true });
       if(Array.isArray(dealIds) && dealIds.length) q = q.in('deal_id', dealIds);
-      const { data, error } = await _withDbTimeout('fetchNotices', q);
-      if(error){ console.error('[SB] fetchNotices:', error); return []; }
+      const { data, error } = await _withDbTimeout('fetchNotices', q, 20000);
+      if(error) throw new Error(error.message || 'fetchNotices error');
       return data || [];
+    };
+    try {
+      return await _run();
     } catch(err){
+      const isTimeout = /timed out/i.test(err && err.message || '');
+      if(isTimeout){
+        console.warn('[SB] fetchNotices timed out — retrying once');
+        try {
+          const data = await _run();
+          console.log('[SB] fetchNotices recovered on retry (' + data.length + ' notices)');
+          return data;
+        } catch(retryErr){
+          console.error('[SB] fetchNotices retry also failed:', retryErr);
+          if(typeof toast === 'function'){
+            toast('Notices load timed out twice — try Reload button on the Notices modal', 6000, {
+              kind: 'error', id: 'sb:fetchNotices', detail: 'loan_notices · Supabase (retry failed)'
+            });
+          }
+          return [];
+        }
+      }
       console.error('[SB] fetchNotices threw:', err);
-      // Surface as a visible toast so the user sees the failure rather
-      // than a silent empty-notices state.
       if(typeof toast === 'function'){
         toast(err.message || 'Failed to load notices', 6000, {
           kind: 'error', id: 'sb:fetchNotices', detail: 'loan_notices · Supabase'
@@ -18159,7 +18181,10 @@ window.refreshNotices = async function(){
   // the modal doesn't get stuck on the spinner.
   let hardTimer;
   const hardStop = new Promise((_, rj) => {
-    hardTimer = setTimeout(() => rj(new Error('Notices load exceeded 15s — aborted so the modal doesn\'t freeze')), 15000);
+    // 45s = 20s primary fetch + 20s retry + 5s buffer for reconciliation.
+    // Matches fetchNotices' own timeout (20s + retry) so the outer guard
+    // fires AFTER the inner retry rather than cutting it off.
+    hardTimer = setTimeout(() => rj(new Error('Notices load exceeded 45s — aborted so the modal doesn\'t freeze')), 45000);
   });
 
   const run = async () => {
