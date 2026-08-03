@@ -3,14 +3,23 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.07.31</title>
+<title>PCS Loan Module · V4 · Build 2026.08.03</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
-     Single source of truth for the build identifier shown in the sidebar
-     badge, the login card, the document title, and any diagnostics. Bump
-     these two values (VERSION + BUILD) whenever you cut a new release. -->
+     Single source of truth for the build identifier shown in the fixed
+     bottom-left pill, the login card, the document title, and diagnostics.
+
+     ⚠️ CONVENTION: PCS_BUILD must be bumped to today's date (YYYY.MM.DD)
+        on EVERY code change to this file. The pill in the bottom-left
+        corner is our version-control indicator — it must reflect the date
+        of the last edit so testers can see at a glance whether they're on
+        the latest build. If you make two builds in one day, use a .N
+        suffix (e.g. '2026.08.03.2').
+
+     Rule of thumb: if you're editing this file, your very first edit or
+     your very last edit should be bumping PCS_BUILD below. -->
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.07.31';
+  window.PCS_BUILD   = '2026.08.03';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -9097,6 +9106,17 @@ window.SB = (function(){
   async function saveDeal(B){
     if(!_client || !_connected) return { ok:false, reason:'not connected' };
     if(!B || !B.deal || !B.deal.name) return { ok:false, reason:'deal name required' };
+    // ─── Session sanity check (2026-07-31, Marija RLS fix) ────────────────
+    // Verify the JWT with the auth server BEFORE writing. If it's expired or
+    // rejected, PostgREST would silently drop to `anon` and every RLS-gated
+    // insert below would fail with a confusing "row-level security" error.
+    // getUser() also triggers a token refresh if we're close to expiry, so
+    // this doubles as the auto-refresh insurance policy.
+    const sess = await _ensureFreshSession();
+    if(!sess.ok){
+      console.warn('[SB] saveDeal aborted — session expired:', sess.reason);
+      return { ok:false, reason:'session expired — please sign in again', expired: true };
+    }
     // ─── Rollback tracking (2026-07) ──────────────────────────────
     // saveDeal writes ~15 related tables sequentially. Any failure mid-way
     // used to leave the parent deal row committed with orphaned partial
@@ -10373,6 +10393,42 @@ window.SB = (function(){
       return _currentUser;
     } catch(err){ console.warn('[SB] _refreshCurrentUser:', err); _currentUser = null; _isAdmin = false; return null; }
   }
+  // Server-verified session check.
+  //
+  // Root cause this was added for (Marija's RLS violation, 2026-07-31):
+  // getSession() returns whatever's in localStorage without verifying it with
+  // the auth server. supabase-js should auto-refresh expired tokens, but under
+  // certain conditions (background-tab throttling, network hiccup during
+  // refresh, watchdog cancelling the refresh fetch) the client can end up with
+  // a stale JWT while _currentUser stays populated. PostgREST then sees the
+  // expired JWT, silently drops to `anon`, and RLS policies referencing
+  // auth.uid() reject the write with a confusing "row-level security" error.
+  //
+  // _ensureFreshSession() calls getUser() which round-trips to /auth/v1/user
+  // — that validates the JWT server-side AND triggers a refresh if the token
+  // is close to expiry. Call this BEFORE any RLS-gated write. On failure it
+  // nulls _currentUser, which flips SB.auth_isSignedIn() → false, which the
+  // login gate observer picks up and re-shows the sign-in form.
+  async function _ensureFreshSession(){
+    if(!_client || !_client.auth) return { ok:false, reason:'not connected' };
+    try {
+      const { data, error } = await _client.auth.getUser();
+      if(error || !data || !data.user){
+        const wasSignedIn = !!_currentUser;
+        _currentUser = null; _isAdmin = false;
+        if(wasSignedIn){
+          // Notify any listeners (login gate observer will re-show itself)
+          _authListeners.forEach(cb => { try { cb(null, 'SESSION_EXPIRED'); } catch(_){} });
+        }
+        return { ok:false, reason: (error && error.message) || 'no active session', expired: true };
+      }
+      _currentUser = data.user;
+      if(!_isAdmin) await _refreshAdminFlag();
+      return { ok:true, user: _currentUser };
+    } catch(err){
+      return { ok:false, reason: (err && err.message) || String(err), expired: true };
+    }
+  }
   // Read user_profiles.is_admin. Cheap read, called on sign-in / session resume.
   async function _refreshAdminFlag(){
     _isAdmin = false;
@@ -10505,6 +10561,7 @@ window.SB = (function(){
     get currentUser(){ return _currentUser; },
     get isAdmin(){ return _isAdmin; },
     _refreshCurrentUser, _refreshAdminFlag,
+    ensureFreshSession: _ensureFreshSession,
     getConfig, setConfig, resetConfig, getDefaults, getBackendTypes,
     get url(){ return SUPABASE_URL; }, get projectLabel(){ return PROJECT_LABEL; },
     get isOverride(){ return _cfg.isOverride; },
@@ -13471,13 +13528,32 @@ function interpretSaveError(rawMsg){
     };
   }
   // RLS
-  if(/row-level security|new row violates row-level security|permission denied/i.test(msg)){
+  if(/row-level security|new row violates row-level security|permission denied|session expired/i.test(msg)){
+    // Kick the login gate check — if the token expired, this pops it back up
+    // so the user can re-authenticate without a hard refresh.
+    try {
+      if(window.SB && window.SB.ensureFreshSession){
+        window.SB.ensureFreshSession().then(r => {
+          if(r && !r.ok && typeof window.__applyGateState === 'function') {
+            window.__applyGateState();
+          }
+        });
+      }
+    } catch(_){}
+    // If the user IS signed in on the client, the overwhelmingly common cause
+    // is a stale JWT (token expired, refresh silently failed). Point them at
+    // re-signing in first. If they're not signed in, it's the classic case.
+    const signedIn = !!(window.SB && window.SB.auth_isSignedIn && window.SB.auth_isSignedIn());
     return {
-      headline: 'Permission denied',
-      summary:  'The database refused this write due to Row-Level Security',
-      field:    'DB Settings',
+      headline: signedIn ? 'Session expired' : 'Not signed in',
+      summary:  signedIn
+        ? 'Your login session is no longer valid. The database rejected the write.'
+        : 'You are not signed in, so the database refused this write.',
+      field:    null,
       fieldId:  null,
-      suggestion: 'Sign in (top-right chip) if you haven\'t. If you are signed in, contact the DB admin — your account may not own this deal.'
+      suggestion: signedIn
+        ? 'Sign out and sign back in (use the user pill in the top-right, or reload the page). If you\'re still blocked after re-signing in, your account may not own this deal — contact your DB admin.'
+        : 'Sign in via the login screen. If it hasn\'t appeared, reload the page.'
     };
   }
   // Generic fallback
@@ -36488,7 +36564,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.07.31</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.03</span>
       </div>
     </div>
     <div>
@@ -36621,8 +36697,15 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(authed){
       ctrl.err(null);
       ctrl.status('');
+    } else {
+      // Coming back from an expired-session drop: tell the user why they're
+      // seeing the gate again.
+      ctrl.status('Your session expired — please sign in again to continue.');
     }
   }
+  // Expose so interpretSaveError (RLS branch) can re-open the gate when a
+  // stale-JWT insert is rejected mid-flight.
+  window.__applyGateState = applyGateState;
   function hookAuth(){
     if(!window.SB || !window.SB.auth_onChange){
       setTimeout(hookAuth, 300);
@@ -36651,7 +36734,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
 -->
 <style>
   #v4-build-stamp {
-    position: fixed; right: 12px; bottom: 10px; z-index: 998;
+    /* Bottom-left of the CONTENT area — offset by the fixed sidebar width
+       (--sb-w, 232px) so the pill doesn't sit underneath the sidebar rail. */
+    position: fixed; left: calc(var(--sb-w, 232px) + 12px); bottom: 10px; z-index: 998;
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 9px; border-radius: 999px;
     background: rgba(255,255,255,0.85); backdrop-filter: blur(6px);
@@ -36671,7 +36756,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     background: var(--fis-green, #22C55E); flex-shrink: 0;
   }
   body:not(.v4-authed) #v4-build-stamp { display: none; }
-  @media (max-width: 640px) { #v4-build-stamp { right: 8px; bottom: 8px; font-size: 10px; } }
+  /* On narrow screens the sidebar collapses — fall back to the viewport edge. */
+  @media (max-width: 640px) { #v4-build-stamp { left: 8px; bottom: 8px; font-size: 10px; } }
 </style>
 <div id="v4-build-stamp" title="Click to copy build identifier">V4 · 2026.07.31</div>
 <script>
