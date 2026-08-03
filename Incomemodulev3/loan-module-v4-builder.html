@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.03</title>
+<title>PCS Loan Module · V4 · Build 2026.08.03.2</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,13 +13,13 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.03.2').
+        suffix (e.g. '2026.08.03.2.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.03';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.03.2';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -7298,13 +7298,72 @@ window.SB = (function(){
   // suspenders — but the extra guard costs nothing and future-proofs
   // against any transport that bypasses fetch (WebSocket, wasm, etc.).
   const DB_CALL_BUDGET_MS = 12000;   // one DB read/write should be well under this
+
+  // ─── DB-timeout tracker (2026-08-03) ─────────────────────────────────
+  // If the DB stops responding, we don't want the UI to hang silently.
+  // Track consecutive timeouts inside a rolling window; after N failures
+  // in that window, force-sign-out with a clear "connection lost"
+  // message. This distinguishes "one flaky call" (recoverable) from
+  // "the DB is down" (need to re-authenticate).
+  const _dbTimeoutState = {
+    count: 0,
+    firstAt: 0,
+    windowMs: 60000,     // 60-second rolling window
+    threshold: 3,        // 3 timeouts in the window → force sign-out
+    tripped: false
+  };
+  function _recordDbSuccess(){
+    // Any successful call resets the counter — a single hiccup shouldn't
+    // build toward auto-signout indefinitely.
+    _dbTimeoutState.count = 0; _dbTimeoutState.firstAt = 0;
+  }
+  function _recordDbTimeout(label){
+    if(_dbTimeoutState.tripped) return;
+    const now = Date.now();
+    if(_dbTimeoutState.count === 0 || (now - _dbTimeoutState.firstAt) > _dbTimeoutState.windowMs){
+      _dbTimeoutState.count = 1; _dbTimeoutState.firstAt = now;
+    } else {
+      _dbTimeoutState.count += 1;
+    }
+    console.warn('[SB] DB timeout · '+label+' · consecutive='+_dbTimeoutState.count+'/'+_dbTimeoutState.threshold);
+    if(_dbTimeoutState.count >= _dbTimeoutState.threshold){
+      _dbTimeoutState.tripped = true;
+      _dbConnectionLost();
+    }
+  }
+  async function _dbConnectionLost(){
+    console.error('[SB] DB connection lost — forcing sign-out after '+_dbTimeoutState.threshold+' timeouts in '+Math.round(_dbTimeoutState.windowMs/1000)+'s');
+    try {
+      if(typeof toast === 'function'){
+        toast('Database connection lost — signing out. Please sign in again.', 8000, {
+          kind: 'error', id: 'sb:db-lost', detail: 'exceeded '+_dbTimeoutState.threshold+' consecutive DB timeouts'
+        });
+      }
+      // Sign out client-side (best-effort — the server call itself may time out)
+      try { await _withDbTimeout('signOut', _client.auth.signOut(), 5000); } catch(_){}
+      _currentUser = null; _isAdmin = false;
+      _authListeners.forEach(cb => { try { cb(null, 'SESSION_EXPIRED'); } catch(_){} });
+      // Re-show login gate so the user can re-authenticate cleanly
+      if(typeof window.__applyGateState === 'function') window.__applyGateState();
+      // Reset the tripwire once the user is back on the gate so a subsequent
+      // successful sign-in resumes normal behaviour.
+      setTimeout(() => { _dbTimeoutState.tripped = false; _dbTimeoutState.count = 0; }, 3000);
+    } catch(err){ console.error('[SB] _dbConnectionLost handler failed:', err); }
+  }
+
   function _withDbTimeout(label, promise, ms){
     ms = ms || DB_CALL_BUDGET_MS;
     let timer;
     const timeout = new Promise((_, rj) => {
       timer = setTimeout(() => rj(new Error(label + ' · timed out after ' + Math.round(ms/1000) + 's — DB call did not return')), ms);
     });
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    return Promise.race([promise, timeout])
+      .then(v => { _recordDbSuccess(); return v; })
+      .catch(err => {
+        if(/timed out/i.test(err && err.message || '')) _recordDbTimeout(label);
+        throw err;
+      })
+      .finally(() => clearTimeout(timer));
   }
 
   // Fetch notices for a set of deal IDs (or all if empty). Returns notices
@@ -36564,7 +36623,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.03</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.03.2</span>
       </div>
     </div>
     <div>
