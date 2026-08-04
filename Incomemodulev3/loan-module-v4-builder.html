@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.04.2</title>
+<title>PCS Loan Module · V4 · Build 2026.08.04.5</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.04.2.2').
+        suffix (e.g. '2026.08.04.5.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.04.2';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.04.5';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -6891,6 +6891,12 @@
       <div class="flex items-center gap-2">
         <input id="active-deal-search" type="text" placeholder="Search by name, framework, team…"
                class="border border-gray-300 rounded px-2 py-1 text-[12px]" style="min-width:240px"/>
+        <button id="active-deal-refresh"
+                onclick="window.refreshActiveDealList && window.refreshActiveDealList(this)"
+                class="mat-btn outline !py-1 !px-2 text-[12px]"
+                title="Force-refresh the DB-saved deal list from the server. Use if a deal you just saved isn't appearing.">
+          <i class="ti ti-refresh" style="font-size:14px; vertical-align:-2px;"></i> Refresh
+        </button>
         <button onclick="window.openBulkImportModal && window.openBulkImportModal()"
                 class="mat-btn !py-1 !px-2 text-[12px]"
                 style="background:#4F46E5; color:white; border-color:#4F46E5;"
@@ -7738,49 +7744,88 @@ window.SB = (function(){
       .finally(() => clearTimeout(timer));
   }
 
+  // ─── In-flight call dedup + true fetch abort (2026-08-04) ──────────
+  // Chrome caps concurrent connections to any one origin at 6. When multiple
+  // fetchNotices calls fire in quick succession (modal open + auto-refresh
+  // poll + user click), they queue behind each other and the last ones can
+  // time out before their fetch ever leaves the browser.
+  //
+  // _dedupe: if a call with the same key is in flight, return the same
+  // promise instead of firing a duplicate. Once resolved/rejected, the slot
+  // opens for the next call.
+  const _inFlight = new Map();
+  function _dedupe(key, fn){
+    if(_inFlight.has(key)) return _inFlight.get(key);
+    const p = Promise.resolve().then(fn).finally(() => { _inFlight.delete(key); });
+    _inFlight.set(key, p);
+    return p;
+  }
+
   // Fetch notices for a set of deal IDs (or all if empty). Returns notices
   // sorted by effective_date ascending. RLS filters by ownership.
   //
-  // 20s timeout (up from 12s) — with 247 notices across 8 deals plus RLS
-  // filtering the query genuinely takes 10-14s on cold cache. Auto-retries
-  // once on timeout in case a concurrent poll blocked the connection pool.
+  // 2026-08-04 rewrite: added AbortController wired through supabase-js's
+  // .abortSignal(sig) — when the client-side deadline hits, the underlying
+  // fetch is truly aborted (socket released), not just orphaned. Also
+  // dedupes concurrent callers. 12s deadline (down from 20s) — the query
+  // genuinely runs in 1.2ms per EXPLAIN ANALYZE, so 12s is generous even
+  // on cold cache. Kept select('*') because downstream code depends on
+  // rate / breakdown / matched_notice_id / variance_json / sender /
+  // recipients — narrowing the list was a minor payload optimisation not
+  // worth maintaining alongside schema changes.
   async function fetchNotices(dealIds){
-    if(!_client || !_connected) return [];
-    const _run = async () => {
-      let q = _client.from('loan_notices').select('*').order('effective_date', { ascending: true });
-      if(Array.isArray(dealIds) && dealIds.length) q = q.in('deal_id', dealIds);
-      const { data, error } = await _withDbTimeout('fetchNotices', q, 20000);
-      if(error) throw new Error(error.message || 'fetchNotices error');
-      return data || [];
-    };
-    try {
-      return await _run();
-    } catch(err){
-      const isTimeout = /timed out/i.test(err && err.message || '');
-      if(isTimeout){
-        console.warn('[SB] fetchNotices timed out — retrying once');
+    if(!_client || !_connected || _authKicked) return [];
+    const dedupeKey = 'fetchNotices:' + (Array.isArray(dealIds) && dealIds.length ? dealIds.slice().sort().join(',') : 'ALL');
+    return _dedupe(dedupeKey, async () => {
+      const _run = async () => {
+        const ac = new AbortController();
+        const killTimer = setTimeout(() => ac.abort(new Error('fetchNotices client-side abort (12s deadline)')), 12000);
         try {
-          const data = await _run();
-          console.log('[SB] fetchNotices recovered on retry (' + data.length + ' notices)');
-          return data;
-        } catch(retryErr){
-          console.error('[SB] fetchNotices retry also failed:', retryErr);
-          if(typeof toast === 'function'){
-            toast('Notices load timed out twice — try Reload button on the Notices modal', 6000, {
-              kind: 'error', id: 'sb:fetchNotices', detail: 'loan_notices · Supabase (retry failed)'
-            });
+          let q = _client.from('loan_notices').select('*').order('effective_date', { ascending: true }).abortSignal(ac.signal);
+          if(Array.isArray(dealIds) && dealIds.length) q = q.in('deal_id', dealIds);
+          const { data, error } = await q;
+          if(error) throw new Error(error.message || 'fetchNotices error');
+          _recordDbSuccess();
+          return data || [];
+        } catch(err){
+          if(err && (err.name === 'AbortError' || /abort/i.test(err.message || ''))){
+            _recordDbTimeout('fetchNotices');
+            throw new Error('fetchNotices · aborted after 12s (deadline)');
           }
-          return [];
+          throw err;
+        } finally {
+          clearTimeout(killTimer);
         }
+      };
+      try {
+        return await _run();
+      } catch(err){
+        const isTimeout = /abort|deadline/i.test(err && err.message || '');
+        if(isTimeout){
+          console.warn('[SB] fetchNotices timed out — retrying once with fresh signal');
+          try {
+            const data = await _run();
+            console.log('[SB] fetchNotices recovered on retry (' + data.length + ' notices)');
+            return data;
+          } catch(retryErr){
+            console.error('[SB] fetchNotices retry also failed:', retryErr);
+            if(typeof toast === 'function'){
+              toast('Notices load timed out — Reload the Notices modal to try again.', 6000, {
+                kind: 'error', id: 'sb:fetchNotices', detail: 'loan_notices · Supabase (retry failed)'
+              });
+            }
+            return [];
+          }
+        }
+        console.error('[SB] fetchNotices threw:', err);
+        if(typeof toast === 'function'){
+          toast(err.message || 'Failed to load notices', 6000, {
+            kind: 'error', id: 'sb:fetchNotices', detail: 'loan_notices · Supabase'
+          });
+        }
+        return [];
       }
-      console.error('[SB] fetchNotices threw:', err);
-      if(typeof toast === 'function'){
-        toast(err.message || 'Failed to load notices', 6000, {
-          kind: 'error', id: 'sb:fetchNotices', detail: 'loan_notices · Supabase'
-        });
-      }
-      return [];
-    }
+    });
   }
 
   // Upsert an auto-derived notice. The unique index on (deal_id, notice_type,
@@ -10230,6 +10275,13 @@ window.SB = (function(){
   // ------------------------------------------------------------
   async function fetchUserDeals(){
     if(!_client || !_connected) return [];
+    // Dedup — Init calls this AND the deal picker calls this on every open.
+    // Without dedup, two rapid-fire opens fire two 3-table-deep JOINs against
+    // Supabase, exhausting Chrome's 6-connection pool and blocking everything
+    // else. In-flight callers share the same promise.
+    return _dedupe('fetchUserDeals', () => _fetchUserDealsImpl());
+  }
+  async function _fetchUserDealsImpl(){
     try {
       const q = _client
         .from('deals')
@@ -17137,6 +17189,34 @@ function openActiveDealModal(){
   const count = document.getElementById('active-deal-count');
   const search = document.getElementById('active-deal-search');
   if(!body) return;
+  // ─── Refresh DB deals on every open (2026-08-04) ────────────────────
+  // Prevents the "empty list" bug where the one-shot init fetchUserDeals
+  // failed (network hiccup, stalled socket, timed out on connect) and the
+  // user then had no way to see their DB-saved deals until reload. Every
+  // open now re-syncs PRESETS with the latest DB list, in-place so the
+  // inner IIFE's `const PRESETS` reference stays valid.
+  (async () => {
+    if(!(window.SB && window.SB.fetchUserDeals && window.SB.currentUser)) return;
+    try {
+      const saved = await window.SB.fetchUserDeals();
+      if(!Array.isArray(saved) || !Array.isArray(window.PRESETS)) return;
+      // Drop all existing DB entries (walk backwards to preserve indices).
+      for(let i = window.PRESETS.length - 1; i >= 0; i--){
+        const p = window.PRESETS[i];
+        if(p && p.source === 'db') window.PRESETS.splice(i, 1);
+      }
+      // Prepend the fresh DB list — same array reference.
+      if(saved.length) window.PRESETS.unshift.apply(window.PRESETS, saved);
+      console.log('[V3] deal picker refresh — synced', saved.length, 'DB deals');
+      // Re-render if the modal is still open (user might have hit Load already)
+      const m = document.getElementById('active-deal-modal');
+      if(m && m.style.display !== 'none' && typeof render === 'function'){
+        try { render(search ? search.value : ''); } catch(_){}
+      }
+    } catch(err){
+      console.warn('[V3] deal picker refresh failed:', err);
+    }
+  })();
   // Render the list (with optional filter)
   function render(filter){
     const list = (window.PRESETS || []);
@@ -17459,6 +17539,44 @@ window.openActiveDealModal   = openActiveDealModal;
 window.closeActiveDealModal  = closeActiveDealModal;
 window.loadActiveDealByKey   = loadActiveDealByKey;
 window.refreshActiveDealChip = refreshActiveDealChip;
+
+// Manual "Refresh" button in the deal picker header. Force-refetches DB deals
+// and re-renders the modal body. Shows spinner + toast so the user sees
+// something happened.
+window.refreshActiveDealList = async function(btn){
+  if(!(window.SB && window.SB.fetchUserDeals)){
+    if(typeof toast === 'function') toast('Database is not connected — cannot refresh', 4000, { kind:'error' });
+    return;
+  }
+  if(!window.SB.currentUser){
+    if(typeof toast === 'function') toast('Sign in to see your DB-saved deals', 4000, { kind:'warning' });
+    return;
+  }
+  const priorLabel = btn && btn.innerHTML;
+  if(btn){ btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:14px; vertical-align:-2px; animation:v4-spin 900ms linear infinite;"></i> Refreshing…'; }
+  try {
+    const saved = await window.SB.fetchUserDeals();
+    if(Array.isArray(saved) && Array.isArray(window.PRESETS)){
+      for(let i = window.PRESETS.length - 1; i >= 0; i--){
+        const p = window.PRESETS[i];
+        if(p && p.source === 'db') window.PRESETS.splice(i, 1);
+      }
+      if(saved.length) window.PRESETS.unshift.apply(window.PRESETS, saved);
+      console.log('[V3] manual refresh — synced', saved.length, 'DB deals');
+      if(typeof toast === 'function') toast('Deal list refreshed · ' + saved.length + ' DB deal' + (saved.length===1?'':'s'), 3500);
+      // Re-render the modal body if it's still open
+      if(typeof openActiveDealModal === 'function'){
+        const m = document.getElementById('active-deal-modal');
+        if(m && m.style.display !== 'none') openActiveDealModal();
+      }
+    }
+  } catch(err){
+    console.error('[V3] manual refresh failed:', err);
+    if(typeof toast === 'function') toast('Refresh failed — see console', 5000, { kind:'error' });
+  } finally {
+    if(btn){ btn.disabled = false; btn.innerHTML = priorLabel; }
+  }
+};
 
 // ═════════════════════════════════════════════════════════════════════
 // Bulk XLSX loan-book import (#233)
@@ -37151,7 +37269,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.2</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.5</span>
       </div>
     </div>
     <div>
