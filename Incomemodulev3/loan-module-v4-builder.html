@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.03.2</title>
+<title>PCS Loan Module · V4 · Build 2026.08.03.8</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,13 +13,13 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.03.2.2').
+        suffix (e.g. '2026.08.03.8.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.03.2';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.03.8';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -1641,6 +1641,11 @@
   <!-- Rate curves — workspace-level benchmark fixings (BBSY, SOFR, SONIA…). -->
   <button class="v4-sb-item" onclick="window.openRateFixingsModal && window.openRateFixingsModal()">
     <i class="ti ti-chart-line" aria-hidden="true"></i>Rate curves
+  </button>
+  <!-- Cash management — Stages 3/4/5 pipeline (Send GL → Actuals → Reconcile).
+       Was previously hidden under DB Settings → Interface toggle. -->
+  <button class="v4-sb-item" onclick="window.openCashManagementModal && window.openCashManagementModal()">
+    <i class="ti ti-cash-banknote" aria-hidden="true"></i>Cash management
   </button>
 
   <div class="v4-sb-spacer"></div>
@@ -4348,7 +4353,10 @@
     </div>
     <div id="actuals-batches-list"></div>
   </div>
-  <details id="workday-actuals-section" class="hidden">
+  <!-- Always-open once actuals are loaded. `open` attribute keeps it expanded
+       by default; CSS inside the Cash management modal also hides the summary
+       toggle so it can't be collapsed accidentally. -->
+  <details id="workday-actuals-section" class="hidden" open>
     <summary class="text-[12px] mb-2">View cash movements actual-cash entries</summary>
     <div class="scrolled" id="workday-actuals-table"></div>
   </details>
@@ -5630,6 +5638,128 @@
     </div>
   </div>
 </div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Cash management modal — Stages 3/4/5 pipeline in one tool.
+     Sub-tabs host the existing #stage-3 / #stage-4 / #stage-5 sections
+     via DOM move on open + restore on close, so all existing wiring
+     (buttons, IDs, event handlers, timers) keeps working unchanged.
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="cash-mgmt-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeCashManagementModal && window.closeCashManagementModal()"></div>
+  <div class="json-modal-pn" style="width:min(1360px,98vw); max-height:96vh;">
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200); flex-wrap:wrap;">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-cash-banknote" style="font-size:18px;"></i>
+      </div>
+      <div style="flex:1; min-width:220px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Cash management</div>
+        <div style="font-size:11px; color:var(--n-500); margin-top:2px;">Send GL to cash-management system → receive actuals → reconcile and feed back to cashflow.</div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeCashManagementModal && window.closeCashManagementModal()" title="Close">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+
+    <!-- Sub-tab strip — v4 pattern (matches Stage 2 sub-tab bar):
+         zinc-100 rest strip, white active pill with FIS-green accent bar,
+         Tabler icons, sentence-case labels. -->
+    <div id="cm-subtab-bar" role="tablist" style="margin:14px 16px 0;">
+      <button class="cm-tab-btn is-active" role="tab" data-cm-tab="stage-3" data-active="true"
+              onclick="window.selectCashManagementTab && window.selectCashManagementTab('stage-3')">
+        <i class="ti ti-cloud-upload" aria-hidden="true"></i>Send GL
+      </button>
+      <button class="cm-tab-btn" role="tab" data-cm-tab="stage-4" data-active="false"
+              onclick="window.selectCashManagementTab && window.selectCashManagementTab('stage-4')">
+        <i class="ti ti-file-invoice" aria-hidden="true"></i>Receive actuals
+      </button>
+      <button class="cm-tab-btn" role="tab" data-cm-tab="stage-5" data-active="false"
+              onclick="window.selectCashManagementTab && window.selectCashManagementTab('stage-5')">
+        <i class="ti ti-arrows-exchange-2" aria-hidden="true"></i>Reconcile
+      </button>
+    </div>
+
+    <div id="cm-body" style="padding:14px 16px; overflow:auto; max-height:calc(96vh - 172px);">
+      <!-- Host containers for the moved stage sections. Only one is visible at a time. -->
+      <div id="cm-host-stage-3" class="cm-host"></div>
+      <div id="cm-host-stage-4" class="cm-host" style="display:none;"></div>
+      <div id="cm-host-stage-5" class="cm-host" style="display:none;"></div>
+    </div>
+
+    <div class="json-modal-f" style="padding:10px 16px; border-top:0.5px solid var(--n-200); display:flex; justify-content:flex-end;">
+      <button class="mat-btn outline" onclick="window.closeCashManagementModal && window.closeCashManagementModal()">Close</button>
+    </div>
+  </div>
+</div>
+<style>
+  /* ── Cash management modal — v4 style (mirrors Stage 2 sub-tab pattern) ── */
+  #cash-mgmt-modal #cm-subtab-bar {
+    display: flex; gap: 4px;
+    padding: 4px;
+    background: var(--n-100);
+    border: 0.5px solid var(--n-200);
+    border-radius: var(--r-lg, 10px);
+  }
+  #cash-mgmt-modal .cm-tab-btn {
+    flex: 1;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 7px 12px 8px;
+    border: 0;
+    background: transparent;
+    border-radius: 7px;
+    font-size: 12px; font-weight: 500;
+    color: var(--n-500);
+    cursor: pointer;
+    transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+    position: relative;
+    font-variant-numeric: tabular-nums;
+  }
+  #cash-mgmt-modal .cm-tab-btn:hover { color: var(--n-800); background: rgba(255,255,255,0.6); }
+  #cash-mgmt-modal .cm-tab-btn i.ti { font-size: 15px; line-height: 1; }
+  #cash-mgmt-modal .cm-tab-btn[data-active="true"],
+  #cash-mgmt-modal .cm-tab-btn.is-active {
+    background: var(--n-0);
+    color: var(--n-900);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.06), inset 0 0 0 0.5px var(--n-200);
+  }
+  #cash-mgmt-modal .cm-tab-btn[data-active="true"]::after,
+  #cash-mgmt-modal .cm-tab-btn.is-active::after {
+    content: '';
+    position: absolute;
+    left: 12px; right: 12px; bottom: 3px;
+    height: 2px; border-radius: 2px;
+    background: var(--fis-green);
+  }
+  /* Inside the modal the sub-tab strip already announces which step you're on,
+     so hide each section's inner "Step N of 5 · You are here" banner. */
+  #cash-mgmt-modal .cm-host .step-indicator { display: none; }
+  /* Hide the loose stage-num circle + the vertical arrows that visually chain
+     the three stages in the main pane — inside the modal they render one at
+     a time. */
+  #cash-mgmt-modal .cm-host .stage-num { display: none; }
+  #cash-mgmt-modal .stage-arrow { display: none; }
+  /* The Material `p-5` padding on the section is redundant with the modal
+     body padding — tighten it up so content isn't double-padded. */
+  #cash-mgmt-modal .cm-host > section.stage-card {
+    padding: 0; background: transparent; border: 0; box-shadow: none;
+  }
+  /* Tighten header rhythm inside the modal to match other v4 modal bodies. */
+  #cash-mgmt-modal .cm-host h2 { font-size: 13.5px; letter-spacing: -0.15px; margin: 0 0 4px; }
+  /* Receive-actuals table: always shown expanded, never collapsible inside the
+     Cash management modal. The <details open> markup handles the default; this
+     CSS removes the disclosure summary + arrow so users can't accidentally
+     collapse it and think their data disappeared. */
+  #cash-mgmt-modal #workday-actuals-section > summary {
+    display: none;   /* hides the summary row entirely */
+  }
+  #cash-mgmt-modal #workday-actuals-section {
+    /* Ensures the block always renders as open even if `open` gets stripped
+       by an errant JS toggle. `display: block` on <details> shows all children
+       regardless of the open attribute. */
+    display: block;
+  }
+</style>
 
 <!-- ═══════════════════════════════════════════════════════════════
      Borrowing Base modal — FirstAg Livestock revolving-BB facility.
@@ -35839,6 +35969,159 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const el = $('rate-fixings-modal'); if(el) el.style.display = 'none';
   };
 
+  // ─── Cash management modal (Stages 3/4/5 in one tool, 2026-08-03) ─────
+  // DOM strategy: on open, MOVE the existing #stage-3/-4/-5 sections into
+  // the modal's host containers. On close, MOVE them back to their original
+  // parent so the underlying tab strip and page layout are unaffected.
+  // We record each section's original parent + next-sibling so restoration
+  // preserves original ordering even if the DOM was reshuffled meanwhile.
+  const _cmSections = ['stage-3', 'stage-4', 'stage-5'];
+  const _cmOriginalMounts = {};
+  function _cmCaptureOriginal(id){
+    const el = document.getElementById(id);
+    if(!el || _cmOriginalMounts[id]) return;
+    _cmOriginalMounts[id] = { parent: el.parentNode, next: el.nextSibling };
+  }
+  function _cmMoveIntoModal(){
+    _cmSections.forEach(id => {
+      _cmCaptureOriginal(id);
+      const el   = document.getElementById(id);
+      const host = document.getElementById('cm-host-' + id);
+      if(el && host && el.parentNode !== host) host.appendChild(el);
+      // The sections carry class `stage-tab-content` which CSS defaults to
+      // `display: none` — they only show when they're the active tab in the
+      // top strip. Inside the modal we always want them rendered, so force
+      // display:block inline (wins against the class rule).
+      if(el) el.style.display = 'block';
+    });
+  }
+  function _cmRestoreFromModal(){
+    _cmSections.forEach(id => {
+      const el = document.getElementById(id);
+      const orig = _cmOriginalMounts[id];
+      if(!el || !orig) return;
+      // Clear our forced inline display so the .stage-tab-content /
+      // .tab-visible CSS regains control in the main tab strip.
+      el.style.display = '';
+      // Restore to original position; if next-sibling has since been removed,
+      // just append to the original parent.
+      if(orig.next && orig.next.parentNode === orig.parent){
+        orig.parent.insertBefore(el, orig.next);
+      } else {
+        orig.parent.appendChild(el);
+      }
+    });
+  }
+  window.selectCashManagementTab = function(which){
+    _cmSections.forEach(id => {
+      const host = document.getElementById('cm-host-' + id);
+      if(host) host.style.display = (id === which) ? '' : 'none';
+    });
+    // v4 sub-tab contract: toggle both data-active AND .is-active (mirrors
+    // the Stage 2 sub-tab strip pattern for CSS consistency).
+    document.querySelectorAll('#cash-mgmt-modal .cm-tab-btn').forEach(b => {
+      const active = b.getAttribute('data-cm-tab') === which;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('data-active', active ? 'true' : 'false');
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  };
+  // Prime the in-memory accounting state if it's cold (e.g. right after a
+  // browser refresh where the user re-selected a DB-loaded deal). The DB
+  // holds the previous accounting_runs + journal_entries, but the Cash
+  // management pipeline reads from window.M in memory — so if M.acctJournals
+  // is empty, none of the Stage 3 buttons enable and the tool looks broken.
+  //
+  // Two-stage strategy:
+  //   1. If a deal is loaded and M.acctJournals is empty, fire runAccounting()
+  //      to compute JEs from the loaded deal. This mirrors the auto-run in
+  //      loadActiveDealByKey but here it's gated to the moment the user
+  //      actually needs the JEs.
+  //   2. During compute, replace the modal body with a "Preparing…" state so
+  //      the user sees the system is working instead of a dead-looking chip.
+  // Overlay spinner — sits ABOVE the modal body without touching innerHTML,
+  // so the stage-3/4/5 sections (with their #btn-workday-push, #workday-out-status
+  // etc.) stay in the DOM. runAccounting() needs those IDs to enable buttons /
+  // update chips when it finishes; replacing innerHTML would detach them and
+  // crash with "Cannot read property 'disabled' of null".
+  function _cmShowPrimingOverlay(){
+    let ov = document.getElementById('cm-priming-overlay');
+    if(ov) return ov;
+    ov = document.createElement('div');
+    ov.id = 'cm-priming-overlay';
+    ov.style.cssText = 'position:absolute; inset:0; background:rgba(255,255,255,0.94); backdrop-filter:blur(2px); z-index:5; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:48px 24px; color:var(--n-600);';
+    ov.innerHTML = ''
+      + '<div style="width:36px; height:36px; border-radius:50%; border:3px solid var(--n-200); border-top-color:var(--fis-green,#22C55E); animation:v4-spin 900ms linear infinite;"></div>'
+      + '<div style="text-align:center;">'
+      + '  <div style="font-size:13px; font-weight:600; color:var(--n-900); letter-spacing:-0.15px;">Preparing cash management…</div>'
+      + '  <div style="font-size:11.5px; color:var(--n-500); margin-top:4px; max-width:420px;">Re-computing accounting from the loaded deal so Stages 3, 4 and 5 have fresh JEs to work with.</div>'
+      + '</div>';
+    const body = document.getElementById('cm-body');
+    if(body){
+      // Make the body a positioning parent so the absolute overlay covers only it.
+      if(getComputedStyle(body).position === 'static') body.style.position = 'relative';
+      body.appendChild(ov);
+    }
+    return ov;
+  }
+  function _cmHidePrimingOverlay(){
+    const ov = document.getElementById('cm-priming-overlay');
+    if(ov && ov.parentNode) ov.parentNode.removeChild(ov);
+  }
+
+  async function _cmPrimeAccountingIfNeeded(){
+    const journalsLen = (window.M && Array.isArray(window.M.acctJournals)) ? window.M.acctJournals.length : 0;
+    if(journalsLen > 0) return { ok:true, primed:false };
+    // Only prime if a deal is actually loaded (Builder has state).
+    const dealLoaded = !!(window.B && window.B.deal && (window.B.tranches || []).length);
+    if(!dealLoaded) return { ok:false, reason:'no deal loaded' };
+    const runFn = (typeof window.runAccounting === 'function') ? window.runAccounting
+                : (typeof runAccounting === 'function')        ? runAccounting
+                : null;
+    if(!runFn) return { ok:false, reason:'runAccounting not available' };
+    _cmShowPrimingOverlay();
+    try {
+      // runAccounting is synchronous but wrapping in Promise.resolve lets us
+      // await it uniformly whether or not a future version becomes async.
+      await Promise.resolve(runFn());
+    } catch(err){
+      console.error('[cash-mgmt] auto-run failed:', err);
+      _cmHidePrimingOverlay();
+      return { ok:false, reason: (err && err.message) || 'run failed' };
+    }
+    _cmHidePrimingOverlay();
+    return { ok:true, primed:true };
+  }
+
+  window.openCashManagementModal = async function(){
+    const el = $('cash-mgmt-modal'); if(!el) return;
+    _cmMoveIntoModal();
+    window.selectCashManagementTab('stage-3');
+    el.style.display = 'flex';
+    // Fire priming after the modal is visible so the "Preparing…" spinner is seen.
+    // Non-blocking — if the deal is already primed this is a no-op.
+    _cmPrimeAccountingIfNeeded().then(res => {
+      if(res && !res.ok && res.reason && res.reason !== 'no deal loaded'){
+        console.warn('[cash-mgmt] priming skipped:', res.reason);
+      }
+      if(res && res.primed && typeof toast === 'function'){
+        toast('Accounting re-computed for Cash management', 3000, { kind:'info', id:'cm:primed' });
+      }
+    });
+  };
+  window.closeCashManagementModal = function(){
+    const el = $('cash-mgmt-modal'); if(!el) return;
+    el.style.display = 'none';
+    _cmRestoreFromModal();
+  };
+  // Esc key closes the modal (matches other modals' UX)
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape'){
+      const cm = document.getElementById('cash-mgmt-modal');
+      if(cm && cm.style.display !== 'none') window.closeCashManagementModal();
+    }
+  });
+
   window.__rfxRefresh = async function(){
     const idx = $('rfx-index')?.value;
     const listEl = $('rfx-list');
@@ -36623,7 +36906,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.03.2</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.03.8</span>
       </div>
     </div>
     <div>
