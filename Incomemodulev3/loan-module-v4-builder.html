@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.03.8</title>
+<title>PCS Loan Module · V4 · Build 2026.08.04.2</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,13 +13,107 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.03.8.2').
+        suffix (e.g. '2026.08.04.2.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
+<!-- ─── Storage resilience shim (2026-08-04) ────────────────────────────
+     Runs BEFORE any other script so all 46+ localStorage.* callsites in
+     this file get a safe wrapper. Motivation: Edge/Firefox Enhanced
+     Tracking Prevention throws SecurityError on localStorage access when
+     the page is served from file:// or an untrusted origin, which turns
+     ~every subsequent line into an uncaught exception and the app looks
+     dead. This shim catches those errors, transparently falls through to
+     sessionStorage (survives tab only) then an in-memory Map (survives
+     until reload), and exposes window.__PCS_STORAGE_STATUS so downstream
+     code can warn the user. -->
+<script>
+(function pcsStorageShim(){
+  function probe(store){
+    try {
+      const k = '__pcs_probe_' + Math.random().toString(36).slice(2);
+      store.setItem(k, '1'); const ok = store.getItem(k) === '1';
+      store.removeItem(k); return ok;
+    } catch(_){ return false; }
+  }
+  let native = null; let kind = 'localStorage';
+  try { if(window.localStorage && probe(window.localStorage)) native = window.localStorage; } catch(_){}
+  if(!native){
+    kind = 'sessionStorage';
+    try { if(window.sessionStorage && probe(window.sessionStorage)) native = window.sessionStorage; } catch(_){}
+  }
+  if(!native){
+    kind = 'memory';
+    const mem = new Map();
+    native = {
+      getItem: k => mem.has(k) ? mem.get(k) : null,
+      setItem: (k, v) => { mem.set(k, String(v)); },
+      removeItem: k => { mem.delete(k); },
+      clear: () => mem.clear(),
+      get length(){ return mem.size; },
+      key: i => Array.from(mem.keys())[i] || null
+    };
+  }
+  // If localStorage exists but throws on write (ETP mid-session), wrap it so
+  // every call is try/catch'd and falls through to sessionStorage/memory. This
+  // preserves the native Storage API surface (getItem/setItem/removeItem/etc.)
+  // while making the app crash-proof.
+  const memFallback = new Map();
+  function safeLocalStorage(){
+    return {
+      getItem: function(k){
+        try { return native.getItem(k); }
+        catch(_){ return memFallback.has(k) ? memFallback.get(k) : null; }
+      },
+      setItem: function(k, v){
+        try { native.setItem(k, v); }
+        catch(_){ memFallback.set(k, String(v)); }
+      },
+      removeItem: function(k){
+        try { native.removeItem(k); } catch(_){}
+        memFallback.delete(k);
+      },
+      clear: function(){
+        try { native.clear(); } catch(_){}
+        memFallback.clear();
+      },
+      get length(){
+        try { return native.length; } catch(_){ return memFallback.size; }
+      },
+      key: function(i){
+        try { return native.key(i); } catch(_){ return Array.from(memFallback.keys())[i] || null; }
+      }
+    };
+  }
+  // Only replace the getter if we actually need the safe wrapper. The native
+  // localStorage object cannot be reassigned directly on some browsers, so we
+  // define the property with a getter returning the wrapped instance.
+  if(kind !== 'localStorage' || !probe(window.localStorage)){
+    try {
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        get: function(){ return safeLocalStorage(); }
+      });
+    } catch(err){
+      // If we can't redefine, at least monkey-patch the prototype methods.
+      try {
+        const proto = Storage.prototype;
+        const _set = proto.setItem, _get = proto.getItem, _rm = proto.removeItem;
+        proto.setItem = function(k,v){ try { return _set.call(this,k,v); } catch(_){ memFallback.set(k,String(v)); } };
+        proto.getItem = function(k){ try { return _get.call(this,k); } catch(_){ return memFallback.has(k) ? memFallback.get(k) : null; } };
+        proto.removeItem = function(k){ try { _rm.call(this,k); } catch(_){}; memFallback.delete(k); };
+      } catch(_){ /* nothing more we can do */ }
+    }
+  }
+  window.__PCS_STORAGE_STATUS = { kind: kind, native: native === window.localStorage };
+  if(kind !== 'localStorage'){
+    console.warn('[PCS] Storage restricted — using ' + kind + ' fallback. Session persistence limited. Likely cause: file:// URL + browser tracking prevention. Fix: host on http://localhost or https://.');
+  }
+})();
+</script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.03.8';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.04.2';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -7115,7 +7209,78 @@ window.SB = (function(){
         // `sb-<projectRef>-auth-token` restores connectivity and still persists the
         // session across reloads. Legacy `pcs_v3_auth` cache in localStorage is
         // stale and safe to ignore.
-        const options = { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } };
+        // ─── Storage fallback for blocked-storage browsers (2026-08-04) ──
+        // Symptom: Marija's browser (Edge on Windows, loading via file://)
+        // logged "Tracking Prevention blocked access to storage" then every
+        // supabase-js session-related call silently failed → notices timed
+        // out, session didn't persist, cookies rejected. Root cause: Edge's
+        // Enhanced Tracking Prevention treats file:// URLs as untrusted and
+        // blocks localStorage/sessionStorage access entirely.
+        //
+        // Fix: probe localStorage → sessionStorage → in-memory, and pass
+        // whichever works as supabase-js's auth storage adapter. Also stash
+        // the outcome on window so we can show a banner + adjust behaviour
+        // elsewhere (e.g. warn that session won't persist).
+        const _pcsStorage = (function pickStorage(){
+          const probe = '__pcs_probe_' + Math.random().toString(36).slice(2);
+          function tryStore(store, name){
+            try {
+              store.setItem(probe, '1');
+              const ok = store.getItem(probe) === '1';
+              store.removeItem(probe);
+              return ok ? { store: store, kind: name } : null;
+            } catch(_){ return null; }
+          }
+          // Prefer localStorage (survives reload). Fall back to sessionStorage
+          // (survives tab only). Last resort: in-memory shim (session lost on reload).
+          if(typeof window !== 'undefined'){
+            const ls = tryStore(window.localStorage, 'localStorage');
+            if(ls) return ls;
+            const ss = tryStore(window.sessionStorage, 'sessionStorage');
+            if(ss) return ss;
+          }
+          // In-memory shim mimicking the Storage interface just enough for supabase-js.
+          const mem = new Map();
+          return {
+            kind: 'memory',
+            store: {
+              getItem: k => mem.has(k) ? mem.get(k) : null,
+              setItem: (k, v) => { mem.set(k, String(v)); },
+              removeItem: k => { mem.delete(k); },
+              clear: () => mem.clear(),
+              get length(){ return mem.size; },
+              key: i => Array.from(mem.keys())[i] || null
+            }
+          };
+        })();
+        window.__PCS_STORAGE_KIND = _pcsStorage.kind;   // for other code to read
+        if(_pcsStorage.kind !== 'localStorage'){
+          console.warn('[SB] Browser storage restricted (' + _pcsStorage.kind + ') — session will ' +
+            (_pcsStorage.kind === 'sessionStorage' ? 'be lost when tab closes' : 'NOT survive page reload') +
+            '. Most likely cause: Enhanced Tracking Prevention on a file:// URL. Fix: host the app on http://localhost or an https:// URL.');
+          // Show a one-time banner so end-users understand what's happening.
+          setTimeout(function showStorageBanner(){
+            if(document.getElementById('pcs-storage-banner')) return;
+            const bar = document.createElement('div');
+            bar.id = 'pcs-storage-banner';
+            bar.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:9999; ' +
+              'padding:10px 16px; background:#FEF3C7; color:#92400E; ' +
+              'border-bottom:1px solid #FDE68A; font:500 12px/1.4 ui-sans-serif,system-ui,sans-serif; ' +
+              'display:flex; align-items:center; gap:12px;';
+            bar.innerHTML = ''
+              + '<span style="flex:1;"><b>Browser storage is restricted.</b> Your session will ' +
+                (_pcsStorage.kind === 'sessionStorage' ? 'end when you close this tab' : 'be lost on page reload') +
+                ' and some features may behave oddly. This usually happens when the app is opened directly from a file (file://) — Edge and Firefox block storage on file URLs. Ask your admin to host the app on http://localhost or an https:// URL.</span>'
+              + '<button onclick="this.parentNode.remove()" style="background:transparent; border:1px solid #92400E; color:#92400E; padding:3px 10px; border-radius:4px; cursor:pointer; font-weight:600;">Dismiss</button>';
+            document.body.appendChild(bar);
+          }, 600);
+        }
+        const options = { auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storage: _pcsStorage.store   // custom storage; falls back gracefully when blocked
+        } };
         // For raw PostgREST, allow custom headers if the user configured them.
         if(BACKEND_TYPE === 'postgrest' && _cfg.authScheme === 'bearer' && _cfg.authValue){
           options.global = { headers: { 'Authorization': 'Bearer ' + _cfg.authValue } };
@@ -7461,25 +7626,102 @@ window.SB = (function(){
       _dbConnectionLost();
     }
   }
-  async function _dbConnectionLost(){
-    console.error('[SB] DB connection lost — forcing sign-out after '+_dbTimeoutState.threshold+' timeouts in '+Math.round(_dbTimeoutState.windowMs/1000)+'s');
+  // "Kicked" flag — set when auth is force-terminated (DB lost or idle timeout).
+  // While set, _refreshCurrentUser skips re-hydrating from localStorage so a
+  // background poll can't undo the signout by reading a still-persistent session.
+  let _authKicked = false;
+  async function _dbConnectionLost(reason){
+    if(_authKicked) return;   // already handling
+    _authKicked = true;
+    const why = reason || ('exceeded '+_dbTimeoutState.threshold+' consecutive DB timeouts');
+    console.error('[SB] Connection lost — forcing sign-out. Reason:', why);
     try {
       if(typeof toast === 'function'){
-        toast('Database connection lost — signing out. Please sign in again.', 8000, {
-          kind: 'error', id: 'sb:db-lost', detail: 'exceeded '+_dbTimeoutState.threshold+' consecutive DB timeouts'
+        toast('Database connection lost — reloading page to reset connection.', 6000, {
+          kind: 'error', id: 'sb:db-lost', detail: why
         });
       }
-      // Sign out client-side (best-effort — the server call itself may time out)
-      try { await _withDbTimeout('signOut', _client.auth.signOut(), 5000); } catch(_){}
+      // Purge every supabase-persisted auth token so a reload comes up on the
+      // login gate cleanly (no auto-resume). The default storageKey is
+      // `sb-<projectRef>-auth-token`; we sweep any `sb-*-auth-token` key defensively.
+      try {
+        const keys = [];
+        for(let i = 0; i < localStorage.length; i++){
+          const k = localStorage.key(i);
+          if(k && /^sb-.*-auth-token$/.test(k)) keys.push(k);
+        }
+        keys.forEach(k => { try { localStorage.removeItem(k); } catch(_){} });
+      } catch(_){}
+      // Best-effort server-side signOut. Short 2s deadline so we don't hang
+      // waiting for a network that's already broken.
+      try { await _withDbTimeout('signOut', _client.auth.signOut(), 2000); } catch(_){}
       _currentUser = null; _isAdmin = false;
       _authListeners.forEach(cb => { try { cb(null, 'SESSION_EXPIRED'); } catch(_){} });
-      // Re-show login gate so the user can re-authenticate cleanly
       if(typeof window.__applyGateState === 'function') window.__applyGateState();
-      // Reset the tripwire once the user is back on the gate so a subsequent
-      // successful sign-in resumes normal behaviour.
-      setTimeout(() => { _dbTimeoutState.tripped = false; _dbTimeoutState.count = 0; }, 3000);
+      // Chrome HTTP/2 connection pool exhaustion is the usual cause of these
+      // timeouts (verified: DB EXPLAIN shows queries running in <2ms while
+      // the client times out at 20s). A page reload is the ONLY reliable
+      // fix — it resets the pool and re-establishes fresh sockets. Small
+      // delay so the toast has time to render.
+      setTimeout(() => { try { location.reload(); } catch(_){} }, 1200);
     } catch(err){ console.error('[SB] _dbConnectionLost handler failed:', err); }
   }
+
+  // ─── Idle-timeout auto sign-out (2026-08-04) ─────────────────────────
+  // supabase-js auto-refreshes the JWT indefinitely, so a session persists
+  // until the tab is closed. Force sign-out after N minutes of no user
+  // activity. Activity = any mousemove / keydown / click / touch / wheel /
+  // visibility change on the tab. Timer resets on every activity event.
+  //
+  // Threshold is loose-configurable via window.PCS_IDLE_MINUTES (default 30).
+  // Warning fires 60s before hard signout so the user can bump activity.
+  const IDLE_DEFAULT_MIN = 30;
+  const IDLE_WARN_LEAD_MS = 60000;   // 60s warning before signout
+  let   _idleLastActivity = Date.now();
+  let   _idleWarnFired = false;
+  function _idleThresholdMs(){
+    const m = +(window.PCS_IDLE_MINUTES || IDLE_DEFAULT_MIN);
+    return Math.max(1, m) * 60000;
+  }
+  function _resetIdleTimer(){
+    _idleLastActivity = Date.now();
+    if(_idleWarnFired){
+      _idleWarnFired = false;
+      // Dismiss any lingering warning toast
+      try { const t = document.querySelector('[data-toast-id="sb:idle-warn"]'); if(t) t.remove(); } catch(_){}
+    }
+  }
+  function _checkIdle(){
+    if(_authKicked || !_currentUser) return;
+    const idleMs = Date.now() - _idleLastActivity;
+    const thresholdMs = _idleThresholdMs();
+    if(idleMs >= thresholdMs){
+      _dbConnectionLost('idle for ' + Math.round(idleMs/60000) + ' minutes — session expired');
+      return;
+    }
+    if(!_idleWarnFired && idleMs >= (thresholdMs - IDLE_WARN_LEAD_MS)){
+      _idleWarnFired = true;
+      if(typeof toast === 'function'){
+        toast('You will be signed out in 1 minute due to inactivity. Move the mouse to stay signed in.', 60000, {
+          kind: 'warning', id: 'sb:idle-warn'
+        });
+      }
+    }
+  }
+  // Bind activity listeners once — after DOM ready — to reset the timer.
+  (function bindIdleListeners(){
+    function bind(){
+      const events = ['mousemove','mousedown','keydown','touchstart','wheel','visibilitychange','focus'];
+      events.forEach(ev => {
+        window.addEventListener(ev, _resetIdleTimer, { passive: true, capture: true });
+      });
+      // Poll every 15s. Cheap — just a time diff + threshold check.
+      setInterval(_checkIdle, 15000);
+      console.log('[SB] idle-timeout armed · threshold=' + (window.PCS_IDLE_MINUTES || IDLE_DEFAULT_MIN) + 'min');
+    }
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+    else bind();
+  })();
 
   function _withDbTimeout(label, promise, ms){
     ms = ms || DB_CALL_BUDGET_MS;
@@ -10564,6 +10806,9 @@ window.SB = (function(){
   const _authListeners = new Set();
   async function _refreshCurrentUser(){
     if(!_client) return null;
+    // If we've been kicked (DB lost, idle timeout), don't re-hydrate from the
+    // persistent session — a page reload is on the way to reset state cleanly.
+    if(_authKicked) return null;
     try {
       // Prefer getSession() over getUser() at boot time: it reads from local
       // storage synchronously (no network round-trip) and is what supabase-js
@@ -36906,7 +37151,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.03.8</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.2</span>
       </div>
     </div>
     <div>
