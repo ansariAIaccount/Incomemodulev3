@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.04.7</title>
+<title>PCS Loan Module · V4 · Build 2026.08.04.8</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.04.7.2').
+        suffix (e.g. '2026.08.04.8.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.04.7';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.04.8';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -8466,6 +8466,53 @@ window.SB = (function(){
     } catch(err){ console.error('[SB] fetchJournalEntriesForDeal threw:', err); return []; }
   }
 
+  // Batch variant — takes an array of dealIds and returns { [dealId]: jes[] }.
+  // Two DB round-trips total regardless of how many deals, vs the N×2 the
+  // per-deal helper does. Used by reconcileNotices — was serially iterating
+  // 10 deals × 2 queries = 20 round-trips inside a for-await loop, and Chrome's
+  // connection pool + RLS made it push past 45s when the pool got congested.
+  async function fetchJournalEntriesForDeals(dealIds, startDate, endDate){
+    if(!_client || !_connected || _authKicked) return {};
+    if(!Array.isArray(dealIds) || !dealIds.length) return {};
+    try {
+      // 1) Latest accounting_run per deal — one query with a window function
+      //    would be ideal, but PostgREST doesn't expose those directly. Fetch
+      //    all runs for these deals, then reduce to one-per-deal in memory.
+      const { data: allRuns, error: runErr } = await _dedupe(
+        'fetchLatestRuns:' + dealIds.slice().sort().join(','),
+        () => _client
+          .from('accounting_runs')
+          .select('id, deal_id, run_at, status')
+          .in('deal_id', dealIds)
+          .order('run_at', { ascending: false })
+      );
+      if(runErr){ console.error('[SB] fetchJournalEntriesForDeals (runs):', runErr); return {}; }
+      // Pick most-recent per deal
+      const latestByDeal = {};
+      for(const r of (allRuns || [])){
+        if(!latestByDeal[r.deal_id]) latestByDeal[r.deal_id] = r;   // ordered desc, so first wins
+      }
+      const runIds = Object.values(latestByDeal).map(r => r.id);
+      if(!runIds.length) return {};
+      // 2) All JEs across those runs in a single query
+      let jeQ = _client.from('journal_entries')
+        .select('id, run_id, effective_date, gl_date, transaction_type, account_code, is_debit, amount_le, amount_original, transaction_comments')
+        .in('run_id', runIds);
+      if(startDate) jeQ = jeQ.gte('effective_date', startDate);
+      if(endDate)   jeQ = jeQ.lte('effective_date', endDate);
+      const { data: jes, error: jeErr } = await jeQ;
+      if(jeErr){ console.error('[SB] fetchJournalEntriesForDeals (jes):', jeErr); return {}; }
+      // Bucket by deal_id via run_id lookup
+      const runToDeal = {}; for(const r of Object.values(latestByDeal)) runToDeal[r.id] = r.deal_id;
+      const out = {}; dealIds.forEach(id => { out[id] = []; });
+      for(const je of (jes || [])){
+        const did = runToDeal[je.run_id];
+        if(did && out[did]) out[did].push(je);
+      }
+      return out;
+    } catch(err){ console.error('[SB] fetchJournalEntriesForDeals threw:', err); return {}; }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // Multi-fund allocations (Tier 1 #2 Phase 1)
   // ═══════════════════════════════════════════════════════════════════
@@ -11019,7 +11066,7 @@ window.SB = (function(){
     fetchNotices, upsertNotice, bulkInsertNotices, updateNoticeStatus, updateNoticeFields, deleteNotice, wipeAutoDerivedNoticesForDeal,
     // Notice Phase 2 — recipients + reconciliation
     fetchRecipients, upsertRecipient, deleteRecipient,
-    fetchJournalEntriesForDeal,
+    fetchJournalEntriesForDeal, fetchJournalEntriesForDeals,
     // Multi-fund (Tier 1 #2 Phase 1)
     fetchFunds, upsertFund, deleteFund,
     fetchFundAllocations, upsertFundAllocation, deleteFundAllocation,
@@ -22453,8 +22500,27 @@ window.reconcileNotices = async function(){
     if(n.effective_date > byDeal[n.deal_id].maxDate) byDeal[n.deal_id].maxDate = n.effective_date;
   }
   window._noticeReconMap = {};
+  // Batch-fetch JEs for all deals in a single pair of round-trips instead
+  // of N×2 serial calls. Compute a global date-range covering all deals so
+  // one DB filter works for all of them.
+  const allDealIds = Object.keys(byDeal);
+  let globalMin = null, globalMax = null;
+  for(const info of Object.values(byDeal)){
+    if(!globalMin || info.minDate < globalMin) globalMin = info.minDate;
+    if(!globalMax || info.maxDate > globalMax) globalMax = info.maxDate;
+  }
+  let jesByDeal = {};
+  if(window.SB && window.SB.fetchJournalEntriesForDeals){
+    jesByDeal = await window.SB.fetchJournalEntriesForDeals(allDealIds, globalMin, globalMax);
+  } else {
+    // Legacy fallback — sequential (kept for safety if the batch helper isn't loaded yet)
+    for(const dealId of allDealIds){
+      const info = byDeal[dealId];
+      jesByDeal[dealId] = await window.SB.fetchJournalEntriesForDeal(dealId, info.minDate, info.maxDate);
+    }
+  }
   for(const [dealId, info] of Object.entries(byDeal)){
-    const jes = await window.SB.fetchJournalEntriesForDeal(dealId, info.minDate, info.maxDate);
+    const jes = jesByDeal[dealId] || [];
     // Bucket JEs by effective_date
     const jesByDate = {};
     for(const je of jes){
@@ -37309,7 +37375,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.7</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.8</span>
       </div>
     </div>
     <div>
