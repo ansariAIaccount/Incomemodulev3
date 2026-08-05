@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.04.5</title>
+<title>PCS Loan Module · V4 · Build 2026.08.04.6</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.04.5.2').
+        suffix (e.g. '2026.08.04.6.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.04.5';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.04.6';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -37269,7 +37269,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.5</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.6</span>
       </div>
     </div>
     <div>
@@ -37287,8 +37287,17 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         <label class="v4-login-label">Email</label>
         <input type="email" id="v4-gate-email" class="v4-login-input" placeholder="you@example.com" autocomplete="email"/>
       </div>
-      <div style="margin-bottom:12px;">
-        <label class="v4-login-label">Password</label>
+      <div style="margin-bottom:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <label class="v4-login-label">Password</label>
+          <button type="button" id="v4-gate-forgot-btn"
+                  onclick="window.__v4Gate?.resetPassword()"
+                  style="background:transparent; border:0; padding:0; margin-bottom:3px; cursor:pointer;
+                         font-size:10.5px; color:var(--fis-green-700,#15803D); font-weight:600;
+                         letter-spacing:0.2px; text-decoration:none;"
+                  onmouseover="this.style.textDecoration='underline'"
+                  onmouseout="this.style.textDecoration='none'">Forgot password?</button>
+        </div>
         <input type="password" id="v4-gate-pw" class="v4-login-input" placeholder="At least 6 characters" autocomplete="current-password"/>
       </div>
       <button id="v4-gate-signin-btn" class="v4-login-btn" onclick="window.__v4Gate?.signIn()">
@@ -37383,6 +37392,46 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       this._busy('v4-gate-magic-btn', false);
       if(!r.ok) this.err(r.reason || 'Failed to send magic link');
       else this.status('Magic link sent — check your inbox. Click the link to sign in.');
+    },
+    // Password-reset flow. Uses whatever email is currently in either the
+    // password-tab email input or the magic-link tab. If missing, focus the
+    // field and prompt for one. On success, Supabase emails a recovery link;
+    // clicking that link brings the user back and fires PASSWORD_RECOVERY,
+    // which the app listens for to show the "Set new password" flow.
+    async resetPassword(){
+      this.err(null);
+      const emailEl = document.getElementById('v4-gate-email');
+      const magicEl = document.getElementById('v4-gate-magic-email');
+      const email = ((emailEl && emailEl.value) || (magicEl && magicEl.value) || '').trim();
+      if(!email){
+        this.err('Enter your email address above, then click "Forgot password?" again.');
+        if(emailEl) emailEl.focus();
+        return;
+      }
+      if(!window.SB || !window.SB.auth_resetPasswordForEmail){
+        this.err('Database not ready — retry in a moment');
+        return;
+      }
+      this._busy('v4-gate-forgot-btn', true);
+      const btn = document.getElementById('v4-gate-forgot-btn');
+      const priorText = btn ? btn.textContent : '';
+      if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
+      try {
+        const r = await window.SB.auth_resetPasswordForEmail(email);
+        if(!r.ok){
+          this.err(r.reason || 'Reset failed');
+        } else {
+          this.status('Password reset link sent to ' + email + ' — check your inbox (and spam folder).');
+          if(btn) btn.textContent = 'Link sent ✓';
+          setTimeout(() => { if(btn) btn.textContent = priorText; }, 4000);
+          return;
+        }
+      } catch(err){
+        this.err((err && err.message) || 'Reset failed');
+      } finally {
+        if(btn && btn.textContent === 'Sending…') btn.textContent = priorText;
+        if(btn) btn.disabled = false;
+      }
     }
   };
   window.__v4Gate = ctrl;
