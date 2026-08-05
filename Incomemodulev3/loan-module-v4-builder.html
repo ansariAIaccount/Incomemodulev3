@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.04.6</title>
+<title>PCS Loan Module · V4 · Build 2026.08.04.7</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.04.6.2').
+        suffix (e.g. '2026.08.04.7.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.04.6';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.04.7';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -25918,14 +25918,54 @@ document.addEventListener('DOMContentLoaded', ()=>{
         errEl.style.display = '';
       }
     };
-    // When the user clicks the recovery link in their email, Supabase-js emits a
-    // PASSWORD_RECOVERY event. Open the modal, switch to the newpw panel.
+    // Auth-event listener. Handles two flows:
+    //  1. PASSWORD_RECOVERY — user clicked the email recovery link → show newpw panel
+    //  2. SIGNED_IN — user just signed in. CRITICAL: the app boot fires
+    //     fetchUserDeals() before the auth state resolves, so a fresh (never-
+    //     signed-in-in-this-tab) session sees "0 DB deals" because RLS filters
+    //     out everything. Once signed in, we must re-fetch so the picker fills
+    //     in without requiring a hard refresh. Skips if already primed (no
+    //     redundant fetch when session is resumed from localStorage on reload).
     if(window.SB && window.SB.auth_onChange){
+      let _hasPrimedAfterSignIn = false;
       window.SB.auth_onChange((user, event) => {
         if(event === 'PASSWORD_RECOVERY'){
           window.openAuthModal();
           setMode('newpw');
           setTimeout(() => document.getElementById('auth-newpw')?.focus(), 100);
+        }
+        if(event === 'SIGNED_IN' && user && !_hasPrimedAfterSignIn){
+          _hasPrimedAfterSignIn = true;
+          // Skip if PRESETS already has DB deals (session was resumed from
+          // localStorage and the boot fetchUserDeals succeeded because we
+          // were already authenticated at that point).
+          const currentDbCount = (window.PRESETS || []).filter(p => p && p.source === 'db').length;
+          if(currentDbCount > 0){
+            console.log('[V3] SIGNED_IN — PRESETS already has ' + currentDbCount + ' DB deals, skipping refetch');
+            return;
+          }
+          console.log('[V3] SIGNED_IN — fetching DB deals for freshly-authenticated session');
+          if(window.SB && window.SB.fetchUserDeals){
+            window.SB.fetchUserDeals().then(saved => {
+              if(Array.isArray(saved) && saved.length && Array.isArray(window.PRESETS)){
+                // Remove any stale DB entries (defensive — should be none)
+                for(let i = window.PRESETS.length - 1; i >= 0; i--){
+                  const p = window.PRESETS[i];
+                  if(p && p.source === 'db') window.PRESETS.splice(i, 1);
+                }
+                window.PRESETS.unshift.apply(window.PRESETS, saved);
+                console.log('[V3] post-signin merge —', saved.length, 'DB deals now in picker');
+                if(typeof toast === 'function'){
+                  toast('Loaded ' + saved.length + ' DB-saved deal' + (saved.length===1?'':'s'), 3500);
+                }
+              } else {
+                console.log('[V3] post-signin — 0 DB deals available for this account');
+              }
+            }).catch(err => console.warn('[V3] post-signin fetchUserDeals failed:', err));
+          }
+        }
+        if(event === 'SIGNED_OUT'){
+          _hasPrimedAfterSignIn = false;
         }
       });
     }
@@ -37269,7 +37309,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.6</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.7</span>
       </div>
     </div>
     <div>
