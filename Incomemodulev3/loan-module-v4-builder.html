@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.04.8</title>
+<title>PCS Loan Module · V4 · Build 2026.08.04.9</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.04.8.2').
+        suffix (e.g. '2026.08.04.9.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.04.8';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.04.9';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -19207,51 +19207,97 @@ window.closeNoticesModal = function(){
 // persist past that deadline — even if a DB call somewhere in the chain
 // hangs and the watchdog + per-call timeouts both miss. Fires an error
 // toast with the reason so the user knows why the load failed.
-window.refreshNotices = async function(){
+// ─── Cache-first Notices render (2026-08-04) ─────────────────────────
+// Previous design: modal open → await fetchNotices → render. When the DB
+// call stalled (Chrome pool congestion), the whole modal hung on spinner
+// for 45s. Now: render immediately from _noticesCache (populated on init
+// and after every deal-save), THEN kick off a background refresh with a
+// short 8s deadline. If refresh succeeds, re-render with fresh data. If
+// it fails, keep the cache visible and toast a small warning — user is
+// never blocked on network. This is the same pattern Gmail / Slack use.
+window.refreshNotices = async function(opts){
+  const forceReload = !!(opts && opts.force);
   const loading = document.getElementById('notices-loading');
   const content = document.getElementById('notices-content');
   const empty   = document.getElementById('notices-empty');
   const errBox  = document.getElementById('notices-error');
-  loading.style.display = ''; content.style.display = 'none'; empty.style.display = 'none'; errBox.style.display = 'none';
-  await new Promise(r => setTimeout(r, 30));
+  errBox.style.display = 'none';
 
-  // Hard top-level deadline. If anything downstream (fetchNotices,
-  // reconcile, render) hangs past this, we bail with a visible error so
-  // the modal doesn't get stuck on the spinner.
+  const cache = Array.isArray(window._noticesCache) ? window._noticesCache : [];
+  const hasCache = cache.length > 0;
+
+  // ─── 1. Instant render from cache (if we have one) ─────────────────
+  if(hasCache && !forceReload){
+    loading.style.display = 'none';
+    content.style.display = '';
+    empty.style.display = 'none';
+    try { _renderNotices(); } catch(err){ console.warn('[notices] cache render failed:', err); }
+    try { _refreshNoticeBadge(); } catch(_){}
+  } else {
+    // No cache yet — show spinner while we do the first fetch
+    loading.style.display = '';
+    content.style.display = 'none';
+    empty.style.display = 'none';
+    await new Promise(r => setTimeout(r, 30));
+  }
+
+  // ─── 2. Background refresh (short 8s deadline) ─────────────────────
+  if(!window.SB || !window.SB.connected){
+    if(!hasCache){
+      loading.style.display = 'none';
+      errBox.style.display = '';
+      errBox.innerHTML = '<b>Not connected to database.</b> Reload the page to retry.';
+    }
+    return;
+  }
+
   let hardTimer;
   const hardStop = new Promise((_, rj) => {
-    // 45s = 20s primary fetch + 20s retry + 5s buffer for reconciliation.
-    // Matches fetchNotices' own timeout (20s + retry) so the outer guard
-    // fires AFTER the inner retry rather than cutting it off.
-    hardTimer = setTimeout(() => rj(new Error('Notices load exceeded 45s — aborted so the modal doesn\'t freeze')), 45000);
+    hardTimer = setTimeout(() => rj(new Error('Notices refresh exceeded 15s — using cached data')), 15000);
   });
 
   const run = async () => {
-    if(!window.SB || !window.SB.connected){ throw new Error('Not connected to database — Supabase probe failed at init. Reload the page to retry.'); }
-    // Fetch all notices for deals the user can see. RLS handles authorization.
-    // fetchNotices already has its own _withDbTimeout guard (12s default).
     const notices = await window.SB.fetchNotices();
-    window._noticesCache = notices;
-    _renderNotices();
-    _refreshNoticeBadge();
-    // Trigger reconciliation in the background. When it finishes, re-render
-    // so the Rec column populates without blocking the first paint.
-    if(notices.length){
-      window.reconcileNotices().then(() => _renderNotices()).catch(err => console.warn('[notices] reconcile failed', err));
+    if(Array.isArray(notices)){
+      window._noticesCache = notices;
+      loading.style.display = 'none';
+      content.style.display = '';
+      try { _renderNotices(); } catch(err){ console.warn('[notices] render failed:', err); }
+      try { _refreshNoticeBadge(); } catch(_){}
+      // Reconcile in background — never awaited from here, so it can never
+      // stall the modal. Re-render when done to fill in the Rec column.
+      if(notices.length){
+        Promise.resolve()
+          .then(() => window.reconcileNotices())
+          .then(() => { try { _renderNotices(); } catch(_){} })
+          .catch(err => console.warn('[notices] reconcile failed:', err));
+      }
     }
   };
 
   try {
     await Promise.race([run(), hardStop]);
   } catch(err){
-    console.error('[notices] refresh failed', err);
-    loading.style.display = 'none';
-    errBox.style.display = '';
-    errBox.innerHTML = '<b>Notices failed:</b> ' + (err && err.message ? err.message : String(err));
-    if(typeof toast === 'function'){
-      toast(err.message || 'Failed to load notices', 6000, {
-        kind: 'error', id: 'notices:refresh', detail: 'loan_notices'
-      });
+    console.warn('[notices] refresh failed (keeping cache visible):', err.message || err);
+    if(!hasCache){
+      // First-load failure — no cache to fall back to, show error state
+      loading.style.display = 'none';
+      errBox.style.display = '';
+      errBox.innerHTML = '<b>Notices load failed:</b> ' + (err && err.message ? err.message : String(err))
+        + '<br><small>Click Reload above to try again.</small>';
+      if(typeof toast === 'function'){
+        toast(err.message || 'Failed to load notices', 6000, {
+          kind: 'error', id: 'notices:refresh', detail: 'loan_notices'
+        });
+      }
+    } else {
+      // Cache is still visible — small non-blocking toast so the user knows
+      // the numbers may be stale but doesn't lose their working set.
+      if(typeof toast === 'function'){
+        toast('Notices refresh timed out — showing cached data. Try again in a moment.', 4000, {
+          kind: 'warning', id: 'notices:stale', detail: 'loan_notices'
+        });
+      }
     }
   } finally {
     clearTimeout(hardTimer);
@@ -37375,7 +37421,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.8</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.9</span>
       </div>
     </div>
     <div>
