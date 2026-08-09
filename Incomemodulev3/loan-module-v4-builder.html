@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.04.9</title>
+<title>PCS Loan Module · V4 · Build 2026.08.05.3</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.04.9.2').
+        suffix (e.g. '2026.08.05.3.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.04.9';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.05.3';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -1741,6 +1741,11 @@
   <button class="v4-sb-item" onclick="window.openCashManagementModal && window.openCashManagementModal()">
     <i class="ti ti-cash-banknote" aria-hidden="true"></i>Cash management
   </button>
+  <!-- GL account setup — client-specific chart of accounts. Maps the engine's
+       default account codes to whatever the client's Investran/ERP uses. -->
+  <button class="v4-sb-item" onclick="window.openGLSetupModal && window.openGLSetupModal()">
+    <i class="ti ti-book" aria-hidden="true"></i>GL account setup
+  </button>
 
   <div class="v4-sb-spacer"></div>
 
@@ -1811,6 +1816,24 @@
   <span class="v4-status-chip" id="v4-status-chip" style="display:none;">
     <i class="ti ti-circle-check-filled" aria-hidden="true"></i>Performing
   </span>
+
+  <!-- ─── DB connection status chip (2026-08-05) ─────────────────────
+       Always visible in the v4 topbar. Reflects the SB client state:
+         · green  → connected
+         · amber  → reconnecting (silent recovery in progress)
+         · red    → disconnected (click to force reconnect)
+       Mirrored from #sb-status-chip in the (hidden) legacy header via
+       updateStatusChip() below. -->
+  <button id="v4-db-status-chip"
+          onclick="window.SB && window.SB.manualReconnect && window.SB.manualReconnect()"
+          title="Database connection status — click to force reconnect"
+          style="background:#DCFCE7; color:#065F46; border:0.5px solid rgba(6,95,70,0.15);
+                 padding:4px 10px; border-radius:999px; font-size:10.5px; font-weight:600;
+                 display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+                 letter-spacing:0.2px; transition:background 140ms ease;">
+    <span id="v4-db-status-dot" style="width:7px; height:7px; border-radius:50%; background:#10B981; box-shadow:0 0 0 2px rgba(16,185,129,0.18);"></span>
+    <span id="v4-db-status-text">DB connected</span>
+  </button>
 
   <button class="v4-cmdk-hint" style="margin-left:auto;" onclick="v4OpenCmdK()">
     <i class="ti ti-search" aria-hidden="true"></i>
@@ -5856,6 +5879,98 @@
 </style>
 
 <!-- ═══════════════════════════════════════════════════════════════
+     GL Account Setup modal — client-specific chart of accounts.
+     Left: engine source accounts (auto-scanned). Right: client mapping.
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="gl-setup-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeGLSetupModal && window.closeGLSetupModal()"></div>
+  <div class="json-modal-pn" style="width:min(1360px,98vw); max-height:96vh;">
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200); flex-wrap:wrap;">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-book" style="font-size:18px;"></i>
+      </div>
+      <div style="flex:1; min-width:220px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">GL account setup</div>
+        <div style="font-size:11px; color:var(--n-500); margin-top:2px;">Map the engine's default GL account codes to your Investran / ERP codes. Applied to every DIU batch push and CSV export.</div>
+      </div>
+      <button id="gl-scan-btn"
+              onclick="window.__glScanSources && window.__glScanSources()"
+              class="mat-btn outline !py-1 !px-2" style="font-size:11.5px;"
+              title="Scan journal_entries for distinct account codes the engine has emitted for your deals.">
+        <i class="ti ti-radar" style="font-size:14px; vertical-align:-2px;"></i> Scan sources
+      </button>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeGLSetupModal && window.closeGLSetupModal()" title="Close">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+
+    <div style="padding:12px 16px; border-bottom:0.5px solid var(--n-200); background:var(--n-50); display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div style="font-size:11px; color:var(--n-500);"><b>Scope:</b></div>
+      <select id="gl-team-scope" onchange="window.__glReload && window.__glReload()"
+              style="border:0.5px solid var(--n-300); border-radius:6px; padding:4px 8px; font-size:12px; background:var(--n-0);">
+        <option value="">Workspace defaults (admins only can edit)</option>
+      </select>
+      <div style="flex:1;"></div>
+      <div id="gl-summary" style="font-size:10.5px; color:var(--n-500); font-variant-numeric:tabular-nums;">—</div>
+    </div>
+
+    <div id="gl-body" style="padding:0; overflow:auto; max-height:calc(96vh - 210px);">
+      <div id="gl-loading" style="padding:40px; text-align:center; color:var(--n-500); font-size:12px;">
+        <i class="ti ti-loader-2" style="font-size:20px; animation:v4-spin 900ms linear infinite;"></i>
+        <div style="margin-top:8px;">Loading GL account mappings…</div>
+      </div>
+      <table id="gl-table" style="width:100%; font-size:11.5px; border-collapse:collapse; display:none;">
+        <thead>
+          <tr style="background:var(--n-50); position:sticky; top:0; z-index:1;">
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:14%;">Source code</th>
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:28%;">Source name (engine)</th>
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:18%;">Your code</th>
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:28%;">Your name (optional)</th>
+            <th style="text-align:right; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:8%;">Uses</th>
+            <th style="text-align:center; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:4%;"></th>
+          </tr>
+        </thead>
+        <tbody id="gl-tbody"></tbody>
+      </table>
+      <div id="gl-empty" style="display:none; padding:40px; text-align:center; color:var(--n-500); font-size:12px;">
+        <i class="ti ti-inbox" style="font-size:24px; color:var(--n-300);"></i>
+        <div style="margin-top:8px; font-weight:600; color:var(--n-700);">No engine accounts found yet.</div>
+        <div style="margin-top:4px; max-width:420px; margin-left:auto; margin-right:auto;">Run an accounting job on any deal, then click <b>Scan sources</b> above to pick up the account codes the engine emitted.</div>
+      </div>
+    </div>
+
+    <div class="json-modal-f" style="padding:10px 16px; border-top:0.5px solid var(--n-200); display:flex; justify-content:space-between; gap:8px; align-items:center;">
+      <div style="font-size:10.5px; color:var(--n-500);">Unmapped source accounts pass through to DIU using the engine's default code.</div>
+      <div style="display:flex; gap:6px;">
+        <button onclick="window.__glExportCsv && window.__glExportCsv()" class="mat-btn outline !py-1 !px-2" style="font-size:11.5px;">
+          <i class="ti ti-download" style="font-size:14px; vertical-align:-2px;"></i> Export CSV
+        </button>
+        <button onclick="window.__glImportCsv && window.__glImportCsv()" class="mat-btn outline !py-1 !px-2" style="font-size:11.5px;">
+          <i class="ti ti-upload" style="font-size:14px; vertical-align:-2px;"></i> Import CSV
+        </button>
+        <input type="file" id="gl-import-file" accept=".csv,text/csv" style="display:none;" onchange="window.__glImportFile && window.__glImportFile(event)"/>
+        <button onclick="window.closeGLSetupModal && window.closeGLSetupModal()" class="mat-btn outline">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+  #gl-setup-modal .gl-row:hover { background: var(--n-50); }
+  #gl-setup-modal .gl-input {
+    width: 100%; padding: 4px 6px; border: 0.5px solid var(--n-300);
+    border-radius: 4px; font-size: 11.5px; background: var(--n-0);
+    font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace;
+  }
+  #gl-setup-modal .gl-input:focus {
+    outline: none; border-color: var(--fis-green,#22C55E);
+    box-shadow: 0 0 0 2px var(--fis-green-50,#ECFDF5);
+  }
+  #gl-setup-modal .gl-input.text { font-family: inherit; }
+  #gl-setup-modal .gl-dirty { border-color: var(--fis-green,#22C55E); }
+  #gl-setup-modal .gl-saved-flash { background: var(--fis-green-50,#ECFDF5); transition: background 400ms; }
+</style>
+
+<!-- ═══════════════════════════════════════════════════════════════
      Borrowing Base modal — FirstAg Livestock revolving-BB facility.
      Left pane: deal-level config summary + inventory list (add/edit).
      Right pane: live computed base amount (PCS.computeBorrowingBase),
@@ -7097,16 +7212,54 @@ window.SB = (function(){
 
   function updateStatusChip(){
     const chip = document.getElementById('sb-status-chip');
-    if(!chip) return;
     const typeLabel = (BACKEND_TYPES[BACKEND_TYPE] && BACKEND_TYPES[BACKEND_TYPE].label) || 'DB';
-    if(_connected){
-      chip.className = 'chip green';
-      chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">cloud_done</span> ' + typeLabel + ' · ' + PROJECT_LABEL;
-      chip.title = 'Connected · ' + typeLabel + ' backend\n· ' + _stats.presetsLoaded + ' deals loaded\n· ' + _stats.runsSaved + ' runs persisted\n· ' + _stats.overridesSaved + ' overrides\n· ' + _stats.sessionsSaved + ' sessions\n\nClick to force reconnect.';
-    } else {
-      chip.className = 'chip red';
-      chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">cloud_off</span> ' + typeLabel + ' offline · click to reconnect';
-      chip.title = 'Disconnected (' + typeLabel + ') · ' + (_lastError ? String(_lastError).slice(0, 200) : 'no client') + '\n\nClick to reconnect.';
+    if(chip){
+      if(_connected){
+        chip.className = 'chip green';
+        chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">cloud_done</span> ' + typeLabel + ' · ' + PROJECT_LABEL;
+        chip.title = 'Connected · ' + typeLabel + ' backend\n· ' + _stats.presetsLoaded + ' deals loaded\n· ' + _stats.runsSaved + ' runs persisted\n· ' + _stats.overridesSaved + ' overrides\n· ' + _stats.sessionsSaved + ' sessions\n\nClick to force reconnect.';
+      } else {
+        chip.className = 'chip red';
+        chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">cloud_off</span> ' + typeLabel + ' offline · click to reconnect';
+        chip.title = 'Disconnected (' + typeLabel + ') · ' + (_lastError ? String(_lastError).slice(0, 200) : 'no client') + '\n\nClick to reconnect.';
+      }
+    }
+    // ─── Mirror to v4 topbar chip (2026-08-05) ──────────────────────
+    // Legacy #sb-status-chip lives in a header that's hidden in v4 mode.
+    // #v4-db-status-chip is the always-visible pill in the v4 topbar.
+    const v4chip = document.getElementById('v4-db-status-chip');
+    const v4dot  = document.getElementById('v4-db-status-dot');
+    const v4text = document.getElementById('v4-db-status-text');
+    if(v4chip && v4dot && v4text){
+      const reconnecting = (typeof _reconnectAttempts !== 'undefined' && _reconnectAttempts > 0);
+      if(reconnecting){
+        v4chip.style.background = '#FEF3C7';
+        v4chip.style.color = '#92400E';
+        v4chip.style.borderColor = 'rgba(146,64,14,0.2)';
+        v4dot.style.background = '#D97706';
+        v4dot.style.boxShadow = '0 0 0 2px rgba(217,119,6,0.22)';
+        v4dot.style.animation = 'v4-spin 1s linear infinite';
+        v4text.textContent = 'Reconnecting… (' + _reconnectAttempts + '/' + (typeof RECONNECT_MAX_ATTEMPTS !== 'undefined' ? RECONNECT_MAX_ATTEMPTS : 3) + ')';
+        v4chip.title = 'Trying to re-establish DB connection';
+      } else if(_connected){
+        v4chip.style.background = '#DCFCE7';
+        v4chip.style.color = '#065F46';
+        v4chip.style.borderColor = 'rgba(6,95,70,0.15)';
+        v4dot.style.background = '#10B981';
+        v4dot.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.18)';
+        v4dot.style.animation = '';
+        v4text.textContent = 'DB connected';
+        v4chip.title = 'Connected · ' + typeLabel + ' · ' + PROJECT_LABEL + ' — click to force reconnect';
+      } else {
+        v4chip.style.background = '#FEE2E2';
+        v4chip.style.color = '#991B1B';
+        v4chip.style.borderColor = 'rgba(153,27,27,0.2)';
+        v4dot.style.background = '#DC2626';
+        v4dot.style.boxShadow = '0 0 0 2px rgba(220,38,38,0.22)';
+        v4dot.style.animation = '';
+        v4text.textContent = 'DB offline';
+        v4chip.title = 'Disconnected — click to reconnect';
+      }
     }
     // Wire click-to-reconnect once. The chip may render before init finishes,
     // so we set style + onclick every call (cheap, idempotent).
@@ -7153,13 +7306,20 @@ window.SB = (function(){
   }
   async function _dbHealthLoop(){
     // Skip when the tab is hidden — Chrome throttles bg timers heavily and
-    // firing a ping every 30s in a bg tab wastes a connection slot.
+    // firing a ping in a bg tab wastes a connection slot.
     if(document.hidden) return;
     const ok = await _dbHealthPing();
     if(ok){
       _healthFailStreak = 0;
+      // Reset the user-triggered timeout counter too — a successful health ping
+      // means the connection is fundamentally healthy, so any residual counter
+      // from a transient blip should be cleared instead of building toward
+      // an aggressive auto-signout.
+      if(typeof _dbTimeoutState !== 'undefined'){
+        _dbTimeoutState.count = 0;
+        _dbTimeoutState.firstAt = 0;
+      }
       if(!_connected){
-        // Silent recovery — was offline, now back.
         _connected = true;
         updateStatusChip();
         console.log('[SB] health ping recovered — connection re-established');
@@ -7168,23 +7328,23 @@ window.SB = (function(){
     } else {
       _healthFailStreak++;
       if(_healthFailStreak >= 2 && _connected){
-        console.warn('[SB] health check failed 2x — flipping to disconnected + trying reconnect');
+        console.warn('[SB] health check failed 2x — triggering silent reconnect');
         _connected = false;
-        _lastError = 'Health check failed — connection may be stale';
+        _lastError = 'Health check failed — reconnecting…';
         updateStatusChip();
-        if(typeof toast === 'function') toast('DB connection lost — reconnecting…', 5000, { kind:'warning', id:'sb:health' });
-        // Attempt silent reconnect
-        try {
-          const ok = await init();
-          if(ok && typeof toast === 'function') toast('DB connection restored', 3000, { kind:'success', id:'sb:health' });
-        } catch(err){ console.error('[SB] silent reconnect failed:', err); }
+        // Delegate to the unified reconnect machinery (up to 3 attempts with
+        // exponential backoff before escalating to forced sign-out).
+        if(typeof _tryReconnect === 'function' && _reconnectAttempts === 0){
+          _tryReconnect('health-check failed twice');
+        }
       }
     }
   }
-  // Kick the loop after page load, then every 30s. Also fire on
-  // visibilitychange (unhide) so a returning-from-sleep tab checks immediately.
-  setTimeout(_dbHealthLoop, 10000);
-  setInterval(_dbHealthLoop, 30000);
+  // Kick the loop after page load, then every 20s (down from 30s so we catch
+  // problems sooner). Also fire on visibilitychange (unhide) so a returning-
+  // from-sleep tab checks immediately.
+  setTimeout(_dbHealthLoop, 8000);
+  setInterval(_dbHealthLoop, 20000);
   document.addEventListener('visibilitychange', () => {
     if(!document.hidden && (Date.now() - _lastHealthCheckAt) > 15000) _dbHealthLoop();
   });
@@ -7632,45 +7792,100 @@ window.SB = (function(){
       _dbConnectionLost();
     }
   }
-  // "Kicked" flag — set when auth is force-terminated (DB lost or idle timeout).
+  // "Kicked" flag — set when auth is force-terminated (idle timeout).
   // While set, _refreshCurrentUser skips re-hydrating from localStorage so a
   // background poll can't undo the signout by reading a still-persistent session.
   let _authKicked = false;
-  async function _dbConnectionLost(reason){
-    if(_authKicked) return;   // already handling
-    _authKicked = true;
-    const why = reason || ('exceeded '+_dbTimeoutState.threshold+' consecutive DB timeouts');
-    console.error('[SB] Connection lost — forcing sign-out. Reason:', why);
+  // Reconnect attempt tracker — DB-lost handler tries to reconnect silently
+  // up to N times before giving up and forcing sign-out. Reset on any success.
+  let _reconnectAttempts = 0;
+  const RECONNECT_MAX_ATTEMPTS = 3;
+
+  async function _tryReconnect(reason){
+    _reconnectAttempts++;
+    console.warn('[SB] Attempting silent reconnect (attempt ' + _reconnectAttempts + '/' + RECONNECT_MAX_ATTEMPTS + ') · reason:', reason);
+    if(typeof toast === 'function'){
+      toast('Reconnecting to database… (attempt ' + _reconnectAttempts + '/' + RECONNECT_MAX_ATTEMPTS + ')', 4000, {
+        kind: 'warning', id: 'sb:reconnecting'
+      });
+    }
+    // Update status chip immediately so the user sees "Reconnecting…"
+    _connected = false;
+    _lastError = 'Reconnecting…';
+    updateStatusChip();
+    // Clear any stale dedup entries — they're holding refs to stalled promises.
+    if(typeof _inFlight !== 'undefined' && _inFlight && _inFlight.clear) _inFlight.clear();
     try {
-      if(typeof toast === 'function'){
-        toast('Database connection lost — reloading page to reset connection.', 6000, {
-          kind: 'error', id: 'sb:db-lost', detail: why
-        });
-      }
-      // Purge every supabase-persisted auth token so a reload comes up on the
-      // login gate cleanly (no auto-resume). The default storageKey is
-      // `sb-<projectRef>-auth-token`; we sweep any `sb-*-auth-token` key defensively.
-      try {
-        const keys = [];
-        for(let i = 0; i < localStorage.length; i++){
-          const k = localStorage.key(i);
-          if(k && /^sb-.*-auth-token$/.test(k)) keys.push(k);
+      // Rebuild the supabase client from scratch. This creates a fresh HTTP
+      // client with fresh internal state, sidestepping any orphaned promises
+      // or stalled connection references in the old client.
+      const ok = await init();
+      if(ok){
+        // Verify the session still works with a lightweight ping.
+        const alive = await _dbHealthPing();
+        if(alive){
+          console.log('[SB] silent reconnect SUCCESS on attempt ' + _reconnectAttempts);
+          _reconnectAttempts = 0;
+          _dbTimeoutState.count = 0;
+          _dbTimeoutState.tripped = false;
+          _dbTimeoutState.firstAt = 0;
+          if(typeof toast === 'function'){
+            toast('DB connection restored — you can continue working.', 3500, {
+              kind: 'success', id: 'sb:reconnected'
+            });
+          }
+          return true;
         }
-        keys.forEach(k => { try { localStorage.removeItem(k); } catch(_){} });
-      } catch(_){}
-      // Best-effort server-side signOut. Short 2s deadline so we don't hang
-      // waiting for a network that's already broken.
-      try { await _withDbTimeout('signOut', _client.auth.signOut(), 2000); } catch(_){}
-      _currentUser = null; _isAdmin = false;
-      _authListeners.forEach(cb => { try { cb(null, 'SESSION_EXPIRED'); } catch(_){} });
-      if(typeof window.__applyGateState === 'function') window.__applyGateState();
-      // Chrome HTTP/2 connection pool exhaustion is the usual cause of these
-      // timeouts (verified: DB EXPLAIN shows queries running in <2ms while
-      // the client times out at 20s). A page reload is the ONLY reliable
-      // fix — it resets the pool and re-establishes fresh sockets. Small
-      // delay so the toast has time to render.
-      setTimeout(() => { try { location.reload(); } catch(_){} }, 1200);
-    } catch(err){ console.error('[SB] _dbConnectionLost handler failed:', err); }
+      }
+    } catch(err){
+      console.error('[SB] reconnect attempt failed:', err);
+    }
+    // Failed. If we haven't hit max attempts, wait a beat and try again.
+    if(_reconnectAttempts < RECONNECT_MAX_ATTEMPTS){
+      const backoffMs = Math.min(5000, 1000 * Math.pow(2, _reconnectAttempts - 1));
+      console.warn('[SB] reconnect failed — retrying in ' + backoffMs + 'ms');
+      setTimeout(() => _tryReconnect(reason), backoffMs);
+      return false;
+    }
+    // Max attempts exhausted → escalate to full sign-out + reload
+    console.error('[SB] reconnect exhausted after ' + RECONNECT_MAX_ATTEMPTS + ' attempts — falling back to forced sign-out + reload');
+    return await _forceSignOutAndReload(reason);
+  }
+
+  async function _forceSignOutAndReload(reason){
+    if(_authKicked) return;
+    _authKicked = true;
+    if(typeof toast === 'function'){
+      toast('Database unreachable after ' + RECONNECT_MAX_ATTEMPTS + ' reconnect attempts — reloading page.', 6000, {
+        kind: 'error', id: 'sb:db-lost', detail: reason
+      });
+    }
+    // Purge persisted auth tokens so reload comes up on the login gate
+    try {
+      const keys = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && /^sb-.*-auth-token$/.test(k)) keys.push(k);
+      }
+      keys.forEach(k => { try { localStorage.removeItem(k); } catch(_){} });
+    } catch(_){}
+    try { await _withDbTimeout('signOut', _client.auth.signOut(), 2000); } catch(_){}
+    _currentUser = null; _isAdmin = false;
+    _authListeners.forEach(cb => { try { cb(null, 'SESSION_EXPIRED'); } catch(_){} });
+    if(typeof window.__applyGateState === 'function') window.__applyGateState();
+    setTimeout(() => { try { location.reload(); } catch(_){} }, 1500);
+  }
+
+  async function _dbConnectionLost(reason){
+    // New behaviour (2026-08-05): attempt silent reconnect FIRST. Only fall
+    // through to forced sign-out + reload if reconnect keeps failing. This
+    // saves the user from getting bounced to the login screen every time
+    // Chrome's connection pool has a hiccup.
+    if(_authKicked) return;   // already handling
+    if(_reconnectAttempts > 0) return;   // reconnect already in flight
+    const why = reason || ('exceeded '+_dbTimeoutState.threshold+' consecutive DB timeouts');
+    console.warn('[SB] DB connection lost — trying to reconnect silently. Reason:', why);
+    _tryReconnect(why);
   }
 
   // ─── Idle-timeout auto sign-out (2026-08-04) ─────────────────────────
@@ -8511,6 +8726,56 @@ window.SB = (function(){
       }
       return out;
     } catch(err){ console.error('[SB] fetchJournalEntriesForDeals threw:', err); return {}; }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // GL account mapping (2026-08-05 · client-specific chart of accounts)
+  // ═══════════════════════════════════════════════════════════════════
+  // Each client's Investran / ERP uses different account codes than what
+  // the engine emits by default. gl_account_mappings lets a workspace team
+  // define source→target substitutions that get applied on DIU push.
+  async function fetchGLSourceAccounts(){
+    if(!_client || !_connected || _authKicked) return [];
+    try {
+      const { data, error } = await _withDbTimeout(
+        'fetchGLSourceAccounts',
+        _client.from('gl_source_accounts').select('*').order('source_account_code'),
+        10000
+      );
+      if(error){ console.error('[SB] fetchGLSourceAccounts:', error); return []; }
+      return data || [];
+    } catch(err){ console.error('[SB] fetchGLSourceAccounts threw:', err); return []; }
+  }
+  async function fetchGLMappings(teamId){
+    if(!_client || !_connected || _authKicked) return [];
+    try {
+      let q = _client.from('gl_account_mappings').select('*').eq('is_active', true).order('source_account_code');
+      if(teamId) q = q.eq('team_id', teamId);
+      const { data, error } = await _withDbTimeout('fetchGLMappings', q, 10000);
+      if(error){ console.error('[SB] fetchGLMappings:', error); return []; }
+      return data || [];
+    } catch(err){ console.error('[SB] fetchGLMappings threw:', err); return []; }
+  }
+  async function upsertGLMapping(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!row || !row.source_account_code) return { ok:false, reason:'source_account_code required' };
+    const payload = Object.assign({
+      created_by: _currentUser ? _currentUser.id : null
+    }, row);
+    // onConflict on (team_id, source_account_code). team_id is nullable, so
+    // Postgres treats null as distinct — we upsert with an explicit conflict target.
+    const { data, error } = await _client
+      .from('gl_account_mappings')
+      .upsert(payload, { onConflict: 'team_id,source_account_code' })
+      .select().single();
+    if(error){ console.error('[SB] upsertGLMapping:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, row: data };
+  }
+  async function deleteGLMapping(id){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('gl_account_mappings').delete().eq('id', id);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -11067,6 +11332,8 @@ window.SB = (function(){
     // Notice Phase 2 — recipients + reconciliation
     fetchRecipients, upsertRecipient, deleteRecipient,
     fetchJournalEntriesForDeal, fetchJournalEntriesForDeals,
+    // GL account mapping
+    fetchGLSourceAccounts, fetchGLMappings, upsertGLMapping, deleteGLMapping,
     // Multi-fund (Tier 1 #2 Phase 1)
     fetchFunds, upsertFund, deleteFund,
     fetchFundAllocations, upsertFundAllocation, deleteFundAllocation,
@@ -11095,6 +11362,26 @@ window.SB = (function(){
     get isAdmin(){ return _isAdmin; },
     _refreshCurrentUser, _refreshAdminFlag,
     ensureFreshSession: _ensureFreshSession,
+    // Manual reconnect — bound to the v4 topbar chip click. Rebuilds the
+    // supabase client, verifies with a health ping. Toasts result.
+    manualReconnect: async function(){
+      if(typeof toast === 'function') toast('Reconnecting…', 3000, { kind:'info', id:'sb:manual-reconnect' });
+      if(typeof _inFlight !== 'undefined' && _inFlight && _inFlight.clear) _inFlight.clear();
+      try {
+        const ok = await init();
+        const alive = ok && await _dbHealthPing();
+        if(alive){
+          if(typeof _dbTimeoutState !== 'undefined'){ _dbTimeoutState.count = 0; _dbTimeoutState.firstAt = 0; _dbTimeoutState.tripped = false; }
+          _reconnectAttempts = 0;
+          if(typeof toast === 'function') toast('Reconnected', 3000, { kind:'success', id:'sb:manual-reconnect' });
+        } else {
+          if(typeof toast === 'function') toast('Reconnect failed — check network', 5000, { kind:'error', id:'sb:manual-reconnect' });
+        }
+      } catch(err){
+        if(typeof toast === 'function') toast('Reconnect failed: ' + (err.message || err), 5000, { kind:'error', id:'sb:manual-reconnect' });
+      }
+      updateStatusChip();
+    },
     getConfig, setConfig, resetConfig, getDefaults, getBackendTypes,
     get url(){ return SUPABASE_URL; }, get projectLabel(){ return PROJECT_LABEL; },
     get isOverride(){ return _cfg.isOverride; },
@@ -12883,6 +13170,16 @@ function downloadDIUFilled(){
   const inst = currentInstrument();
   if(!inst){ toast('No active deal — pick one from the header'); return; }
   console.log('[DIU] downloadDIUFilled start — journals:', M.acctJournals.length, 'deal:', inst.id);
+  // Apply client GL account remapping (same as pushToWorkday). Overwrites the
+  // in-memory journals so downstream sanitisers, batch grouping and CSV/XLSX
+  // rendering all use the mapped codes. Pass-through when no mappings exist.
+  if(window.__applyGLMappings){
+    const remapped = window.__applyGLMappings(M.acctJournals);
+    if(remapped !== M.acctJournals){
+      // Substitute in place so all downstream refs (loops, groupBy, sanitisers) see the mapped codes
+      M.acctJournals = remapped;
+    }
+  }
   const dateStamp = new Date().toISOString().slice(0,10);
   // Build XLSX workbook with two tabs: GL (the existing journal data) and
   // PortfolioPosition (matches the DIU Sec master worksheet template).
@@ -24460,18 +24757,74 @@ function pushToWorkday(){
     alert('Push DIU threw: ' + err.message + '\n\n' + (err.stack || '').slice(0, 400));
   }
 }
+// ─── GL account-code remapping (2026-08-05) ──────────────────────────
+// Client Investrans use their own chart of accounts. window.PCS_GL_MAPPINGS
+// is refreshed from gl_account_mappings on init + after any GL setup save,
+// keyed by source_account_code → { mapped_account_code, mapped_account_name }.
+// Any code not in the map passes through unchanged, so this is fully
+// opt-in: no mappings = same output as before.
+window.PCS_GL_MAPPINGS = window.PCS_GL_MAPPINGS || {};
+window.__refreshGLMappings = async function(){
+  if(!(window.SB && window.SB.fetchGLMappings)) return {};
+  try {
+    const rows = await window.SB.fetchGLMappings(null);   // workspace default; team-scope handled inside SB
+    const map = {};
+    (rows || []).forEach(r => {
+      if(r.source_account_code && r.mapped_account_code){
+        map[r.source_account_code] = { code: r.mapped_account_code, name: r.mapped_account_name || null };
+      }
+    });
+    window.PCS_GL_MAPPINGS = map;
+    console.log('[GL] loaded', Object.keys(map).length, 'active account mappings');
+    return map;
+  } catch(err){ console.warn('[GL] refresh failed:', err); return window.PCS_GL_MAPPINGS; }
+};
+// Prime on boot (fire-and-forget, no await needed)
+setTimeout(() => { if(window.SB && window.SB.connected) window.__refreshGLMappings(); }, 2000);
+
+// Apply mapping to a journal-entry array. Returns a NEW array (originals untouched)
+// with `account` / `glAccountName` substituted where a mapping exists. Emits a
+// console line with mapped vs pass-through counts for debuggability.
+window.__applyGLMappings = function(journals){
+  if(!Array.isArray(journals) || !journals.length) return journals;
+  const map = window.PCS_GL_MAPPINGS || {};
+  if(!Object.keys(map).length) return journals;
+  let remapped = 0, passthrough = 0, alreadyMapped = 0;
+  const out = journals.map(j => {
+    // Skip rows already remapped in a previous call (idempotency)
+    if(j._originalAccount) { alreadyMapped++; return j; }
+    const src = j.account || j.account_code;
+    const m = src && map[src];
+    if(m){
+      remapped++;
+      return Object.assign({}, j, {
+        account: m.code,
+        _originalAccount: src,
+        glAccountName: m.name || j.glAccountName
+      });
+    }
+    passthrough++;
+    return j;
+  });
+  console.log('[GL] applied mappings — remapped ' + remapped + ' rows · ' + passthrough + ' passed through · ' + alreadyMapped + ' already mapped');
+  return out;
+};
+
 function pushToWorkdayImpl(){
   console.log('Push DIU clicked — journals:', M.acctJournals?.length, '· instrument:', M.instrumentId);
   if(!M.acctJournals || !M.acctJournals.length){ toast('Run accounting first — no journals to push'); return; }
   const inst = currentInstrument();
   if(!inst){ toast('No active instrument'); return; }
+  // Apply client GL account remapping BEFORE building the batch. Fully opt-in
+  // — if no mappings are configured, this is a no-op and codes pass through.
+  const journalsForBatch = window.__applyGLMappings ? window.__applyGLMappings(M.acctJournals) : M.acctJournals;
   // Build the DIU batch envelope (matches Investran DIU /api/DataImport/v1/batches)
   const period = `${inst.settlementDate}-to-${inst.maturityDate}`;
-  const rowsHash = djb2(JSON.stringify(M.acctJournals.map(j => `${j.effectiveDate}|${j.transactionType}|${j.amountLE}|${j.account}`)));
+  const rowsHash = djb2(JSON.stringify(journalsForBatch.map(j => `${j.effectiveDate}|${j.transactionType}|${j.amountLE}|${j.account}`)));
   const externalKey = `lmil-${inst.id}-${period}-${rowsHash}`;
   const batchId = 'WD-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + inst.id.toUpperCase().slice(0,12) + '-' + Math.floor(Math.random()*9000+1000);
   let totalDR = 0, totalCR = 0;
-  for(const j of M.acctJournals){
+  for(const j of journalsForBatch){
     if(j.isDebit) totalDR += j.amountLE; else totalCR += j.amountLE;
   }
   M.workdayBatch = {
@@ -24490,12 +24843,12 @@ function pushToWorkdayImpl(){
       pcsSourceVersion: 'PCS / Investran v2026'
     },
     summary: {
-      jeRows: M.acctJournals.length,
+      jeRows: journalsForBatch.length,
       totalDebits: totalDR,
       totalCredits: totalCR,
       balanced: Math.abs(totalDR - totalCR) < 0.01
     },
-    journalEntries: M.acctJournals
+    journalEntries: journalsForBatch
   };
   $('batch-id').textContent = batchId;
   $('batch-extkey').textContent = externalKey;
@@ -36637,6 +36990,199 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
   });
 
+  // ─── GL account setup controller (2026-08-05) ─────────────────────────
+  // Loads engine source accounts (from journal_entries via gl_source_accounts
+  // view) and lets the user map them to their own GL account codes. Stores
+  // to gl_account_mappings scoped by team_id. On DIU push, mappings are
+  // applied so client-side GL codes flow through.
+  const _glState = { sources: [], mappings: [], teamId: '', teams: [] };
+
+  window.openGLSetupModal = async function(){
+    const el = $('gl-setup-modal'); if(!el) return;
+    el.style.display = 'flex';
+    // Populate team dropdown once (per session)
+    if(!_glState.teams.length && window.SB && window.SB.fetchTeams){
+      try {
+        const teams = await window.SB.fetchTeams();
+        _glState.teams = teams || [];
+        const sel = $('gl-team-scope');
+        if(sel){
+          // Preserve the "Workspace defaults" option
+          const opts = _glState.teams.map(t => '<option value="' + t.id + '">Team · ' + escape(t.name || t.code) + '</option>').join('');
+          sel.innerHTML = '<option value="">Workspace defaults (admins only can edit)</option>' + opts;
+        }
+      } catch(_){}
+    }
+    await window.__glReload();
+  };
+  window.closeGLSetupModal = function(){
+    const el = $('gl-setup-modal'); if(el) el.style.display = 'none';
+    // Refresh the in-memory mapping cache so the next DIU push picks up any
+    // edits without needing a page reload.
+    if(typeof window.__refreshGLMappings === 'function') window.__refreshGLMappings();
+  };
+
+  window.__glReload = async function(){
+    const loading = $('gl-loading'), table = $('gl-table'), empty = $('gl-empty'), tbody = $('gl-tbody');
+    if(!loading || !table || !tbody) return;
+    loading.style.display = ''; table.style.display = 'none'; empty.style.display = 'none';
+    _glState.teamId = ($('gl-team-scope') || {}).value || '';
+    try {
+      const [sources, mappings] = await Promise.all([
+        window.SB.fetchGLSourceAccounts(),
+        window.SB.fetchGLMappings(_glState.teamId || null)
+      ]);
+      _glState.sources  = Array.isArray(sources) ? sources : [];
+      _glState.mappings = Array.isArray(mappings) ? mappings : [];
+      // If there are mappings for accounts that never showed in the view,
+      // still include them as rows (so admins can pre-configure future accounts).
+      const bySource = {};
+      _glState.sources.forEach(s => { bySource[s.source_account_code] = { source: s, mapping: null }; });
+      _glState.mappings.forEach(m => {
+        if(!bySource[m.source_account_code]) bySource[m.source_account_code] = { source: { source_account_code: m.source_account_code, source_account_name: m.source_account_name, occurrences: 0 }, mapping: m };
+        else bySource[m.source_account_code].mapping = m;
+      });
+      const rows = Object.values(bySource).sort((a,b) => (a.source.source_account_code || '').localeCompare(b.source.source_account_code || ''));
+      loading.style.display = 'none';
+      if(!rows.length){
+        empty.style.display = '';
+        _glUpdateSummary(0, 0);
+        return;
+      }
+      table.style.display = '';
+      tbody.innerHTML = rows.map(r => _glRowHtml(r)).join('');
+      const mapped = rows.filter(r => r.mapping && r.mapping.mapped_account_code).length;
+      _glUpdateSummary(rows.length, mapped);
+      _glWireInputs();
+    } catch(err){
+      console.error('[gl-setup] reload failed:', err);
+      loading.style.display = 'none';
+      empty.style.display = '';
+      $('gl-empty').innerHTML = '<div style="color:#DC2626; font-weight:600;">Failed to load — see console for details.</div>';
+    }
+  };
+  function _glUpdateSummary(total, mapped){
+    const el = $('gl-summary'); if(!el) return;
+    el.innerHTML = '<b>' + total + '</b> account' + (total===1?'':'s') + ' · <b style="color:' + (mapped ? 'var(--fis-green-700,#15803D)' : 'var(--n-500)') + ';">' + mapped + '</b> mapped';
+  }
+  function _glRowHtml(r){
+    const src = r.source, m = r.mapping || {};
+    const key = src.source_account_code;
+    return ''
+      + '<tr class="gl-row" data-src="' + escape(key) + '">'
+      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); font-family:ui-monospace,monospace; font-size:11px;">' + escape(key) + '</td>'
+      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); color:var(--n-700);">' + escape(src.source_account_name || '') + '</td>'
+      +   '<td style="padding:4px 12px; border-bottom:0.5px solid var(--n-100);"><input class="gl-input" data-field="mapped_account_code" data-src="' + escape(key) + '" value="' + escape(m.mapped_account_code || '') + '" placeholder="—" /></td>'
+      +   '<td style="padding:4px 12px; border-bottom:0.5px solid var(--n-100);"><input class="gl-input text" data-field="mapped_account_name" data-src="' + escape(key) + '" value="' + escape(m.mapped_account_name || '') + '" placeholder="(same as source)" /></td>'
+      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); text-align:right; color:var(--n-500); font-variant-numeric:tabular-nums;">' + (src.occurrences || 0) + '</td>'
+      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); text-align:center;">'
+      +     (m.id ? '<button title="Clear this mapping" onclick="window.__glClearRow(\'' + escape(key) + '\',\'' + m.id + '\')" style="background:none; border:0; color:var(--n-400); cursor:pointer;"><i class="ti ti-x" style="font-size:14px;"></i></button>' : '')
+      +   '</td>'
+      + '</tr>';
+  }
+  function _glWireInputs(){
+    document.querySelectorAll('#gl-tbody .gl-input').forEach(input => {
+      input.addEventListener('input', function(){ this.classList.add('gl-dirty'); });
+      input.addEventListener('blur', async function(){
+        if(!this.classList.contains('gl-dirty')) return;
+        const src = this.getAttribute('data-src');
+        const row = document.querySelector('#gl-tbody tr[data-src="' + CSS.escape(src) + '"]');
+        if(!row) return;
+        const code = row.querySelector('[data-field="mapped_account_code"]').value.trim();
+        const name = row.querySelector('[data-field="mapped_account_name"]').value.trim();
+        const sourceRow = _glState.sources.find(s => s.source_account_code === src) || {};
+        const payload = {
+          team_id: _glState.teamId || null,
+          source_account_code: src,
+          source_account_name: sourceRow.source_account_name || null,
+          mapped_account_code: code || null,
+          mapped_account_name: name || null,
+          is_active: true
+        };
+        // If we already have an id for this source (existing mapping), include it
+        const existing = _glState.mappings.find(m => m.source_account_code === src);
+        if(existing && existing.id) payload.id = existing.id;
+        const r = await window.SB.upsertGLMapping(payload);
+        if(r.ok){
+          row.classList.add('gl-saved-flash');
+          setTimeout(() => row.classList.remove('gl-saved-flash'), 500);
+          row.querySelectorAll('.gl-dirty').forEach(el => el.classList.remove('gl-dirty'));
+          // Update local state so counts stay accurate
+          if(r.row){
+            if(existing){ Object.assign(existing, r.row); }
+            else _glState.mappings.push(r.row);
+          }
+          const mapped = _glState.mappings.filter(m => m.mapped_account_code).length;
+          _glUpdateSummary(document.querySelectorAll('#gl-tbody tr').length, mapped);
+        } else {
+          if(typeof toast === 'function') toast('Save failed: ' + (r.reason || 'unknown'), 5000, { kind:'error' });
+        }
+      });
+    });
+  }
+  window.__glClearRow = async function(src, id){
+    if(!confirm('Clear the mapping for ' + src + '?')) return;
+    const r = await window.SB.deleteGLMapping(id);
+    if(r.ok){
+      // Remove from local state, re-render just this row's inputs
+      _glState.mappings = _glState.mappings.filter(m => m.id !== id);
+      window.__glReload();
+    }
+  };
+  window.__glScanSources = async function(){
+    const btn = $('gl-scan-btn'); if(!btn) return;
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:14px; vertical-align:-2px; animation:v4-spin 900ms linear infinite;"></i> Scanning…';
+    try {
+      await window.__glReload();
+      if(typeof toast === 'function') toast('Scanned — ' + _glState.sources.length + ' source account' + (_glState.sources.length===1?'':'s') + ' found', 3500);
+    } finally {
+      btn.disabled = false; btn.innerHTML = orig;
+    }
+  };
+  window.__glImportCsv = function(){
+    const f = $('gl-import-file'); if(f) f.click();
+  };
+  window.__glImportFile = async function(evt){
+    const file = evt.target.files && evt.target.files[0]; if(!file) return;
+    evt.target.value = '';
+    const text = await file.text();
+    // CSV format: source_code,source_name,mapped_code,mapped_name
+    const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(1);   // skip header
+    let ok = 0, fail = 0;
+    for(const line of lines){
+      const [src, sname, code, name] = line.split(',').map(s => (s||'').trim().replace(/^"|"$/g, ''));
+      if(!src) continue;
+      const r = await window.SB.upsertGLMapping({
+        team_id: _glState.teamId || null,
+        source_account_code: src,
+        source_account_name: sname || null,
+        mapped_account_code: code || null,
+        mapped_account_name: name || null,
+        is_active: true
+      });
+      if(r.ok) ok++; else fail++;
+    }
+    if(typeof toast === 'function') toast('Imported ' + ok + ' mappings' + (fail ? ' (' + fail + ' failed)' : ''), 4000, { kind: fail ? 'warning' : 'success' });
+    window.__glReload();
+  };
+  window.__glExportCsv = function(){
+    const rows = ['source_code,source_name,mapped_code,mapped_name'];
+    document.querySelectorAll('#gl-tbody tr').forEach(tr => {
+      const src = tr.getAttribute('data-src');
+      const srcRow = _glState.sources.find(s => s.source_account_code === src) || {};
+      const code = tr.querySelector('[data-field="mapped_account_code"]').value.trim();
+      const name = tr.querySelector('[data-field="mapped_account_name"]').value.trim();
+      rows.push([src, srcRow.source_account_name || '', code, name].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(','));
+    });
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'gl-account-mappings.csv';
+    a.click(); URL.revokeObjectURL(url);
+  };
+
   window.__rfxRefresh = async function(){
     const idx = $('rfx-index')?.value;
     const listEl = $('rfx-list');
@@ -37421,7 +37967,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.04.9</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.05.3</span>
       </div>
     </div>
     <div>
