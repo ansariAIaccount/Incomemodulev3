@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.05.3</title>
+<title>PCS Loan Module · V4 · Build 2026.08.06</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.05.3.2').
+        suffix (e.g. '2026.08.06.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.05.3';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.06';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -7209,6 +7209,15 @@ window.SB = (function(){
   let _connected = false;
   let _lastError = null;
   let _stats = { presetsLoaded: 0, runsSaved: 0, overridesSaved: 0, sessionsSaved: 0 };
+  // Auth subscription handle — captured from _client.auth.onAuthStateChange so
+  // we can unsubscribe before creating a replacement client. Skipping this was
+  // the root cause of the "Multiple GoTrueClient instances" runaway + SIGNED_IN
+  // cascade + connection pool exhaustion observed on 2026-08-06.
+  let _authSubscription = null;
+  // init() dedup — repeated concurrent calls (health check + user click +
+  // idle handler) were each creating a new client. Now if one init is
+  // in-flight, subsequent callers await the same promise.
+  let _initInFlight = null;
 
   function updateStatusChip(){
     const chip = document.getElementById('sb-status-chip');
@@ -7349,7 +7358,13 @@ window.SB = (function(){
     if(!document.hidden && (Date.now() - _lastHealthCheckAt) > 15000) _dbHealthLoop();
   });
 
+  // Public init() — dedups concurrent calls. Internal _initImpl does the real work.
   async function init(){
+    if(_initInFlight) return _initInFlight;
+    _initInFlight = _initImpl().finally(() => { _initInFlight = null; });
+    return _initInFlight;
+  }
+  async function _initImpl(){
     // Wait for the ES-module-loaded createClient to be available.
     if(!window.__supabaseCreateClient){
       await new Promise(res => window.addEventListener('supabase-lib-ready', res, { once:true }));
@@ -7465,6 +7480,17 @@ window.SB = (function(){
         // hanging. .bind(window) preserves `this` inside supabase-js's
         // internal caller.
         options.global = Object.assign({}, options.global, { fetch: window.fetch.bind(window) });
+        // Dispose previous client's auth subscription BEFORE creating a new one.
+        // Skipping this leaked a fresh GoTrueClient + onAuthStateChange listener
+        // on every reconnect, and Chrome console showed the exact symptom:
+        // "Multiple GoTrueClient instances detected". Each old listener kept
+        // firing SIGNED_IN when its GoTrue re-read localStorage, producing
+        // thousands of duplicate events and eventually connection-pool
+        // exhaustion. This unsubscribe stops that cold.
+        if(_authSubscription){
+          try { _authSubscription.unsubscribe(); } catch(_){}
+          _authSubscription = null;
+        }
         _client = window.__supabaseCreateClient(SUPABASE_URL, key || ' ', options);
         // V4 fix: guard the probe with a hard timeout. If Chrome's connection
         // pool is exhausted (6-per-origin cap) the supabase-js query would
@@ -7499,7 +7525,8 @@ window.SB = (function(){
         try {
           await _refreshCurrentUser();
           if(_currentUser) console.log('[SB] resumed session for', _currentUser.email);
-          _client.auth.onAuthStateChange(async (event, session) => {
+          // Capture the subscription handle so a subsequent init() can dispose it.
+          const sub = _client.auth.onAuthStateChange(async (event, session) => {
             _currentUser = session && session.user ? session.user : null;
             // Refresh admin flag whenever auth state changes so the bypass
             // logic sees the correct value after SIGNED_IN, TOKEN_REFRESHED etc.
@@ -7510,6 +7537,8 @@ window.SB = (function(){
             if(typeof window.__applyAdminVisibility === 'function') window.__applyAdminVisibility();
             console.log('[SB] auth event:', event, _currentUser ? '· user=' + _currentUser.email + (_isAdmin ? ' (admin)' : '') : '· signed out');
           });
+          // supabase-js @2.x returns { data: { subscription } }; older returned bare subscription.
+          _authSubscription = (sub && sub.data && sub.data.subscription) || sub || null;
           // Also fire once after resume so admin chrome shows immediately for
           // users who are already signed in on page load (no auth event fires
           // in that case — onAuthStateChange only triggers on transitions).
@@ -7877,13 +7906,19 @@ window.SB = (function(){
   }
 
   async function _dbConnectionLost(reason){
-    // New behaviour (2026-08-05): attempt silent reconnect FIRST. Only fall
-    // through to forced sign-out + reload if reconnect keeps failing. This
-    // saves the user from getting bounced to the login screen every time
-    // Chrome's connection pool has a hiccup.
     if(_authKicked) return;   // already handling
     if(_reconnectAttempts > 0) return;   // reconnect already in flight
     const why = reason || ('exceeded '+_dbTimeoutState.threshold+' consecutive DB timeouts');
+    // ROUTE: idle-timeout ends the session — user asked to be signed out.
+    //        Attempting to reconnect on an idle timeout was creating a loop
+    //        where every 15s the idle handler re-fires _dbConnectionLost,
+    //        reconnect succeeds, then idle handler fires again → infinite
+    //        client-creation cascade + "Multiple GoTrueClient instances".
+    if(/idle/i.test(why)){
+      console.warn('[SB] Idle timeout — forcing sign-out (no reconnect):', why);
+      return _forceSignOutAndReload(why);
+    }
+    // Actual connection loss → try silent reconnect (up to 3x, exp backoff)
     console.warn('[SB] DB connection lost — trying to reconnect silently. Reason:', why);
     _tryReconnect(why);
   }
@@ -37967,7 +38002,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.05.3</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.06</span>
       </div>
     </div>
     <div>
