@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.06</title>
+<title>PCS Loan Module · V4 · Build 2026.08.06.5</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.06.2').
+        suffix (e.g. '2026.08.06.5.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.06';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.06.5';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -5891,8 +5891,13 @@
       </div>
       <div style="flex:1; min-width:220px;">
         <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">GL account setup</div>
-        <div style="font-size:11px; color:var(--n-500); margin-top:2px;">Map the engine's default GL account codes to your Investran / ERP codes. Applied to every DIU batch push and CSV export.</div>
+        <div style="font-size:11px; color:var(--n-500); margin-top:2px;"><b>Usage</b> = which engine calculation / lifecycle event produces this JE (e.g. Interest accrual, Loan drawdown). <b>GL</b> = which account in <i>your</i> ledger tracks it (applied on DIU push + CSV export).</div>
       </div>
+      <button onclick="window.__glAddRow && window.__glAddRow()"
+              class="mat-btn !py-1 !px-2" style="font-size:11.5px; background:var(--fis-green,#22C55E); color:#fff; border-color:var(--fis-green,#22C55E);"
+              title="Add a new GL account row — for accounts the engine hasn't emitted yet, or client-specific accounts.">
+        <i class="ti ti-plus" style="font-size:14px; vertical-align:-2px;"></i> Add account
+      </button>
       <button id="gl-scan-btn"
               onclick="window.__glScanSources && window.__glScanSources()"
               class="mat-btn outline !py-1 !px-2" style="font-size:11.5px;"
@@ -5922,10 +5927,11 @@
       <table id="gl-table" style="width:100%; font-size:11.5px; border-collapse:collapse; display:none;">
         <thead>
           <tr style="background:var(--n-50); position:sticky; top:0; z-index:1;">
-            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:14%;">Source code</th>
-            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:28%;">Source name (engine)</th>
-            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:18%;">Your code</th>
-            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:28%;">Your name (optional)</th>
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:12%;" title="The engine's internal account code">Source code<br><span style="font-weight:400; font-size:10px; color:var(--n-500); text-transform:none;">Engine's default</span></th>
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:22%;">Source name<br><span style="font-weight:400; font-size:10px; color:var(--n-500); text-transform:none;">Engine label</span></th>
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:16%;" title="When this account is posted — which engine calculation or lifecycle event triggered the JE line">Usage — when it's posted<br><span style="font-weight:400; font-size:10px; color:var(--n-500); text-transform:none;">Business event / calculation</span></th>
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:14%;" title="Your GL account code — how your ledger tracks it">Your GL code<br><span style="font-weight:400; font-size:10px; color:var(--n-500); text-transform:none;">Substituted on push</span></th>
+            <th style="text-align:left; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:24%;">Your GL name<br><span style="font-weight:400; font-size:10px; color:var(--n-500); text-transform:none;">Optional label</span></th>
             <th style="text-align:right; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:8%;">Uses</th>
             <th style="text-align:center; padding:8px 12px; font-weight:600; color:var(--n-700); border-bottom:0.5px solid var(--n-200); width:4%;"></th>
           </tr>
@@ -5968,6 +5974,7 @@
   #gl-setup-modal .gl-input.text { font-family: inherit; }
   #gl-setup-modal .gl-dirty { border-color: var(--fis-green,#22C55E); }
   #gl-setup-modal .gl-saved-flash { background: var(--fis-green-50,#ECFDF5); transition: background 400ms; }
+  #gl-setup-modal .gl-info-btn:hover { color: var(--fis-green-700,#15803D) !important; background: var(--fis-green-50,#ECFDF5) !important; border-radius: 4px; }
 </style>
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -37100,58 +37107,338 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const el = $('gl-summary'); if(!el) return;
     el.innerHTML = '<b>' + total + '</b> account' + (total===1?'':'s') + ' · <b style="color:' + (mapped ? 'var(--fis-green-700,#15803D)' : 'var(--n-500)') + ';">' + mapped + '</b> mapped';
   }
+  // Usage = "when does this account get posted?" — the business EVENT or
+  // engine CALCULATION that produces the JE line. NOT the account type
+  // (principal / interest / fee) — that's what GL code + name are for.
+  // Grouped by lifecycle stage so the dropdown reads naturally top-to-bottom.
+  const GL_USAGE_CATEGORIES = [
+    { v:'',                             l:'— (unclassified)' },
+    // ─── Loan lifecycle events ───
+    { v:'drawdown',                     l:'Loan drawdown / funding' },
+    { v:'principal_repayment',          l:'Principal repayment (scheduled)' },
+    { v:'prepayment',                   l:'Prepayment (voluntary or mandatory)' },
+    { v:'maturity',                     l:'Maturity paydown' },
+    // ─── Interest calculations ───
+    { v:'interest_accrual',             l:'Interest accrual (daily/period)' },
+    { v:'interest_cash_receipt',        l:'Interest cash receipt' },
+    { v:'interest_pik_capitalisation',  l:'PIK — interest capitalised to principal' },
+    { v:'interest_suspended',           l:'Interest suspended (non-accrual)' },
+    { v:'interest_default',             l:'Default / penalty interest' },
+    // ─── Fees ───
+    { v:'fee_earned_upfront',           l:'Fee earned at close (upfront)' },
+    { v:'fee_amortised_eir',            l:'Fee amortised over life (EIR)' },
+    { v:'fee_cash_receipt',             l:'Fee cash receipt' },
+    { v:'fee_commitment',               l:'Commitment / undrawn fee' },
+    { v:'fee_exit_hurdle',              l:'Exit fee / IRR-hurdle share' },
+    // ─── Impairment (IFRS 9 / CECL) ───
+    { v:'ecl_stage1',                   l:'ECL — Stage 1 (12-mo)' },
+    { v:'ecl_stage2',                   l:'ECL — Stage 2 (lifetime, SICR)' },
+    { v:'ecl_stage3',                   l:'ECL — Stage 3 (credit-impaired)' },
+    { v:'writeoff',                     l:'Write-off (derecognition)' },
+    { v:'recovery',                     l:'Recovery (post write-off)' },
+    // ─── Modifications & fair value ───
+    { v:'modification_substantial',     l:'Modification — substantial (derecognition)' },
+    { v:'modification_nonsubstantial',  l:'Modification — non-substantial (gain/loss)' },
+    { v:'fx_revaluation',               l:'FX revaluation' },
+    { v:'discount_amortisation',        l:'Discount / premium amortisation' },
+    { v:'fair_value_adjustment',        l:'Fair value adjustment (FVOCI / FVTPL)' },
+    { v:'hedge_accounting',             l:'Hedge accounting adjustment' },
+    // ─── Cash flow / distributions ───
+    { v:'waterfall_distribution',       l:'Waterfall distribution (exit)' },
+    { v:'cash_clearing',                l:'Cash / bank clearing' },
+    { v:'other',                        l:'Other' }
+  ];
+  // Detailed description shown in the info popover — explains WHEN the engine
+  // posts to a GL account with this usage category, the typical DR/CR shape,
+  // and the standard reference. Kept short so the popover fits in ~2 lines.
+  const GL_USAGE_DESCRIPTIONS = {
+    'drawdown':                     { title:'Loan drawdown / funding',              body:'<b>Trigger:</b> A drawdown row on any tranche reaches its effective date.<br><b>Typical JE:</b> DR Loan Principal Receivable / CR Cash (or Cash Movements Pending).<br><b>Frequency:</b> One posting per drawdown event.<br><b>Standard:</b> IFRS 9 §5.1 (initial recognition at transaction price).' },
+    'principal_repayment':          { title:'Principal repayment (scheduled)',      body:'<b>Trigger:</b> A scheduled amortisation / paydown row on the tranche schedule.<br><b>Typical JE:</b> DR Cash / CR Loan Principal Receivable.<br><b>Frequency:</b> Per scheduled repayment date.<br><b>Standard:</b> Reduces amortised cost carrying amount.' },
+    'prepayment':                   { title:'Prepayment (voluntary / mandatory)',   body:'<b>Trigger:</b> Borrower prepays outside schedule; or mandatory-prepayment covenant fires.<br><b>Typical JE:</b> DR Cash / CR Loan Principal Receivable (± any prepayment penalty).<br><b>Note:</b> If penalty applies, a separate fee JE fires.<br><b>Standard:</b> IFRS 9 §B4.1.11-13 (SPPI compatibility check).' },
+    'maturity':                     { title:'Maturity paydown',                     body:'<b>Trigger:</b> Facility maturity_date. Final principal repayment plus any capitalised coupon balance.<br><b>Typical JE:</b> DR Cash / CR Loan Principal Receivable (+ CR Capitalised Coupon Balance for PIK tranches).' },
+    'interest_accrual':             { title:'Interest accrual (daily / period)',    body:'<b>Trigger:</b> Daily engine step (or period-end) accruing coupon on the outstanding balance.<br><b>Formula:</b> balance × rate × days / dayCount.<br><b>Typical JE:</b> DR Interest Receivable / CR Interest Income.<br><b>Standard:</b> IFRS 9 §5.4.1 — effective interest method.' },
+    'interest_cash_receipt':        { title:'Interest cash receipt',                body:'<b>Trigger:</b> A coupon payment settles (payment date on the schedule, or reconciled actual).<br><b>Typical JE:</b> DR Cash / CR Interest Receivable (clears the accrual).<br><b>Reconciliation:</b> Matched against Stage-4 actuals in Stage 5.' },
+    'interest_pik_capitalisation':  { title:'PIK — interest capitalised to principal', body:'<b>Trigger:</b> Coupon capitalisation date on a PIK tranche (monthly / quarterly / annual per pikCapitalisationFreq).<br><b>Typical JE:</b> DR Loan Principal Receivable / CR Interest Receivable — the accrued coupon becomes principal.<br><b>Effect:</b> Increases carrying balance, compounds future interest.' },
+    'interest_suspended':           { title:'Interest suspended (non-accrual)',     body:'<b>Trigger:</b> Deal status flipped to non-performing OR ECL Stage 3 forced accrual OFF.<br><b>Typical JE:</b> DR Interest Receivable / CR Suspended Interest (contra-account, memo posting only).<br><b>Standard:</b> IFRS 9 §5.4.1(b) — Stage 3 net-carrying-amount rule.' },
+    'interest_default':             { title:'Default / penalty interest',           body:'<b>Trigger:</b> Covenant breach with defaultInterest consequence, OR event of default.<br><b>Typical JE:</b> DR Default Interest Receivable / CR Default Interest Income.<br><b>Rate:</b> Base coupon + defaultMarginBps.' },
+    'fee_earned_upfront':           { title:'Fee earned at close (upfront)',        body:'<b>Trigger:</b> Fee.mode = fixAmount / fixPct with kind = arrangement / origination — earned on the closing date.<br><b>Typical JE:</b> DR Fee Receivable / CR Fee Income.<br><b>IFRS 9:</b> Only if NOT included in EIR (otherwise deferred).' },
+    'fee_amortised_eir':            { title:'Fee amortised over life (EIR)',        body:'<b>Trigger:</b> Fee treated as part of effective interest rate — recognised over the loan life via EIR.<br><b>Typical JE:</b> Progressively DR Deferred Fee / CR Interest Income each accrual period.<br><b>Standard:</b> IFRS 9 §5.4.1 & Appendix A.' },
+    'fee_cash_receipt':             { title:'Fee cash receipt',                     body:'<b>Trigger:</b> Fee payment settles (payment date on fee schedule, or reconciled actual).<br><b>Typical JE:</b> DR Cash / CR Fee Receivable.' },
+    'fee_commitment':               { title:'Commitment / undrawn fee',             body:'<b>Trigger:</b> Fee.mode = overUnfunded — charged on the undrawn portion of the facility.<br><b>Formula:</b> (commitment − outstanding) × rate × period / dayCount.<br><b>Typical JE:</b> DR Fee Receivable / CR Fee Income.<br><b>Extension:</b> UndrawnRamp mode adds a warm-up period.' },
+    'fee_exit_hurdle':              { title:'Exit fee / IRR-hurdle share',          body:'<b>Trigger:</b> Fee.kind = exitFeeIrrHurdle at maturity or in the exit waterfall.<br><b>Formula:</b> IRR-tiered share of proceeds (default 20% / 22.5% / 20% per tier).<br><b>Typical JE:</b> DR Cash / CR Exit Fee Income.<br><b>Where:</b> Also visible in the Waterfall of Payments modal.' },
+    'ecl_stage1':                   { title:'ECL — Stage 1 (12-month)',             body:'<b>Trigger:</b> Initial recognition, or SICR criteria still not met. 12-month expected credit loss.<br><b>Formula:</b> PD(12m) × LGD × EAD × discount.<br><b>Typical JE:</b> DR ECL Expense (P&L) / CR ECL Allowance (BS contra-asset).<br><b>Standard:</b> IFRS 9 §5.5.5.' },
+    'ecl_stage2':                   { title:'ECL — Stage 2 (lifetime, SICR)',       body:'<b>Trigger:</b> Significant increase in credit risk. Move from 12-mo to lifetime PD.<br><b>Typical JE:</b> DR ECL Expense / CR ECL Allowance — for the incremental amount above Stage 1.<br><b>Standard:</b> IFRS 9 §5.5.3.' },
+    'ecl_stage3':                   { title:'ECL — Stage 3 (credit-impaired)',      body:'<b>Trigger:</b> Objective evidence of impairment. Interest also switches to net-carrying-amount basis.<br><b>Typical JE:</b> DR ECL Expense / CR ECL Allowance; interest DR based on carrying amount net of allowance.<br><b>Standard:</b> IFRS 9 §5.5.13 & §B5.5.44.' },
+    'writeoff':                     { title:'Write-off (derecognition)',            body:'<b>Trigger:</b> No reasonable expectation of recovery — reduce carrying amount to zero.<br><b>Typical JE:</b> DR ECL Allowance / CR Loan Principal Receivable — the allowance absorbs the loss without hitting P&L again.<br><b>Standard:</b> IFRS 9 §5.4.4.' },
+    'recovery':                     { title:'Recovery (post write-off)',            body:'<b>Trigger:</b> Cash received after a loan was previously written off.<br><b>Typical JE:</b> DR Cash / CR ECL Expense (recovery reduces prior period expense — or CR Recovery Income if separate account).' },
+    'modification_substantial':     { title:'Modification — substantial (derecognition)', body:'<b>Trigger:</b> Contract terms change so materially they represent a new instrument (typically ≥10% NPV change).<br><b>Typical JE:</b> Derecognise old loan (CR Principal), recognise new one at fair value (DR Principal), P&L for the difference.<br><b>Standard:</b> IFRS 9 §5.4.3 & §B5.5.25.' },
+    'modification_nonsubstantial':  { title:'Modification — non-substantial (gain/loss)', body:'<b>Trigger:</b> Contract terms change but NPV impact is under the substantial threshold.<br><b>Typical JE:</b> DR/CR Modification Gain/Loss for the immediate P&L, adjust carrying amount to new PV of cash flows discounted at original EIR.<br><b>Standard:</b> IFRS 9 §5.4.3.' },
+    'fx_revaluation':               { title:'FX revaluation',                       body:'<b>Trigger:</b> Non-functional-currency loan translated at each reporting date.<br><b>Typical JE:</b> DR/CR Loan Principal (spot-rate delta) with offset to FX Gain/Loss.<br><b>Standard:</b> IAS 21 §23 (monetary items).' },
+    'discount_amortisation':        { title:'Discount / premium amortisation',      body:'<b>Trigger:</b> Loan acquired at a discount or premium — amortised over remaining life via EIR.<br><b>Typical JE:</b> DR Loan Principal / CR Interest Income (discount) or the reverse (premium).<br><b>Standard:</b> IFRS 9 EIR method.' },
+    'fair_value_adjustment':        { title:'Fair value adjustment (FVOCI / FVTPL)', body:'<b>Trigger:</b> Non-amortised-cost classification. Mark-to-market at each reporting date.<br><b>Typical JE (FVOCI):</b> DR/CR Loan / CR/DR OCI. <b>FVTPL:</b> same but P&L.<br><b>Standard:</b> IFRS 9 §4.1.2A / §4.1.4.' },
+    'hedge_accounting':             { title:'Hedge accounting adjustment',          body:'<b>Trigger:</b> Designated hedge relationship (CFH or FVH) — effective portion posted per accounting policy.<br><b>Typical JE (CFH):</b> DR/CR OCI (effective) + DR/CR P&L (ineffective).<br><b>Standard:</b> IFRS 9 §6.5.' },
+    'waterfall_distribution':       { title:'Waterfall distribution (exit)',        body:'<b>Trigger:</b> Cash-distribution cascade at exit — sales proceeds flow through senior debt → mezz → equity tiers.<br><b>Typical JE per tier:</b> DR Cash / CR Recipient (or reduction of that tier\'s carrying balance).<br><b>Where:</b> Waterfall of Payments modal.' },
+    'cash_clearing':                { title:'Cash / bank clearing',                 body:'<b>Trigger:</b> Any actual cash movement — used as the counterparty to interest / principal / fee postings.<br><b>Typical JE:</b> Serves as the DR/CR balancing account when cash settles.' },
+    'other':                        { title:'Other',                                body:'Any posting that doesn\'t fit a standard category. Add a note in the description so the reason is auditable.' }
+  };
+  // Auto-detect usage from source_account_name — matches engine-generated
+  // transaction_type strings (e.g. "Loan Drawdown", "Interest Cash Receipt").
+  function _glAutoDetectUsage(name){
+    const s = (name || '').toLowerCase();
+    // Lifecycle
+    if(/drawdown|funding|initial\s*draw/.test(s)) return 'drawdown';
+    if(/prepay/.test(s)) return 'prepayment';
+    if(/maturity|final\s*repay/.test(s)) return 'maturity';
+    if(/principal\s*(repay|paydown|amortis)/.test(s)) return 'principal_repayment';
+    // Interest
+    if(/pik|capitalis(ed|ing)\s*coupon/.test(s)) return 'interest_pik_capitalisation';
+    if(/suspend/.test(s)) return 'interest_suspended';
+    if(/default\s*interest|penalty/.test(s)) return 'interest_default';
+    if(/interest.*(cash|receipt|received|paid)/.test(s)) return 'interest_cash_receipt';
+    if(/interest\s*(accrual|accrued|receivable)/.test(s) || /accrued\s*interest/.test(s)) return 'interest_accrual';
+    // Fees
+    if(/exit\s*fee|irr[- ]?hurdle/.test(s)) return 'fee_exit_hurdle';
+    if(/commitment|undrawn/.test(s)) return 'fee_commitment';
+    if(/fee.*(cash|receipt|received)/.test(s)) return 'fee_cash_receipt';
+    if(/deferred.*fee|eir/.test(s)) return 'fee_amortised_eir';
+    if(/(origination|arrangement|upfront).*fee|fee\s*income/.test(s)) return 'fee_earned_upfront';
+    // Impairment
+    if(/write.?off/.test(s)) return 'writeoff';
+    if(/recover/.test(s)) return 'recovery';
+    if(/stage\s*3|credit\s*impaired|poci/.test(s)) return 'ecl_stage3';
+    if(/stage\s*2|sicr|lifetime/.test(s)) return 'ecl_stage2';
+    if(/ecl|allowance|provision/.test(s)) return 'ecl_stage1';
+    // Modifications / FV
+    if(/substantial\s*modif|derecogn/.test(s)) return 'modification_substantial';
+    if(/modif/.test(s)) return 'modification_nonsubstantial';
+    if(/fx|foreign|reval/.test(s)) return 'fx_revaluation';
+    if(/hedge/.test(s)) return 'hedge_accounting';
+    if(/fair\s*value|fvoci|fvtpl/.test(s)) return 'fair_value_adjustment';
+    if(/amortis|discount|premium/.test(s)) return 'discount_amortisation';
+    // Distributions / cash
+    if(/waterfall|distribution/.test(s)) return 'waterfall_distribution';
+    if(/cash|bank|clearing/.test(s)) return 'cash_clearing';
+    return '';
+  }
+  function _glUsageSelectHtml(currentValue, srcName){
+    const suggested = currentValue || _glAutoDetectUsage(srcName);
+    const opts = GL_USAGE_CATEGORIES.map(o =>
+      '<option value="' + o.v + '"' + (o.v === suggested ? ' selected' : '') + '>' + escape(o.l) + '</option>'
+    ).join('');
+    // Info button — click shows the description popover for the currently-
+    // selected usage. Renders even for blank/custom so users can still learn
+    // what each category means before picking.
+    const infoBtn = '<button type="button" class="gl-info-btn" onclick="window.__glShowUsageInfo(event, this)" title="Show details of when this account is posted" style="background:none; border:0; padding:2px 4px; margin-left:4px; color:var(--n-400); cursor:pointer; vertical-align:middle;"><i class="ti ti-info-circle" style="font-size:14px;"></i></button>';
+    const isCustom = suggested && !GL_USAGE_CATEGORIES.some(o => o.v === suggested);
+    if(isCustom){
+      return '<div style="display:flex; align-items:center;"><input class="gl-input text" data-field="usage_category" value="' + escape(suggested) + '" placeholder="Custom" title="Custom usage label — edit as needed"/>' + infoBtn + '</div>';
+    }
+    return '<div style="display:flex; align-items:center;"><select class="gl-input text gl-usage-sel" data-field="usage_category" style="cursor:pointer; flex:1;">' + opts + '</select>' + infoBtn + '</div>';
+  }
+  // Popover shown when the info icon is clicked. Reads the sibling
+  // select/input's value to figure out which description to render.
+  window.__glShowUsageInfo = function(evt, btn){
+    evt.stopPropagation();
+    // Remove any existing popover first
+    document.querySelectorAll('.gl-info-popover').forEach(el => el.remove());
+    const cell = btn.closest('td');
+    if(!cell) return;
+    const usageInput = cell.querySelector('[data-field="usage_category"]');
+    const usage = usageInput ? (usageInput.value || '').trim() : '';
+    const desc = GL_USAGE_DESCRIPTIONS[usage];
+    let bodyHtml;
+    if(!usage){
+      bodyHtml = '<div style="color:var(--n-500); font-style:italic;">Pick a usage category from the dropdown to see when the engine posts to this GL account.</div>';
+    } else if(!desc){
+      bodyHtml = '<div style="color:var(--n-500);"><b>' + escape(usage) + '</b> — custom category. No standard description available.</div>';
+    } else {
+      bodyHtml = '<div style="font-weight:600; color:var(--n-900); margin-bottom:6px; font-size:12.5px;">' + escape(desc.title) + '</div><div style="color:var(--n-700); line-height:1.55; font-size:11.5px;">' + desc.body + '</div>';
+    }
+    const pop = document.createElement('div');
+    pop.className = 'gl-info-popover';
+    pop.style.cssText = 'position:absolute; z-index:1000; width:380px; max-width:90vw; padding:12px 14px; ' +
+      'background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; ' +
+      'box-shadow:0 10px 30px rgba(15,23,42,0.15), 0 3px 8px rgba(15,23,42,0.05); ' +
+      'font-family:inherit;';
+    pop.innerHTML = bodyHtml
+      + '<div style="text-align:right; margin-top:10px;">'
+      + '  <button onclick="this.closest(\'.gl-info-popover\').remove()" class="mat-btn outline !py-1 !px-2" style="font-size:11px;">Close</button>'
+      + '</div>';
+    document.body.appendChild(pop);
+    // Position below the info button, or above if not enough room
+    const rect = btn.getBoundingClientRect();
+    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+    const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const popHeight = pop.offsetHeight;
+    // Prefer below; if that would clip, put above the icon
+    const top = (spaceBelow > popHeight + 20)
+      ? rect.bottom + scrollTop + 6
+      : Math.max(10, rect.top + scrollTop - popHeight - 6);
+    // Right-align to viewport if the popover would overflow to the right
+    const left = Math.min(rect.left + scrollLeft, window.innerWidth - 400);
+    pop.style.top = top + 'px';
+    pop.style.left = Math.max(8, left) + 'px';
+    // Dismiss on outside click / Esc
+    const dismiss = (e) => {
+      if(e.type === 'keydown' && e.key !== 'Escape') return;
+      if(e.type === 'click' && (pop.contains(e.target) || btn.contains(e.target))) return;
+      pop.remove();
+      document.removeEventListener('click', dismiss, true);
+      document.removeEventListener('keydown', dismiss, true);
+    };
+    setTimeout(() => {
+      document.addEventListener('click', dismiss, true);
+      document.addEventListener('keydown', dismiss, true);
+    }, 0);
+  };
   function _glRowHtml(r){
     const src = r.source, m = r.mapping || {};
     const key = src.source_account_code;
+    // Manually-added rows (not derived from journal_entries) get editable
+    // source-code and source-name cells — the user is defining a client-specific
+    // account. Existing engine-derived rows keep those cells read-only so users
+    // can't accidentally rename what the engine already emits.
+    const isManual = !!r.isManual;
     return ''
-      + '<tr class="gl-row" data-src="' + escape(key) + '">'
-      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); font-family:ui-monospace,monospace; font-size:11px;">' + escape(key) + '</td>'
-      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); color:var(--n-700);">' + escape(src.source_account_name || '') + '</td>'
+      + '<tr class="gl-row" data-src="' + escape(key) + '"' + (isManual ? ' data-manual="1"' : '') + '>'
+      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); font-family:ui-monospace,monospace; font-size:11px;">'
+      +     (isManual
+        ? '<input class="gl-input" data-field="source_account_code" value="' + escape(key || '') + '" placeholder="e.g. 10101" style="font-family:ui-monospace,monospace; font-size:11px;"/>'
+        : escape(key))
+      +   '</td>'
+      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); color:var(--n-700);">'
+      +     (isManual
+        ? '<input class="gl-input text" data-field="source_account_name" value="' + escape(src.source_account_name || '') + '" placeholder="e.g. Loan Principal Receivable"/>'
+        : escape(src.source_account_name || ''))
+      +   '</td>'
+      +   '<td style="padding:4px 12px; border-bottom:0.5px solid var(--n-100);" data-usage-cell="1">' + _glUsageSelectHtml(m.usage_category, src.source_account_name) + '</td>'
       +   '<td style="padding:4px 12px; border-bottom:0.5px solid var(--n-100);"><input class="gl-input" data-field="mapped_account_code" data-src="' + escape(key) + '" value="' + escape(m.mapped_account_code || '') + '" placeholder="—" /></td>'
       +   '<td style="padding:4px 12px; border-bottom:0.5px solid var(--n-100);"><input class="gl-input text" data-field="mapped_account_name" data-src="' + escape(key) + '" value="' + escape(m.mapped_account_name || '') + '" placeholder="(same as source)" /></td>'
-      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); text-align:right; color:var(--n-500); font-variant-numeric:tabular-nums;">' + (src.occurrences || 0) + '</td>'
+      +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); text-align:right; color:var(--n-500); font-variant-numeric:tabular-nums;">' + (isManual ? '<span style="color:var(--fis-green-700,#15803D); font-weight:600;">Manual</span>' : (src.occurrences || 0)) + '</td>'
       +   '<td style="padding:6px 12px; border-bottom:0.5px solid var(--n-100); text-align:center;">'
-      +     (m.id ? '<button title="Clear this mapping" onclick="window.__glClearRow(\'' + escape(key) + '\',\'' + m.id + '\')" style="background:none; border:0; color:var(--n-400); cursor:pointer;"><i class="ti ti-x" style="font-size:14px;"></i></button>' : '')
+      +     (m.id || isManual ? '<button title="' + (isManual ? 'Remove this row' : 'Clear this mapping') + '" onclick="' + (isManual ? 'window.__glRemoveManualRow(this)' : 'window.__glClearRow(\'' + escape(key) + '\',\'' + m.id + '\')') + '" style="background:none; border:0; color:var(--n-400); cursor:pointer;"><i class="ti ti-x" style="font-size:14px;"></i></button>' : '')
       +   '</td>'
       + '</tr>';
   }
+  // Add a blank row for a client-defined GL account. Focuses the first input
+  // so the user can just start typing. Saves via the same _glSaveRow path
+  // once source_account_code has a value.
+  window.__glAddRow = function(){
+    const tbody = document.getElementById('gl-tbody');
+    if(!tbody) return;
+    // Hide the empty-state if this is the first row ever
+    const empty = document.getElementById('gl-empty');
+    const table = document.getElementById('gl-table');
+    if(empty) empty.style.display = 'none';
+    if(table) table.style.display = '';
+    // Generate a temporary placeholder src key — replaced by user input on save
+    const tmpKey = '__new_' + Date.now();
+    const html = _glRowHtml({ source: { source_account_code: '', source_account_name: '' }, mapping: {}, isManual: true });
+    // The row is generated with data-src="", which would collide with any other
+    // in-progress new row. Give it a unique tmp key so CSS.escape / _glSaveRow can find it.
+    const wrap = document.createElement('tbody');
+    wrap.innerHTML = html;
+    const tr = wrap.firstElementChild;
+    tr.setAttribute('data-src', tmpKey);
+    tbody.insertBefore(tr, tbody.firstChild);
+    _glWireInputs();
+    // Focus the source-code input
+    const codeInput = tr.querySelector('[data-field="source_account_code"]');
+    if(codeInput) codeInput.focus();
+    // Bump summary counter
+    const total = tbody.querySelectorAll('tr').length;
+    const mapped = _glState.mappings.filter(m => m.mapped_account_code).length;
+    _glUpdateSummary(total, mapped);
+  };
+  // Remove a manually-added row that was never saved (or the user wants gone).
+  window.__glRemoveManualRow = async function(btn){
+    const row = btn && btn.closest('tr[data-src]');
+    if(!row) return;
+    const src = row.getAttribute('data-src');
+    // If it corresponds to a saved mapping, delete on server too
+    const existing = _glState.mappings.find(m => m.source_account_code === src);
+    if(existing && existing.id){
+      const r = await window.SB.deleteGLMapping(existing.id);
+      if(!r.ok){ if(typeof toast === 'function') toast('Delete failed: ' + r.reason, 4000, { kind:'error' }); return; }
+      _glState.mappings = _glState.mappings.filter(m => m.id !== existing.id);
+    }
+    row.remove();
+    const total = document.querySelectorAll('#gl-tbody tr').length;
+    const mapped = _glState.mappings.filter(m => m.mapped_account_code).length;
+    _glUpdateSummary(total, mapped);
+  };
+  async function _glSaveRow(row){
+    if(!row) return;
+    const isManual = row.getAttribute('data-manual') === '1';
+    // Source code: for manual rows read from the input; for engine rows from data-src.
+    const srcFromAttr = row.getAttribute('data-src');
+    const srcInputEl = row.querySelector('[data-field="source_account_code"]');
+    const srcNameEl  = row.querySelector('[data-field="source_account_name"]');
+    const src  = isManual
+      ? ((srcInputEl && srcInputEl.value.trim()) || '')
+      : srcFromAttr;
+    if(!src){
+      // Nothing to save yet — user tabbed out of an empty new row. Leave it be.
+      return;
+    }
+    const srcName = isManual
+      ? ((srcNameEl && srcNameEl.value.trim()) || null)
+      : (( _glState.sources.find(s => s.source_account_code === srcFromAttr) || {} ).source_account_name || null);
+    const code = (row.querySelector('[data-field="mapped_account_code"]') || {}).value?.trim() || '';
+    const name = (row.querySelector('[data-field="mapped_account_name"]') || {}).value?.trim() || '';
+    const usage = (row.querySelector('[data-field="usage_category"]') || {}).value?.trim() || '';
+    const payload = {
+      team_id: _glState.teamId || null,
+      source_account_code: src,
+      source_account_name: srcName,
+      mapped_account_code: code || null,
+      mapped_account_name: name || null,
+      usage_category: usage || null,
+      is_active: true
+    };
+    const existing = _glState.mappings.find(m => m.source_account_code === src);
+    if(existing && existing.id) payload.id = existing.id;
+    const r = await window.SB.upsertGLMapping(payload);
+    if(r.ok){
+      row.classList.add('gl-saved-flash');
+      setTimeout(() => row.classList.remove('gl-saved-flash'), 500);
+      row.querySelectorAll('.gl-dirty').forEach(el => el.classList.remove('gl-dirty'));
+      if(r.row){
+        if(existing){ Object.assign(existing, r.row); }
+        else _glState.mappings.push(r.row);
+      }
+      // Manual row is now saved — replace its tmp data-src with the real code so
+      // subsequent edits find the right mapping.
+      if(isManual){
+        row.setAttribute('data-src', src);
+        // Also promote it to a "saved manual" — keep source inputs editable
+        // so admins can still rename an account they created.
+      }
+      const mapped = _glState.mappings.filter(m => m.mapped_account_code).length;
+      _glUpdateSummary(document.querySelectorAll('#gl-tbody tr').length, mapped);
+    } else {
+      if(typeof toast === 'function') toast('Save failed: ' + (r.reason || 'unknown'), 5000, { kind:'error' });
+    }
+  }
   function _glWireInputs(){
-    document.querySelectorAll('#gl-tbody .gl-input').forEach(input => {
+    // Text inputs — save on blur (only if dirty)
+    document.querySelectorAll('#gl-tbody input.gl-input').forEach(input => {
       input.addEventListener('input', function(){ this.classList.add('gl-dirty'); });
       input.addEventListener('blur', async function(){
         if(!this.classList.contains('gl-dirty')) return;
-        const src = this.getAttribute('data-src');
-        const row = document.querySelector('#gl-tbody tr[data-src="' + CSS.escape(src) + '"]');
-        if(!row) return;
-        const code = row.querySelector('[data-field="mapped_account_code"]').value.trim();
-        const name = row.querySelector('[data-field="mapped_account_name"]').value.trim();
-        const sourceRow = _glState.sources.find(s => s.source_account_code === src) || {};
-        const payload = {
-          team_id: _glState.teamId || null,
-          source_account_code: src,
-          source_account_name: sourceRow.source_account_name || null,
-          mapped_account_code: code || null,
-          mapped_account_name: name || null,
-          is_active: true
-        };
-        // If we already have an id for this source (existing mapping), include it
-        const existing = _glState.mappings.find(m => m.source_account_code === src);
-        if(existing && existing.id) payload.id = existing.id;
-        const r = await window.SB.upsertGLMapping(payload);
-        if(r.ok){
-          row.classList.add('gl-saved-flash');
-          setTimeout(() => row.classList.remove('gl-saved-flash'), 500);
-          row.querySelectorAll('.gl-dirty').forEach(el => el.classList.remove('gl-dirty'));
-          // Update local state so counts stay accurate
-          if(r.row){
-            if(existing){ Object.assign(existing, r.row); }
-            else _glState.mappings.push(r.row);
-          }
-          const mapped = _glState.mappings.filter(m => m.mapped_account_code).length;
-          _glUpdateSummary(document.querySelectorAll('#gl-tbody tr').length, mapped);
-        } else {
-          if(typeof toast === 'function') toast('Save failed: ' + (r.reason || 'unknown'), 5000, { kind:'error' });
-        }
+        const row = this.closest('tr[data-src]');
+        await _glSaveRow(row);
+      });
+    });
+    // Usage <select> — save on change (blur fires unreliably on selects)
+    document.querySelectorAll('#gl-tbody select.gl-input').forEach(sel => {
+      sel.addEventListener('change', async function(){
+        const row = this.closest('tr[data-src]');
+        // Flash the whole cell so the user sees the change registered
+        const cell = this.closest('td');
+        if(cell){ cell.classList.add('gl-dirty'); }
+        await _glSaveRow(row);
       });
     });
   }
@@ -37183,16 +37470,25 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const file = evt.target.files && evt.target.files[0]; if(!file) return;
     evt.target.value = '';
     const text = await file.text();
-    // CSV format: source_code,source_name,mapped_code,mapped_name
-    const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(1);   // skip header
+    // CSV format v2: source_code,source_name,usage,mapped_code,mapped_name
+    // Backwards-compatible with v1 (no usage column): if row has only 4 cols,
+    // we treat as [src,sname,code,name] and leave usage null.
+    const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(1);
     let ok = 0, fail = 0;
     for(const line of lines){
-      const [src, sname, code, name] = line.split(',').map(s => (s||'').trim().replace(/^"|"$/g, ''));
+      const cells = line.split(',').map(s => (s||'').trim().replace(/^"|"$/g, ''));
+      let src, sname, usage, code, name;
+      if(cells.length >= 5){
+        [src, sname, usage, code, name] = cells;
+      } else {
+        [src, sname, code, name] = cells; usage = null;
+      }
       if(!src) continue;
       const r = await window.SB.upsertGLMapping({
         team_id: _glState.teamId || null,
         source_account_code: src,
         source_account_name: sname || null,
+        usage_category: usage || null,
         mapped_account_code: code || null,
         mapped_account_name: name || null,
         is_active: true
@@ -37203,13 +37499,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     window.__glReload();
   };
   window.__glExportCsv = function(){
-    const rows = ['source_code,source_name,mapped_code,mapped_name'];
+    const rows = ['source_code,source_name,usage,mapped_code,mapped_name'];
     document.querySelectorAll('#gl-tbody tr').forEach(tr => {
       const src = tr.getAttribute('data-src');
       const srcRow = _glState.sources.find(s => s.source_account_code === src) || {};
+      const usage = (tr.querySelector('[data-field="usage_category"]') || {}).value?.trim() || '';
       const code = tr.querySelector('[data-field="mapped_account_code"]').value.trim();
       const name = tr.querySelector('[data-field="mapped_account_name"]').value.trim();
-      rows.push([src, srcRow.source_account_name || '', code, name].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(','));
+      rows.push([src, srcRow.source_account_name || '', usage, code, name].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(','));
     });
     const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -38002,7 +38299,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.06</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.06.5</span>
       </div>
     </div>
     <div>
