@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.06.5</title>
+<title>PCS Loan Module · V4 · Build 2026.08.06.6</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.06.5.2').
+        suffix (e.g. '2026.08.06.6.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.06.5';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.06.6';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -1746,6 +1746,11 @@
   <button class="v4-sb-item" onclick="window.openGLSetupModal && window.openGLSetupModal()">
     <i class="ti ti-book" aria-hidden="true"></i>GL account setup
   </button>
+  <!-- Peer benchmarks — cross-portfolio distributions (yield, WAL, breach
+       rates, ECL stage mix, utilisation). Direct answer to Allvue OneVue. -->
+  <button class="v4-sb-item" onclick="window.openBenchmarksModal && window.openBenchmarksModal()">
+    <i class="ti ti-chart-histogram" aria-hidden="true"></i>Benchmarks
+  </button>
 
   <div class="v4-sb-spacer"></div>
 
@@ -2828,6 +2833,35 @@
             <button onclick="window.__sweepReportingNoticesUI && window.__sweepReportingNoticesUI()" class="mat-btn outline !py-1 !px-3 text-[11px]" title="Sweep now: emit notices for any due-soon or overdue reports"><i class="ti ti-bell-ringing" style="font-size:12px;"></i>Sweep now</button>
           </div>
           <div id="b-reporting-list"></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- ─── COMMITMENT LIFECYCLE ─── time-varying facility limit.
+         Captures: initial commitment, upsizes (accordion / add-on), partial
+         cancellations, delayed-draw availability windows, maturity extensions,
+         rollovers, full cancellations. Engine uses PCS.effectiveCommitmentAtDate
+         to derive the applicable limit at any point in time. Every event
+         is an immutable log row so an auditor can trace facility changes. -->
+    <details class="builder-section" id="b-commitment-section">
+      <summary>
+        <div class="builder-section-icon icon-emerald"><i class="ti ti-timeline" style="font-size:20px;"></i></div>
+        <div>
+          <div class="builder-section-title">Commitment lifecycle</div>
+          <div class="builder-section-subtitle">Facility upsizes · delayed-draw windows · extensions · cancellations. Cashflow and reg reports use the effective commitment at each date.</div>
+        </div>
+      </summary>
+      <div class="builder-section-body">
+        <div id="b-commitment-empty" class="text-[11px] text-gray-500 italic">Save the deal first, then reopen this panel to record commitment events.</div>
+        <div id="b-commitment-body" style="display:none;">
+          <div id="b-commitment-summary" style="padding:10px 12px; background:var(--n-50,#FAFAFA); border-radius:8px; border:0.5px solid var(--n-200); margin-bottom:12px; font-size:11.5px;">—</div>
+          <!-- Timeline strip — visual sparkline of running commitment over time -->
+          <div id="b-commitment-timeline" style="margin-bottom:12px;"></div>
+          <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+            <button onclick="window.addCommitmentEventUI && window.addCommitmentEventUI()" class="mat-btn primary !py-1 !px-3 text-[11px]"><i class="ti ti-plus"></i>Add event</button>
+            <button onclick="window.seedInitialCommitmentEventUI && window.seedInitialCommitmentEventUI()" class="mat-btn outline !py-1 !px-3 text-[11px]" title="Insert an initial_commitment row for this deal's original facility limit"><i class="ti ti-flag" style="font-size:12px;"></i>Seed initial from facility</button>
+          </div>
+          <div id="b-commitment-list"></div>
         </div>
       </div>
     </details>
@@ -5417,6 +5451,11 @@
                 class="mat-btn outline !py-1 !px-2 text-[11px]" title="Export the active tab to CSV">
           <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">download</span> CSV
         </button>
+        <button onclick="window.exportRegulatoryXml && window.exportRegulatoryXml()"
+                class="mat-btn !py-1 !px-2 text-[11px]" style="background:var(--fis-green,#22C55E); color:#fff; border-color:var(--fis-green,#22C55E);"
+                title="Generate the regulatory XML filing for the active tab (Form PF · AIFMD Annex IV). Structurally matches the SEC/ESMA schema.">
+          <i class="ti ti-file-code" style="font-size:13px; vertical-align:-2px;"></i> XML
+        </button>
         <button class="mat-btn outline !py-1 !px-2" onclick="window.closeRegulatoryModal && window.closeRegulatoryModal()" title="Close">
           <span class="material-icons-outlined text-[16px]">close</span>
         </button>
@@ -5975,6 +6014,82 @@
   #gl-setup-modal .gl-dirty { border-color: var(--fis-green,#22C55E); }
   #gl-setup-modal .gl-saved-flash { background: var(--fis-green-50,#ECFDF5); transition: background 400ms; }
   #gl-setup-modal .gl-info-btn:hover { color: var(--fis-green-700,#15803D) !important; background: var(--fis-green-50,#ECFDF5) !important; border-radius: 4px; }
+</style>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Benchmarks modal — cross-portfolio distributions.
+     Renders yield / spread histogram, WAL by structure, breach rates by
+     covenant, ECL stage mix, utilisation heatmap — computed client-side
+     from window.PRESETS (deals the user can see via RLS).
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="bench-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closeBenchmarksModal && window.closeBenchmarksModal()"></div>
+  <div class="json-modal-pn" style="width:min(1400px,98vw); max-height:96vh;">
+    <div class="json-modal-h" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:0.5px solid var(--n-200); flex-wrap:wrap;">
+      <div style="flex-shrink:0; width:32px; height:32px; border-radius:8px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-chart-histogram" style="font-size:18px;"></i>
+      </div>
+      <div style="flex:1; min-width:220px;">
+        <div style="font-size:14px; font-weight:600; color:var(--n-900); letter-spacing:-0.2px;">Peer benchmarks</div>
+        <div style="font-size:11px; color:var(--n-500); margin-top:2px;">Cross-portfolio distributions across every deal you have access to. Yield · spread · WAL · breach rates · ECL stage mix · utilisation.</div>
+      </div>
+      <button class="mat-btn outline !py-1 !px-2" onclick="window.closeBenchmarksModal && window.closeBenchmarksModal()" title="Close">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+
+    <!-- Filter strip — peer-set selector -->
+    <div style="padding:10px 16px; border-bottom:0.5px solid var(--n-200); background:var(--n-50); display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:11px;">
+      <div style="color:var(--n-500);"><b>Peer set:</b></div>
+      <select id="bench-filter-structure" onchange="window.__benchRender && window.__benchRender()" style="border:0.5px solid var(--n-300); border-radius:6px; padding:3px 8px; font-size:11px; background:var(--n-0);">
+        <option value="">All structures</option>
+        <option value="construction_mezz">Construction mezz</option>
+        <option value="revolving_borrowing_base">Revolving BB</option>
+        <option value="corporate_term">Corporate term</option>
+        <option value="bilateral">Bilateral</option>
+      </select>
+      <select id="bench-filter-currency" onchange="window.__benchRender && window.__benchRender()" style="border:0.5px solid var(--n-300); border-radius:6px; padding:3px 8px; font-size:11px; background:var(--n-0);">
+        <option value="">All currencies</option>
+      </select>
+      <select id="bench-filter-framework" onchange="window.__benchRender && window.__benchRender()" style="border:0.5px solid var(--n-300); border-radius:6px; padding:3px 8px; font-size:11px; background:var(--n-0);">
+        <option value="">All frameworks</option>
+        <option value="IFRS">IFRS</option>
+        <option value="USGAAP">US GAAP</option>
+        <option value="ASPE">ASPE</option>
+        <option value="AASB">AASB</option>
+      </select>
+      <div style="flex:1;"></div>
+      <div id="bench-summary" style="font-size:10.5px; color:var(--n-500); font-variant-numeric:tabular-nums;">—</div>
+    </div>
+
+    <div id="bench-body" style="padding:14px 16px; overflow:auto; max-height:calc(96vh - 200px); display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <!-- Chart panels -->
+      <div class="bench-panel"><div class="bench-title">Yield distribution (EIR %)</div><canvas id="bench-yield" height="200"></canvas><div class="bench-note" id="bench-yield-note">—</div></div>
+      <div class="bench-panel"><div class="bench-title">Spread distribution (bps over benchmark)</div><canvas id="bench-spread" height="200"></canvas><div class="bench-note" id="bench-spread-note">—</div></div>
+      <div class="bench-panel"><div class="bench-title">Weighted average life by structure (years)</div><canvas id="bench-wal" height="200"></canvas><div class="bench-note" id="bench-wal-note">—</div></div>
+      <div class="bench-panel"><div class="bench-title">ECL stage mix</div><canvas id="bench-ecl" height="200"></canvas><div class="bench-note" id="bench-ecl-note">—</div></div>
+      <div class="bench-panel" style="grid-column:1/-1;"><div class="bench-title">Covenant breach rate (% deals in breach by covenant type)</div><canvas id="bench-breach" height="200"></canvas><div class="bench-note" id="bench-breach-note">—</div></div>
+    </div>
+
+    <div class="json-modal-f" style="padding:10px 16px; border-top:0.5px solid var(--n-200); display:flex; justify-content:space-between; gap:8px;">
+      <div style="font-size:10.5px; color:var(--n-500);">Computed live from your workspace deals. RLS ensures you only see peers you're authorised for.</div>
+      <div style="display:flex; gap:6px;">
+        <button onclick="window.__benchExportCsv && window.__benchExportCsv()" class="mat-btn outline !py-1 !px-2" style="font-size:11.5px;"><i class="ti ti-download" style="font-size:14px; vertical-align:-2px;"></i> Export CSV</button>
+        <button onclick="window.closeBenchmarksModal && window.closeBenchmarksModal()" class="mat-btn outline">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+  #bench-modal .bench-panel {
+    padding:12px; border:0.5px solid var(--n-200); border-radius:10px; background:var(--n-0);
+  }
+  #bench-modal .bench-title {
+    font-size:11px; font-weight:600; color:var(--n-900); letter-spacing:-0.1px; margin-bottom:6px;
+  }
+  #bench-modal .bench-note {
+    font-size:10.5px; color:var(--n-500); margin-top:6px; font-variant-numeric:tabular-nums;
+  }
 </style>
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -8821,6 +8936,43 @@ window.SB = (function(){
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // Commitment lifecycle events (2026-08-06 · delayed-draw + upsizes)
+  // ═══════════════════════════════════════════════════════════════════
+  // Each row is an immutable event on the facility timeline (initial commit,
+  // increase, decrease, delayed-draw open/close, extension, rollover, cancel).
+  // The engine walks these in chronological order via PCS.effectiveCommitmentAtDate.
+  async function fetchCommitmentEvents(dealId){
+    if(!_client || !_connected || _authKicked) return [];
+    if(!dealId) return [];
+    const { data, error } = await _withDbTimeout(
+      'fetchCommitmentEvents',
+      _client.from('deal_commitment_events').select('*').eq('deal_id', dealId).order('event_date').order('created_at'),
+      8000
+    );
+    if(error){ console.error('[SB] fetchCommitmentEvents:', error); return []; }
+    return data || [];
+  }
+  async function upsertCommitmentEvent(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!row || !row.deal_id || !row.event_date || !row.event_type){
+      return { ok:false, reason:'deal_id, event_date, event_type required' };
+    }
+    const payload = Object.assign({ created_by: _currentUser ? _currentUser.id : null }, row);
+    const { data, error } = await _client
+      .from('deal_commitment_events')
+      .upsert(payload)
+      .select().single();
+    if(error){ console.error('[SB] upsertCommitmentEvent:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, row: data };
+  }
+  async function deleteCommitmentEvent(id){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('deal_commitment_events').delete().eq('id', id);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // Multi-fund allocations (Tier 1 #2 Phase 1)
   // ═══════════════════════════════════════════════════════════════════
   // Fund = the PE fund entity that holds loans (US Fund I, EU Fund II, etc).
@@ -11376,6 +11528,8 @@ window.SB = (function(){
     fetchJournalEntriesForDeal, fetchJournalEntriesForDeals,
     // GL account mapping
     fetchGLSourceAccounts, fetchGLMappings, upsertGLMapping, deleteGLMapping,
+    // Commitment lifecycle events
+    fetchCommitmentEvents, upsertCommitmentEvent, deleteCommitmentEvent,
     // Multi-fund (Tier 1 #2 Phase 1)
     fetchFunds, upsertFund, deleteFund,
     fetchFundAllocations, upsertFundAllocation, deleteFundAllocation,
@@ -19136,6 +19290,261 @@ window.exportRegulatoryCsv = function(){
   setTimeout(() => URL.revokeObjectURL(url), 500);
   if(typeof toast === 'function') toast('Downloaded ' + filename, 2500);
 };
+
+// ─── Regulatory XML generators (2026-08-06) ────────────────────────────
+// Produce well-formed XML matching the SEC / ESMA / Fed schema shapes
+// for the currently-selected regulatory tab. Structurally correct enough
+// to load into a filing-preparation tool; final production filing still
+// needs LEI codes, adviser SEC-CRD, MPS submission ID etc. supplied by
+// the client's compliance team.
+window.exportRegulatoryXml = function(){
+  const cache = window._regulatoryCache;
+  if(!cache){ if(typeof toast === 'function') toast('Recompute first'); return; }
+  const tab = window._regulatoryActiveTab || 'formPF';
+  let xml = '', filename = '';
+  if(tab === 'formPF'){
+    xml = _xmlFormPF(cache);
+    filename = 'form-pf-' + cache.meta.asOf + '.xml';
+  } else if(tab === 'aifmd'){
+    xml = _xmlAifmdAnnexIV(cache);
+    filename = 'aifmd-annex-iv-' + cache.meta.asOf + '.xml';
+  } else if(tab === 'y14q'){
+    xml = _xmlFRY14QH1(cache);
+    filename = 'fr-y-14q-h1-' + cache.meta.asOf + '.xml';
+  } else if(tab === 'nport'){
+    xml = _xmlNPORT(cache);
+    filename = 'n-port-' + cache.meta.asOf + '.xml';
+  }
+  const blob = new Blob([xml], { type: 'application/xml;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+  if(typeof toast === 'function') toast('Generated ' + filename, 3000, { kind:'success' });
+};
+
+// XML-escape helper — strict per XML 1.0 spec
+function _xesc(v){
+  if(v == null) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+function _xNum(v){ return (v == null || isNaN(+v)) ? '0' : String(+v); }
+function _xDate(v){ return v ? String(v).slice(0,10) : ''; }
+// Wraps content in an element with optional attributes. Skips empty elements.
+function _xEl(name, content, attrs){
+  const a = attrs ? ' ' + Object.entries(attrs).map(([k,v]) => k + '="' + _xesc(v) + '"').join(' ') : '';
+  if(content == null || content === '') return '';
+  return '<' + name + a + '>' + content + '</' + name + '>';
+}
+
+// Form PF — SEC Rule 204(b)-1. Produces Section 1a (adviser + fund basic
+// info), Section 1b (fund assets + investors), Section 2a (aggregate
+// borrowings, VaR, sector exposures). Full production Form PF also needs
+// Section 2b (large hedge funds) and Section 4 (large liquidity funds)
+// which we omit — the loan module is a private-credit context.
+function _xmlFormPF(cache){
+  const meta = cache.meta || {};
+  const pf   = cache.formPF || {};
+  const s1a  = pf.section1a || {};
+  const s1b  = pf.section1b_concentration || {};
+  const s2a  = pf.section2a || {};
+  return ''
+    + '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<edgarSubmission xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="eis_PF_Filer.xsd">\n'
+    + '  <headerData>\n'
+    + '    <submissionType>PF</submissionType>\n'
+    + '    <filerInfo>\n'
+    + '      <filer>\n'
+    + '        <credentials>\n'
+    + '          <cik>[FILL: 10-digit CIK]</cik>\n'
+    + '          <ccc>[FILL: CCC]</ccc>\n'
+    + '        </credentials>\n'
+    + '        <flags>\n'
+    + '          <returnCopyFlag>true</returnCopyFlag>\n'
+    + '          <overrideInternetFlag>false</overrideInternetFlag>\n'
+    + '        </flags>\n'
+    + '      </filer>\n'
+    + '    </filerInfo>\n'
+    + '    <periodOfReport>' + _xesc(_xDate(meta.asOf)) + '</periodOfReport>\n'
+    + '    <reportingFrequency>Q</reportingFrequency>\n'
+    + '  </headerData>\n'
+    + '  <formData>\n'
+    + '    <formPfData>\n'
+    + '      <section1a>\n'
+    + '        ' + _xEl('adviserName', _xesc(s1a.adviserName || meta.adviserName || '[FILL: adviser legal name]')) + '\n'
+    + '        ' + _xEl('adviserSecFileNumber', _xesc(s1a.adviserSecFileNumber || '[FILL: 801-XXXXXX]')) + '\n'
+    + '        ' + _xEl('adviserCrdNumber', _xesc(s1a.adviserCrd || '[FILL: CRD]')) + '\n'
+    + '        ' + _xEl('reportingFundName', _xesc(s1a.fundName || meta.fundName || '[FILL: fund legal name]')) + '\n'
+    + '        ' + _xEl('reportingFundLei', _xesc(s1a.fundLei || '[FILL: 20-char LEI]')) + '\n'
+    + '        ' + _xEl('fundType', 'PRIVATE_CREDIT_FUND') + '\n'
+    + '      </section1a>\n'
+    + '      <section1b>\n'
+    + '        ' + _xEl('grossAssetValue', _xNum(s1b.totalAssets || meta.fundNAV)) + '\n'
+    + '        ' + _xEl('netAssetValue', _xNum(meta.fundNAV)) + '\n'
+    + '        <borrowerConcentration>\n'
+    +          (s1b.byBorrower || []).map(b => ''
+    +            + '          <borrower>\n'
+    +            + '            ' + _xEl('borrowerName', _xesc(b.label)) + '\n'
+    +            + '            ' + _xEl('drawnAmount', _xNum(b.amount)) + '\n'
+    +            + '            ' + _xEl('percentOfPortfolio', _xNum(b.pct)) + '\n'
+    +            + '          </borrower>\n'
+    +          ).join('')
+    + '        </borrowerConcentration>\n'
+    + '      </section1b>\n'
+    + '      <section2a>\n'
+    + '        ' + _xEl('aggregateGrossExposure', _xNum(s2a.grossExposure || 0)) + '\n'
+    + '        ' + _xEl('aggregateNetExposure', _xNum(s2a.netExposure || 0)) + '\n'
+    + '        ' + _xEl('portfolioLiquidityDays', _xNum(s2a.liquidityDays || 90)) + '\n'
+    + '        ' + _xEl('valueAtRisk1M', _xNum(s2a.var1m || 0)) + '\n'
+    + '        ' + _xEl('reportingCurrency', 'USD') + '\n'
+    + '      </section2a>\n'
+    + '      <disclaimer>Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. This is a draft filing prepared from portfolio data. Complete CIK, CCC, LEI, and adviser identifiers before submission via EDGAR Online Forms.</disclaimer>\n'
+    + '    </formPfData>\n'
+    + '  </formData>\n'
+    + '</edgarSubmission>\n';
+}
+
+// AIFMD Annex IV — ESMA reporting template.
+// Schema: XSD published under Annex II of ESMA/2014/869 (Reporting to CAs).
+// Covers: AIF general info, principal markets/instruments, main risks, geographic focus.
+function _xmlAifmdAnnexIV(cache){
+  const meta  = cache.meta || {};
+  const aif   = cache.aifmd || {};
+  const conc  = aif.concentration || {};
+  const bySec = conc.bySector || [];
+  const byGeo = conc.byGeography || [];
+  const byInst= conc.byInstrumentType || [];
+  return ''
+    + '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<AIFReportingInfo xmlns="urn:esma:aif:v1.2" ReportingType="Q" ReportingPeriodType="Q4"\n'
+    + '                  ReportingPeriodStartDate="' + _xesc(_xDate(meta.periodStart)) + '"\n'
+    + '                  ReportingPeriodEndDate="' + _xesc(_xDate(meta.asOf)) + '"\n'
+    + '                  AIFMIdentifier="[FILL: AIFM LEI]" AIFMName="[FILL: AIFM name]">\n'
+    + '  <AIFRecordInfo>\n'
+    + '    ' + _xEl('AIFDescription', _xesc(meta.fundName || '[FILL: AIF legal name]')) + '\n'
+    + '    ' + _xEl('AIFIdentifier', _xesc(meta.fundLei || '[FILL: AIF LEI]')) + '\n'
+    + '    ' + _xEl('AIFReportingObligationCode', 'HIGH') + '\n'
+    + '    <AIFPrincipalInfo>\n'
+    + '      ' + _xEl('AIFMainStrategy', 'PRIVATE_CREDIT') + '\n'
+    + '      ' + _xEl('AIFPredominantAIFType', 'PE_FUND') + '\n'
+    + '      ' + _xEl('AIFAum', _xNum(meta.fundNAV || 0)) + '\n'
+    + '      ' + _xEl('AIFBaseCurrency', meta.reportingCcy || 'EUR') + '\n'
+    + '      <PrincipalMarkets>\n'
+    +        byGeo.slice(0,5).map((g,i) => ''
+    +          + '        <PrincipalMarket>\n'
+    +          + '          ' + _xEl('Ranking', String(i+1)) + '\n'
+    +          + '          ' + _xEl('MarketIdentifier', _xesc(g.label)) + '\n'
+    +          + '          ' + _xEl('AggregateValue', _xNum(g.amount)) + '\n'
+    +          + '        </PrincipalMarket>\n'
+    +        ).join('')
+    + '      </PrincipalMarkets>\n'
+    + '      <PrincipalInstruments>\n'
+    +        byInst.slice(0,5).map((it,i) => ''
+    +          + '        <PrincipalInstrument>\n'
+    +          + '          ' + _xEl('Ranking', String(i+1)) + '\n'
+    +          + '          ' + _xEl('SubAssetType', _xesc(it.label)) + '\n'
+    +          + '          ' + _xEl('AggregateValue', _xNum(it.amount)) + '\n'
+    +          + '        </PrincipalInstrument>\n'
+    +        ).join('')
+    + '      </PrincipalInstruments>\n'
+    + '    </AIFPrincipalInfo>\n'
+    + '    <AIFExposures>\n'
+    + '      ' + _xEl('AIFRegulatoryAum', _xNum(aif.regulatoryAum || meta.fundNAV || 0)) + '\n'
+    +        bySec.map(s => ''
+    +          + '      <SectorExposure>\n'
+    +          + '        ' + _xEl('Sector', _xesc(s.label)) + '\n'
+    +          + '        ' + _xEl('Value', _xNum(s.amount)) + '\n'
+    +          + '        ' + _xEl('PercentOfNav', _xNum(s.pct)) + '\n'
+    +          + '      </SectorExposure>\n'
+    +        ).join('')
+    + '    </AIFExposures>\n'
+    + '    <AIFLiquidityRisk>\n'
+    + '      ' + _xEl('PortfolioLiquidityProfileDays', _xNum(aif.liquidityDays || 180)) + '\n'
+    + '      ' + _xEl('InvestorLiquidityProfileDays', _xNum(aif.investorLiquidityDays || 365)) + '\n'
+    + '    </AIFLiquidityRisk>\n'
+    + '    <AIFLeverage>\n'
+    + '      ' + _xEl('LeverageMethodGross', _xNum(aif.leverageGross || 0)) + '\n'
+    + '      ' + _xEl('LeverageMethodCommitment', _xNum(aif.leverageCommitment || 0)) + '\n'
+    + '    </AIFLeverage>\n'
+    + '  </AIFRecordInfo>\n'
+    + '  <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft filing. Populate AIFM/AIF LEI identifiers before submission via national NCA portal. -->\n'
+    + '</AIFReportingInfo>\n';
+}
+
+// FR Y-14Q Schedule H.1 — Fed corporate loan schedule.
+// Fixed-width per-facility rows in production; the XML wrapper below is a
+// convenience container for downstream ETL conversion.
+function _xmlFRY14QH1(cache){
+  const meta = cache.meta || {};
+  const rows = (cache.y14q && cache.y14q.rows) || [];
+  return ''
+    + '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<FRY14Q Schedule="H.1" ReportingDate="' + _xesc(_xDate(meta.asOf)) + '"\n'
+    + '        RSSDId="[FILL: 10-digit RSSD ID]" BHC="[FILL: BHC name]">\n'
+    +   rows.map(r => ''
+    +     + '  <CorporateLoan>\n'
+    +     + '    ' + _xEl('CustomerId', _xesc(r.obligorId || r.obligorName)) + '\n'
+    +     + '    ' + _xEl('ObligorName', _xesc(r.obligorName)) + '\n'
+    +     + '    ' + _xEl('NAICSCode', _xesc(r.naics || '')) + '\n'
+    +     + '    ' + _xEl('IndustryDescription', _xesc(r.industry)) + '\n'
+    +     + '    ' + _xEl('CountryCode', _xesc(r.geography)) + '\n'
+    +     + '    ' + _xEl('OriginalCommitmentAmount', _xNum(r.commitment)) + '\n'
+    +     + '    ' + _xEl('CommittedExposureAmount', _xNum(r.commitment)) + '\n'
+    +     + '    ' + _xEl('UtilizedExposureAmount', _xNum(r.drawn)) + '\n'
+    +     + '    ' + _xEl('LineReportedOnFRY9C', 'Y') + '\n'
+    +     + '    ' + _xEl('InterestRatePct', _xNum(r.couponPct)) + '\n'
+    +     + '    ' + _xEl('MaturityDate', _xesc(_xDate(r.maturity))) + '\n'
+    +     + '    ' + _xEl('ProbabilityOfDefault', _xNum(r.pd)) + '\n'
+    +     + '    ' + _xEl('LossGivenDefault', _xNum(r.lgd)) + '\n'
+    +     + '    ' + _xEl('ExposureAtDefault', _xNum(r.ead)) + '\n'
+    +     + '    ' + _xEl('CreditRating', _xesc(r.eclStage)) + '\n'
+    +     + '    ' + _xEl('CovenantBreachFlag', r.covenantBreach ? 'Y' : 'N') + '\n'
+    +     + '  </CorporateLoan>\n'
+    +   ).join('')
+    + '  <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft template. Fed submission is fixed-width flat file; this XML is for internal review + ETL. -->\n'
+    + '</FRY14Q>\n';
+}
+
+// N-PORT — SEC Form N-PORT for registered investment companies.
+function _xmlNPORT(cache){
+  const meta = cache.meta || {};
+  const holdings = (cache.nport && cache.nport.itemC_holdings) || [];
+  return ''
+    + '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<edgarSubmission xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="eis_NPORT_Filer.xsd">\n'
+    + '  <headerData>\n'
+    + '    <submissionType>NPORT-P</submissionType>\n'
+    + '    <periodOfReport>' + _xesc(_xDate(meta.asOf)) + '</periodOfReport>\n'
+    + '  </headerData>\n'
+    + '  <formData>\n'
+    + '    <genInfo>\n'
+    + '      ' + _xEl('regName', _xesc(meta.fundName || '[FILL: registrant name]')) + '\n'
+    + '      ' + _xEl('regLei', '[FILL: 20-char LEI]') + '\n'
+    + '    </genInfo>\n'
+    + '    <invstOrSecs>\n'
+    +      holdings.map(h => ''
+    +        + '      <invstOrSec>\n'
+    +        + '        ' + _xEl('name', _xesc(h.name)) + '\n'
+    +        + '        ' + _xEl('lei', _xesc(h.identifier)) + '\n'
+    +        + '        ' + _xEl('balance', _xNum(h.principal)) + '\n'
+    +        + '        ' + _xEl('units', 'PA') + '\n'
+    +        + '        ' + _xEl('curCd', 'USD') + '\n'
+    +        + '        ' + _xEl('valUSD', _xNum(h.fairValue)) + '\n'
+    +        + '        ' + _xEl('pctVal', _xNum(h.pctVal || 0)) + '\n'
+    +        + '        ' + _xEl('assetCat', 'DBT') + '\n'
+    +        + '        ' + _xEl('fairValLevel', String(h.fairValueLevel || 3)) + '\n'
+    +        + '        <debtSec>\n'
+    +        + '          ' + _xEl('maturityDt', _xesc(_xDate(h.maturity))) + '\n'
+    +        + '          ' + _xEl('couponKind', 'Fixed') + '\n'
+    +        + '          ' + _xEl('annualizedRt', _xNum(h.couponPct)) + '\n'
+    +        + '        </debtSec>\n'
+    +        + '      </invstOrSec>\n'
+    +      ).join('')
+    + '    </invstOrSecs>\n'
+    + '    <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft filing. -->\n'
+    + '  </formData>\n'
+    + '</edgarSubmission>\n';
+}
 
 // ═════════════════════════════════════════════════════════════════════
 // Watchlist / Early-Warning (Tier 1 #5)
@@ -35465,6 +35874,78 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   //   dailyRate      = 0.1135 / 365       = 0.0003109589
   //   dailyAccrual   = 30_000_000 × 0.0003109589 = $9,328.77
   //   periodInterest = $9,328.77 × 7      = $65,301.37
+  // ─── Time-varying facility commitment (2026-08-06) ────────────────────
+  // Walks the deal_commitment_events log to derive the effective commitment
+  // at any given date. Events are cumulative signed deltas — the running
+  // sum at or before `asOfDate` is what applies.
+  //
+  // Also returns:
+  //   nextEventDate   — next scheduled change (for cashflow projection)
+  //   currentMaturity — most recent extension_granted.new_maturity_date, or original
+  //
+  // If no events are recorded (legacy deals), falls back to
+  // deal.facility.commitment as the static value.
+  PCS.effectiveCommitmentAtDate = function effectiveCommitmentAtDate(deal, events, asOfDate){
+    const asOf = asOfDate ? new Date(asOfDate) : new Date();
+    // Legacy fallback — no events on this deal.
+    if(!Array.isArray(events) || !events.length){
+      const staticCommitment = (deal && deal.facility && +deal.facility.commitment) || 0;
+      return {
+        effectiveCommitment: staticCommitment,
+        nextEventDate: null,
+        currentMaturity: (deal && deal.deal && deal.deal.maturity) || null,
+        appliedEventsCount: 0,
+        deltaHistory: []
+      };
+    }
+    const sorted = events.slice().sort((a,b) => {
+      const da = new Date(a.event_date), db = new Date(b.event_date);
+      if(da - db !== 0) return da - db;
+      return (a.created_at || '').localeCompare(b.created_at || '');
+    });
+    let running = 0;
+    let currentMaturity = (deal && deal.deal && deal.deal.maturity) || null;
+    let nextEventDate = null;
+    const applied = [];
+    for(const e of sorted){
+      const eDate = new Date(e.event_date);
+      if(eDate <= asOf){
+        running += +e.amount_delta || 0;
+        if(e.event_type === 'extension_granted' && e.new_maturity_date){
+          currentMaturity = e.new_maturity_date;
+        }
+        applied.push(e);
+      } else if(!nextEventDate){
+        nextEventDate = e.event_date;
+      }
+    }
+    return {
+      effectiveCommitment: running,
+      nextEventDate: nextEventDate,
+      currentMaturity: currentMaturity,
+      appliedEventsCount: applied.length,
+      deltaHistory: applied
+    };
+  };
+  // Enumerate commitment history at every event date — used by the timeline
+  // strip in the UI and by benchmark charts that plot commitment over time.
+  PCS.commitmentSchedule = function commitmentSchedule(deal, events){
+    if(!Array.isArray(events) || !events.length) return [];
+    const sorted = events.slice().sort((a,b) => new Date(a.event_date) - new Date(b.event_date));
+    let running = 0;
+    return sorted.map(e => {
+      running += +e.amount_delta || 0;
+      return {
+        event_date: e.event_date,
+        event_type: e.event_type,
+        delta: +e.amount_delta || 0,
+        running_commitment: running,
+        new_maturity_date: e.new_maturity_date || null,
+        notes: e.notes || null
+      };
+    });
+  };
+
   PCS.reconcileInterest = function reconcileInterest(opts){
     opts = opts || {};
     const principal = +opts.principal || 0;
@@ -37515,6 +37996,279 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     a.click(); URL.revokeObjectURL(url);
   };
 
+  // ─── Peer benchmarks controller (2026-08-06) ─────────────────────────
+  // Computes distributions across PRESETS the user can see. RLS already
+  // filters PRESETS at fetch time, so no re-check needed here.
+  window.openBenchmarksModal = function(){
+    const el = $('bench-modal'); if(!el) return;
+    el.style.display = 'flex';
+    // Populate the currency dropdown from unique values in PRESETS
+    const ccySel = $('bench-filter-currency');
+    if(ccySel){
+      const ccyMap = {};
+      (window.PRESETS || []).forEach(p => {
+        try { const b = p.build && p.build(); if(b?.deal?.currency) ccyMap[b.deal.currency] = 1; }
+        catch(_){}
+      });
+      const opts = Object.keys(ccyMap).sort().map(c => '<option value="' + c + '">' + c + '</option>').join('');
+      ccySel.innerHTML = '<option value="">All currencies</option>' + opts;
+    }
+    window.__benchRender();
+  };
+  window.closeBenchmarksModal = function(){
+    const el = $('bench-modal'); if(el) el.style.display = 'none';
+  };
+
+  function _benchPeerSet(){
+    const structFilter = ($('bench-filter-structure') || {}).value || '';
+    const ccyFilter    = ($('bench-filter-currency')  || {}).value || '';
+    const fwFilter     = ($('bench-filter-framework') || {}).value || '';
+    const out = [];
+    (window.PRESETS || []).forEach(p => {
+      try {
+        const b = p.build && p.build(); if(!b) return;
+        const d = b.deal || {}, f = b.facility || {};
+        const structure = d.structure || (f.type === 'revolvingBorrowingBase' ? 'revolving_borrowing_base' : (f.type === 'revolver' ? 'revolver' : 'corporate_term'));
+        if(structFilter && structure !== structFilter) return;
+        if(ccyFilter && d.currency !== ccyFilter) return;
+        if(fwFilter && (d.framework || 'IFRS') !== fwFilter) return;
+        out.push({ preset:p, def:b, structure, currency:d.currency, framework:d.framework || 'IFRS' });
+      } catch(_){}
+    });
+    return out;
+  }
+
+  // Extract representative metrics from a built-deal def
+  function _benchMetricsForDeal(def){
+    const t0 = (def.tranches || [])[0] || {};
+    const ic0 = (t0.interestComponents || [])[0] || {};
+    const spreads = (ic0.spreads || []);
+    const spreadBps = spreads.length ? +spreads[0].bps || 0 : 0;
+    const baseValue = +ic0.baseValue || 0;   // decimal (e.g. 0.0435)
+    // Rough EIR: base + spread. Not the engine's exact EIR (that needs a run) — good enough for benchmark distributions.
+    const eirPct = (baseValue * 100) + (spreadBps / 100);
+    const settle = def.deal?.settle ? new Date(def.deal.settle) : null;
+    const maturity = def.deal?.maturity ? new Date(def.deal.maturity) : null;
+    let walYears = null;
+    if(settle && maturity && !isNaN(settle) && !isNaN(maturity)){
+      walYears = Math.max(0, (maturity - settle) / (365.25 * 86400000));
+    }
+    // Covenants — count in-breach vs total by kpi
+    const covenants = def.covenants || [];
+    // ECL stage from deal.overrides.eclStage if present (post accounting run), else 'stage1' default
+    const eclStage = (def.overrides?.eclStage) || (def.deal?.eclStage) || 'stage1';
+    // Utilisation for revolvers (drawn / commitment)
+    const commitment = +def.facility?.commitment || 0;
+    const drawn = (def.tranches || []).reduce((s,t) => s + ((t.drawdowns || []).reduce((ss,d) => ss + (+d.amount || 0), 0)), 0);
+    const utilisation = commitment > 0 ? Math.min(1, drawn / commitment) : null;
+    return { eirPct, spreadBps, walYears, covenants, eclStage, utilisation, commitment };
+  }
+
+  // Bin a numeric array into a histogram; returns { edges, counts, min, max, mean, median }
+  function _histogram(values, binCount){
+    const clean = values.filter(v => v != null && isFinite(v));
+    if(!clean.length) return { edges:[], counts:[], min:0, max:0, mean:0, median:0 };
+    const min = Math.min(...clean), max = Math.max(...clean);
+    const range = Math.max(0.0001, max - min);
+    const bins = Math.max(3, binCount || 10);
+    const step = range / bins;
+    const edges = Array.from({length:bins+1}, (_,i) => min + i*step);
+    const counts = Array(bins).fill(0);
+    clean.forEach(v => {
+      let idx = Math.floor((v - min) / step);
+      if(idx >= bins) idx = bins - 1;
+      counts[idx]++;
+    });
+    const sorted = clean.slice().sort((a,b) => a-b);
+    const median = sorted[Math.floor(sorted.length/2)];
+    const mean = clean.reduce((s,v)=>s+v,0) / clean.length;
+    return { edges, counts, min, max, mean, median, n: clean.length };
+  }
+
+  // Render an SVG histogram inside a <canvas> element (we'll swap the canvas for an SVG since we're not using Chart.js)
+  function _renderHist(canvasId, hist, opts){
+    opts = opts || {};
+    const el = document.getElementById(canvasId); if(!el) return;
+    if(!hist.counts.length){ el.outerHTML = '<div style="padding:40px; text-align:center; color:var(--n-500); font-size:11px; font-style:italic;">No data</div>'; return; }
+    const w = 380, h = 180, pad = { l:30, r:8, t:8, b:26 };
+    const maxCount = Math.max(...hist.counts);
+    const barW = (w - pad.l - pad.r) / hist.counts.length;
+    const yScale = v => h - pad.b - (h - pad.t - pad.b) * (v / Math.max(1, maxCount));
+    const fmt = opts.fmt || (v => v.toFixed(2));
+    let svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%; height:180px; font-family:ui-sans-serif,system-ui,sans-serif;">';
+    // Bars
+    hist.counts.forEach((c, i) => {
+      const x = pad.l + i*barW;
+      const y = yScale(c);
+      svg += '<rect x="' + (x+1) + '" y="' + y + '" width="' + Math.max(1, barW-2) + '" height="' + (h - pad.b - y) + '" fill="var(--fis-green,#22C55E)" opacity="0.85"><title>' + fmt(hist.edges[i]) + ' → ' + fmt(hist.edges[i+1]) + ': ' + c + ' deals</title></rect>';
+    });
+    // Axes
+    svg += '<line x1="' + pad.l + '" y1="' + (h - pad.b) + '" x2="' + (w - pad.r) + '" y2="' + (h - pad.b) + '" stroke="var(--n-300)" stroke-width="0.5"/>';
+    svg += '<line x1="' + pad.l + '" y1="' + pad.t + '" x2="' + pad.l + '" y2="' + (h - pad.b) + '" stroke="var(--n-300)" stroke-width="0.5"/>';
+    // X-axis labels — first, middle, last
+    [0, Math.floor(hist.edges.length/2), hist.edges.length-1].forEach(i => {
+      const x = pad.l + (i/(hist.edges.length-1)) * (w - pad.l - pad.r);
+      svg += '<text x="' + x + '" y="' + (h - pad.b + 14) + '" text-anchor="middle" font-size="9" fill="var(--n-500)">' + fmt(hist.edges[i]) + '</text>';
+    });
+    // Y-axis count labels
+    [0, Math.ceil(maxCount/2), maxCount].forEach(v => {
+      svg += '<text x="' + (pad.l - 4) + '" y="' + (yScale(v) + 3) + '" text-anchor="end" font-size="9" fill="var(--n-500)">' + v + '</text>';
+    });
+    // Median line
+    if(hist.median != null){
+      const mx = pad.l + ((hist.median - hist.min) / Math.max(0.0001, hist.max - hist.min)) * (w - pad.l - pad.r);
+      svg += '<line x1="' + mx + '" y1="' + pad.t + '" x2="' + mx + '" y2="' + (h - pad.b) + '" stroke="var(--brand-600,#4F46E5)" stroke-width="1" stroke-dasharray="3,2"><title>Median: ' + fmt(hist.median) + '</title></line>';
+    }
+    svg += '</svg>';
+    // Replace the <canvas> with an <svg> wrapper on first render
+    const wrap = document.createElement('div');
+    wrap.innerHTML = svg;
+    el.replaceWith(wrap.firstChild);
+  }
+
+  function _renderBar(canvasId, categories, values, opts){
+    opts = opts || {};
+    const el = document.getElementById(canvasId); if(!el) return;
+    if(!categories.length){ el.outerHTML = '<div style="padding:40px; text-align:center; color:var(--n-500); font-size:11px; font-style:italic;">No data</div>'; return; }
+    const w = opts.wide ? 780 : 380, h = 180, pad = { l:80, r:8, t:8, b:26 };
+    const maxV = Math.max(...values, 0.001);
+    const rowH = (h - pad.t - pad.b) / categories.length;
+    let svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%; height:180px; font-family:ui-sans-serif,system-ui,sans-serif;">';
+    categories.forEach((c, i) => {
+      const y = pad.t + i*rowH;
+      const barW = (w - pad.l - pad.r) * (values[i] / maxV);
+      svg += '<text x="' + (pad.l - 6) + '" y="' + (y + rowH/2 + 3) + '" text-anchor="end" font-size="10" fill="var(--n-700)">' + c.slice(0, 20) + '</text>';
+      svg += '<rect x="' + pad.l + '" y="' + (y + rowH*0.15) + '" width="' + barW + '" height="' + (rowH*0.7) + '" fill="var(--fis-green,#22C55E)" opacity="0.85"><title>' + c + ': ' + (opts.fmt ? opts.fmt(values[i]) : values[i]) + '</title></rect>';
+      svg += '<text x="' + (pad.l + barW + 4) + '" y="' + (y + rowH/2 + 3) + '" font-size="10" fill="var(--n-600)" font-variant-numeric="tabular-nums">' + (opts.fmt ? opts.fmt(values[i]) : values[i]) + '</text>';
+    });
+    svg += '</svg>';
+    const wrap = document.createElement('div');
+    wrap.innerHTML = svg;
+    el.replaceWith(wrap.firstChild);
+  }
+
+  function _renderStacked(canvasId, segments, opts){
+    opts = opts || {};
+    const el = document.getElementById(canvasId); if(!el) return;
+    if(!segments.length){ el.outerHTML = '<div style="padding:40px; text-align:center; color:var(--n-500); font-size:11px; font-style:italic;">No data</div>'; return; }
+    const total = segments.reduce((s,seg) => s + seg.value, 0);
+    if(!total){ el.outerHTML = '<div style="padding:40px; text-align:center; color:var(--n-500); font-size:11px; font-style:italic;">No data</div>'; return; }
+    const w = 380, h = 180, barY = 60, barH = 40;
+    const colors = { stage1:'var(--fis-green,#22C55E)', stage2:'#F59E0B', stage3:'#DC2626', poci:'#7C3AED' };
+    let x = 8;
+    let svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%; height:180px; font-family:ui-sans-serif,system-ui,sans-serif;">';
+    segments.forEach(seg => {
+      const segW = ((w - 16) * seg.value) / total;
+      svg += '<rect x="' + x + '" y="' + barY + '" width="' + segW + '" height="' + barH + '" fill="' + (colors[seg.key] || 'var(--n-400)') + '"><title>' + seg.label + ': ' + seg.value + ' (' + Math.round(100*seg.value/total) + '%)</title></rect>';
+      x += segW;
+    });
+    // Legend
+    let lx = 8;
+    segments.forEach(seg => {
+      const legendY = barY + barH + 20;
+      svg += '<rect x="' + lx + '" y="' + legendY + '" width="10" height="10" fill="' + (colors[seg.key] || 'var(--n-400)') + '"/>';
+      svg += '<text x="' + (lx + 14) + '" y="' + (legendY + 9) + '" font-size="10" fill="var(--n-700)">' + seg.label + ' (' + seg.value + ')</text>';
+      lx += 90;
+    });
+    svg += '</svg>';
+    const wrap = document.createElement('div');
+    wrap.innerHTML = svg;
+    el.replaceWith(wrap.firstChild);
+  }
+
+  window.__benchRender = function(){
+    const peers = _benchPeerSet();
+    const sum = $('bench-summary');
+    if(sum) sum.textContent = peers.length + ' deal' + (peers.length===1?'':'s') + ' in peer set';
+    // Rebuild the body's canvas targets each render (SVGs were replaced last time)
+    const body = $('bench-body');
+    if(body){
+      body.innerHTML = ''
+        + '<div class="bench-panel"><div class="bench-title">Yield distribution (EIR %)</div><canvas id="bench-yield" height="200"></canvas><div class="bench-note" id="bench-yield-note">—</div></div>'
+        + '<div class="bench-panel"><div class="bench-title">Spread distribution (bps over benchmark)</div><canvas id="bench-spread" height="200"></canvas><div class="bench-note" id="bench-spread-note">—</div></div>'
+        + '<div class="bench-panel"><div class="bench-title">Weighted average life by structure (years)</div><canvas id="bench-wal" height="200"></canvas><div class="bench-note" id="bench-wal-note">—</div></div>'
+        + '<div class="bench-panel"><div class="bench-title">ECL stage mix</div><canvas id="bench-ecl" height="200"></canvas><div class="bench-note" id="bench-ecl-note">—</div></div>'
+        + '<div class="bench-panel" style="grid-column:1/-1;"><div class="bench-title">Covenant breach rate (% deals with at least one breach, by covenant KPI)</div><canvas id="bench-breach" height="200"></canvas><div class="bench-note" id="bench-breach-note">—</div></div>';
+    }
+    if(!peers.length){
+      $('bench-yield-note').textContent = 'Adjust filters — no deals in current peer set.';
+      return;
+    }
+    const metrics = peers.map(p => _benchMetricsForDeal(p.def));
+    // 1. Yield distribution
+    const yields = metrics.map(m => m.eirPct).filter(v => v > 0);
+    const yieldHist = _histogram(yields, 10);
+    _renderHist('bench-yield', yieldHist, { fmt: v => v.toFixed(2) + '%' });
+    $('bench-yield-note').innerHTML = yields.length ? '<b>' + yields.length + '</b> deals · median <b>' + yieldHist.median.toFixed(2) + '%</b> · mean <b>' + yieldHist.mean.toFixed(2) + '%</b> · range ' + yieldHist.min.toFixed(2) + '% – ' + yieldHist.max.toFixed(2) + '%' : 'No coupon data';
+    // 2. Spread distribution
+    const spreads = metrics.map(m => m.spreadBps).filter(v => v > 0);
+    const spreadHist = _histogram(spreads, 10);
+    _renderHist('bench-spread', spreadHist, { fmt: v => Math.round(v) + ' bps' });
+    $('bench-spread-note').innerHTML = spreads.length ? '<b>' + spreads.length + '</b> floating-rate deals · median <b>' + Math.round(spreadHist.median) + ' bps</b> · mean <b>' + Math.round(spreadHist.mean) + ' bps</b>' : 'No spread data (fixed-rate deals only)';
+    // 3. WAL by structure — group and compute average
+    const walByStruct = {};
+    peers.forEach((p, i) => {
+      const wal = metrics[i].walYears;
+      if(wal == null) return;
+      const s = p.structure;
+      walByStruct[s] = walByStruct[s] || { total:0, n:0 };
+      walByStruct[s].total += wal;
+      walByStruct[s].n++;
+    });
+    const walKeys = Object.keys(walByStruct);
+    const walValues = walKeys.map(k => walByStruct[k].total / walByStruct[k].n);
+    _renderBar('bench-wal', walKeys, walValues, { fmt: v => v.toFixed(1) + ' y' });
+    $('bench-wal-note').innerHTML = walKeys.length ? walKeys.map(k => '<b>' + k + '</b>: ' + walByStruct[k].n + ' deals').join(' · ') : 'No maturity data';
+    // 4. ECL stage mix
+    const stageCounts = { stage1:0, stage2:0, stage3:0, poci:0 };
+    metrics.forEach(m => { const s = m.eclStage || 'stage1'; stageCounts[s] = (stageCounts[s] || 0) + 1; });
+    const stageSeg = [
+      { key:'stage1', label:'Stage 1 (12-mo)', value: stageCounts.stage1 },
+      { key:'stage2', label:'Stage 2 (SICR)',  value: stageCounts.stage2 },
+      { key:'stage3', label:'Stage 3',         value: stageCounts.stage3 },
+      { key:'poci',   label:'POCI',            value: stageCounts.poci }
+    ].filter(s => s.value > 0);
+    _renderStacked('bench-ecl', stageSeg, {});
+    $('bench-ecl-note').innerHTML = peers.length + ' deals · <b>' + Math.round(100 * stageCounts.stage1 / peers.length) + '%</b> in Stage 1';
+    // 5. Breach rate by covenant KPI
+    const kpiCounts = {}, kpiBreaches = {};
+    peers.forEach((p, i) => {
+      const covs = metrics[i].covenants;
+      covs.forEach(c => {
+        const kpi = c.kpi || c.metric || 'unknown';
+        kpiCounts[kpi] = (kpiCounts[kpi] || 0) + 1;
+        // Rough breach detection: any covenant with c.inBreach or c.breached
+        if(c.inBreach || c.breached) kpiBreaches[kpi] = (kpiBreaches[kpi] || 0) + 1;
+      });
+    });
+    const breachKeys = Object.keys(kpiCounts).sort();
+    const breachRates = breachKeys.map(k => 100 * (kpiBreaches[k] || 0) / kpiCounts[k]);
+    _renderBar('bench-breach', breachKeys, breachRates, { fmt: v => v.toFixed(1) + '%', wide: true });
+    $('bench-breach-note').innerHTML = breachKeys.length ? breachKeys.length + ' covenant KPIs monitored across ' + peers.length + ' deals' : 'No covenants configured';
+  };
+
+  window.__benchExportCsv = function(){
+    const peers = _benchPeerSet();
+    const rows = ['deal_key,deal_name,structure,currency,framework,eir_pct,spread_bps,wal_years,ecl_stage,utilisation_pct,commitment'];
+    peers.forEach(p => {
+      const m = _benchMetricsForDeal(p.def);
+      const d = p.def.deal || {};
+      rows.push([
+        p.preset.key, d.name || '', p.structure, p.currency || '', p.framework,
+        (m.eirPct || 0).toFixed(4), Math.round(m.spreadBps),
+        m.walYears != null ? m.walYears.toFixed(2) : '',
+        m.eclStage || '',
+        m.utilisation != null ? (m.utilisation * 100).toFixed(1) : '',
+        Math.round(m.commitment)
+      ].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(','));
+    });
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'peer-benchmarks.csv';
+    a.click(); URL.revokeObjectURL(url);
+  };
+
   window.__rfxRefresh = async function(){
     const idx = $('rfx-index')?.value;
     const listEl = $('rfx-list');
@@ -37880,6 +38634,226 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       setTimeout(() => { window.SB.sweepReportingNotices && window.SB.sweepReportingNotices().then(r => r.ok && r.inserted && console.log('[reporting] auto-sweep emitted', r.inserted, 'notices')); }, 15000);
       setInterval(() => { window.SB.sweepReportingNotices && window.SB.sweepReportingNotices().then(r => r.ok && r.inserted && console.log('[reporting] auto-sweep emitted', r.inserted, 'notices')); }, 3600000);
     }
+  });
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Commitment lifecycle — Deal Setup panel controller.
+     Time-varying facility events (initial commit, upsize, delayed-draw
+     windows, extensions, cancels). Renders a chronological list + a
+     lightweight SVG timeline strip showing running commitment.
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const esc = s => (s == null ? '' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
+  const fmt$ = n => (n == null || isNaN(n)) ? '—' : (n < 0 ? '−' : '') + '$' + Math.abs(Math.round(+n)).toLocaleString('en-AU');
+  const fmtD = d => d ? new Date(d).toISOString().slice(0,10) : '—';
+
+  // Curated event-type list — dropdown labels + implied sign for the amount.
+  const CMT_EVENT_TYPES = [
+    { v:'initial_commitment',     l:'Initial commitment',                         sign:'positive' },
+    { v:'commitment_increase',    l:'Commitment increase (upsize / accordion)',   sign:'positive' },
+    { v:'commitment_decrease',    l:'Commitment decrease (partial cancel)',       sign:'negative' },
+    { v:'delayed_draw_available', l:'Delayed-draw available (window opens)',      sign:'positive' },
+    { v:'delayed_draw_expired',   l:'Delayed-draw expired (uncommitted falls away)', sign:'negative' },
+    { v:'extension_granted',      l:'Extension granted (new maturity)',           sign:'zero' },
+    { v:'rollover',               l:'Rollover / refinance',                       sign:'zero' },
+    { v:'cancellation',           l:'Cancellation (full termination)',            sign:'negative' }
+  ];
+  function eventTypeLabel(v){ return (CMT_EVENT_TYPES.find(t => t.v === v) || {}).l || v; }
+
+  window.__renderCommitmentLifecycle = async function(){
+    const emptyEl = $('b-commitment-empty'), bodyEl = $('b-commitment-body');
+    if(!emptyEl || !bodyEl) return;
+    const dealId = window.B?._dbDealId || window.B?.deal?.dbDealId;
+    if(!dealId || !window.SB?.fetchCommitmentEvents){
+      emptyEl.style.display = ''; bodyEl.style.display = 'none';
+      return;
+    }
+    emptyEl.style.display = 'none'; bodyEl.style.display = '';
+    const events = await window.SB.fetchCommitmentEvents(dealId);
+    _renderCommitmentBody(events);
+  };
+
+  function _renderCommitmentBody(events){
+    const summaryEl = $('b-commitment-summary');
+    const listEl    = $('b-commitment-list');
+    const tlEl      = $('b-commitment-timeline');
+    if(!summaryEl || !listEl || !tlEl) return;
+
+    // Compute the effective-commitment view for today
+    const eff = window.PCS.effectiveCommitmentAtDate(window.B, events, new Date());
+    summaryEl.innerHTML = ''
+      + '<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">'
+      +   '<div><b>Effective commitment today:</b> <span style="font-variant-numeric:tabular-nums; font-weight:600; color:var(--fis-green-700,#15803D);">' + fmt$(eff.effectiveCommitment) + '</span></div>'
+      +   '<div style="color:var(--n-500);">Applied ' + eff.appliedEventsCount + ' event' + (eff.appliedEventsCount===1?'':'s') + ' · ' + events.length + ' total</div>'
+      +   (eff.currentMaturity ? '<div style="color:var(--n-500);">Current maturity: <b>' + eff.currentMaturity + '</b></div>' : '')
+      +   (eff.nextEventDate   ? '<div style="color:var(--n-500);">Next event: <b>' + eff.nextEventDate + '</b></div>' : '')
+      + '</div>';
+
+    // Timeline strip — 100%-wide SVG with a line for running commitment
+    const schedule = window.PCS.commitmentSchedule(window.B, events);
+    if(schedule.length >= 2){
+      const w = 720, h = 60, pad = 4;
+      const min = Math.min(...schedule.map(s => s.running_commitment));
+      const max = Math.max(...schedule.map(s => s.running_commitment), min + 1);
+      const t0 = new Date(schedule[0].event_date).getTime();
+      const t1 = new Date(schedule[schedule.length-1].event_date).getTime();
+      const xOf = d => pad + (w - 2*pad) * ((new Date(d).getTime() - t0) / Math.max(1, t1 - t0));
+      const yOf = v => h - pad - (h - 2*pad) * ((v - min) / Math.max(1, max - min));
+      let d = '';
+      schedule.forEach((s, i) => {
+        d += (i === 0 ? 'M' : 'L') + xOf(s.event_date).toFixed(1) + ',' + yOf(s.running_commitment).toFixed(1) + ' ';
+      });
+      const dots = schedule.map(s =>
+        '<circle cx="' + xOf(s.event_date).toFixed(1) + '" cy="' + yOf(s.running_commitment).toFixed(1) + '" r="3" fill="var(--fis-green,#22C55E)"><title>' + esc(s.event_date + ' — ' + eventTypeLabel(s.event_type) + ' — ' + fmt$(s.running_commitment)) + '</title></circle>'
+      ).join('');
+      tlEl.innerHTML = ''
+        + '<div style="font-size:10px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px;">Commitment history</div>'
+        + '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%; height:' + h + 'px; background:var(--n-50); border-radius:6px; border:0.5px solid var(--n-200);">'
+        + '  <path d="' + d + '" fill="none" stroke="var(--fis-green,#22C55E)" stroke-width="1.5"/>'
+        +    dots
+        + '</svg>';
+    } else {
+      tlEl.innerHTML = '';
+    }
+
+    // Event list
+    if(!events.length){
+      listEl.innerHTML = '<div class="v4-empty" style="padding:20px; text-align:center; color:var(--n-500); font-size:11.5px; font-style:italic;">No commitment events yet. Click <b>Seed initial from facility</b> to record the starting commitment.</div>';
+      return;
+    }
+    const sorted = events.slice().sort((a,b) => new Date(a.event_date) - new Date(b.event_date));
+    listEl.innerHTML = '<table style="width:100%; font-size:11.5px; border-collapse:collapse;">'
+      + '<thead><tr style="background:var(--n-50);">'
+      + '  <th style="text-align:left; padding:8px 10px; border-bottom:0.5px solid var(--n-200); font-weight:600;">Date</th>'
+      + '  <th style="text-align:left; padding:8px 10px; border-bottom:0.5px solid var(--n-200); font-weight:600;">Event</th>'
+      + '  <th style="text-align:right; padding:8px 10px; border-bottom:0.5px solid var(--n-200); font-weight:600;">Δ Amount</th>'
+      + '  <th style="text-align:left; padding:8px 10px; border-bottom:0.5px solid var(--n-200); font-weight:600;">New maturity</th>'
+      + '  <th style="text-align:left; padding:8px 10px; border-bottom:0.5px solid var(--n-200); font-weight:600;">Notes</th>'
+      + '  <th style="text-align:center; padding:8px 10px; border-bottom:0.5px solid var(--n-200); font-weight:600;"></th>'
+      + '</tr></thead><tbody>'
+      + sorted.map(e => {
+        const delta = +e.amount_delta || 0;
+        const color = delta > 0 ? 'var(--fis-green-700,#15803D)' : delta < 0 ? '#B91C1C' : 'var(--n-500)';
+        return '<tr>'
+          + '  <td style="padding:6px 10px; border-bottom:0.5px solid var(--n-100); font-variant-numeric:tabular-nums;">' + fmtD(e.event_date) + '</td>'
+          + '  <td style="padding:6px 10px; border-bottom:0.5px solid var(--n-100);">' + esc(eventTypeLabel(e.event_type)) + '</td>'
+          + '  <td style="padding:6px 10px; border-bottom:0.5px solid var(--n-100); text-align:right; font-variant-numeric:tabular-nums; color:' + color + '; font-weight:600;">' + (delta === 0 ? '—' : fmt$(delta)) + '</td>'
+          + '  <td style="padding:6px 10px; border-bottom:0.5px solid var(--n-100); font-variant-numeric:tabular-nums;">' + (e.new_maturity_date ? fmtD(e.new_maturity_date) : '—') + '</td>'
+          + '  <td style="padding:6px 10px; border-bottom:0.5px solid var(--n-100); color:var(--n-600);">' + esc(e.notes || '') + '</td>'
+          + '  <td style="padding:6px 10px; border-bottom:0.5px solid var(--n-100); text-align:center;">'
+          + '    <button title="Edit" onclick="window.__editCommitmentEvent(\'' + e.id + '\')" style="background:none; border:0; color:var(--n-400); cursor:pointer; padding:2px 4px;"><i class="ti ti-edit" style="font-size:13px;"></i></button>'
+          + '    <button title="Delete" onclick="window.__deleteCommitmentEvent(\'' + e.id + '\')" style="background:none; border:0; color:var(--n-400); cursor:pointer; padding:2px 4px;"><i class="ti ti-x" style="font-size:13px;"></i></button>'
+          + '  </td>'
+          + '</tr>';
+      }).join('')
+      + '</tbody></table>';
+  }
+
+  window.addCommitmentEventUI = function(){ _openCommitmentModal(null); };
+  window.__editCommitmentEvent = async function(id){
+    const dealId = window.B?._dbDealId || window.B?.deal?.dbDealId;
+    if(!dealId) return;
+    const events = await window.SB.fetchCommitmentEvents(dealId);
+    const evt = events.find(e => e.id === id);
+    if(evt) _openCommitmentModal(evt);
+  };
+  window.__deleteCommitmentEvent = async function(id){
+    if(!confirm('Delete this commitment event?')) return;
+    const r = await window.SB.deleteCommitmentEvent(id);
+    if(!r.ok){ if(typeof toast === 'function') toast('Delete failed: ' + r.reason, 4000, { kind:'error' }); return; }
+    await window.__renderCommitmentLifecycle();
+  };
+
+  window.seedInitialCommitmentEventUI = async function(){
+    const dealId = window.B?._dbDealId || window.B?.deal?.dbDealId;
+    if(!dealId){ if(typeof toast === 'function') toast('Save the deal first', 3500, { kind:'warning' }); return; }
+    const commitment = +(window.B?.facility?.commitment || 0);
+    if(!commitment){ if(typeof toast === 'function') toast('Facility commitment is 0 — set it in Facility Setup first', 4500, { kind:'warning' }); return; }
+    const settleDate = window.B?.deal?.settle;
+    if(!settleDate){ if(typeof toast === 'function') toast('Deal settlement date required', 3500, { kind:'warning' }); return; }
+    const r = await window.SB.upsertCommitmentEvent({
+      deal_id: dealId,
+      event_date: settleDate,
+      event_type: 'initial_commitment',
+      amount_delta: commitment,
+      notes: 'Auto-seeded from facility.commitment on ' + settleDate
+    });
+    if(!r.ok){ if(typeof toast === 'function') toast('Seed failed: ' + r.reason, 5000, { kind:'error' }); return; }
+    if(typeof toast === 'function') toast('Initial commitment recorded (' + fmt$(commitment) + ')', 3500, { kind:'success' });
+    await window.__renderCommitmentLifecycle();
+  };
+
+  // Minimalistic prompt-based modal — keeps this feature light. Full modal
+  // can come later if the users need richer editing.
+  function _openCommitmentModal(existing){
+    const dealId = window.B?._dbDealId || window.B?.deal?.dbDealId;
+    if(!dealId){ if(typeof toast === 'function') toast('Save the deal first', 3500, { kind:'warning' }); return; }
+
+    const modal = document.createElement('div');
+    modal.className = 'json-modal';
+    modal.style.cssText = 'display:flex; position:fixed; inset:0; z-index:99999; align-items:center; justify-content:center; padding:24px;';
+    modal.innerHTML = ''
+      + '<div class="json-modal-bd" style="position:absolute; inset:0; background:rgba(15,23,42,0.45);"></div>'
+      + '<div class="json-modal-pn" style="position:relative; width:min(520px,92vw); background:var(--n-0); border-radius:14px; box-shadow:0 20px 50px rgba(15,23,42,0.15);">'
+      +   '<div style="padding:14px 16px; border-bottom:0.5px solid var(--n-200);">'
+      +     '<div style="font-size:14px; font-weight:600;">' + (existing ? 'Edit' : 'Add') + ' commitment event</div>'
+      +     '<div style="font-size:11px; color:var(--n-500); margin-top:2px;">Records a change to the facility commitment on the given date.</div>'
+      +   '</div>'
+      +   '<div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">'
+      +     '<div><label class="b-label">Event date</label><input id="cmt-form-date" type="date" class="b-input" value="' + (existing ? existing.event_date : (window.B?.deal?.settle || new Date().toISOString().slice(0,10))) + '"/></div>'
+      +     '<div><label class="b-label">Event type</label><select id="cmt-form-type" class="b-input">'
+      +       CMT_EVENT_TYPES.map(t => '<option value="' + t.v + '"' + (existing && existing.event_type === t.v ? ' selected' : '') + '>' + esc(t.l) + '</option>').join('')
+      +     '</select></div>'
+      +     '<div><label class="b-label">Δ Amount (signed) <span style="color:var(--n-500); font-weight:400;">— positive for increases, negative for decreases</span></label><input id="cmt-form-amount" type="number" step="0.01" class="b-input" placeholder="e.g. 5000000 or -2000000" value="' + (existing ? (existing.amount_delta || '') : '') + '"/></div>'
+      +     '<div><label class="b-label">New maturity date <span style="color:var(--n-500); font-weight:400;">— required for extension_granted</span></label><input id="cmt-form-maturity" type="date" class="b-input" value="' + (existing && existing.new_maturity_date ? existing.new_maturity_date : '') + '"/></div>'
+      +     '<div><label class="b-label">Notes</label><textarea id="cmt-form-notes" class="b-input" rows="2" placeholder="e.g. Accordion upsize agreed by Investor A on term-sheet amendment #3">' + esc(existing ? (existing.notes || '') : '') + '</textarea></div>'
+      +   '</div>'
+      +   '<div style="padding:10px 16px; border-top:0.5px solid var(--n-200); display:flex; justify-content:flex-end; gap:6px;">'
+      +     '<button class="mat-btn outline" data-cmt-cancel>Cancel</button>'
+      +     '<button class="mat-btn primary" data-cmt-save>' + (existing ? 'Save changes' : 'Add event') + '</button>'
+      +   '</div>'
+      + '</div>';
+    document.body.appendChild(modal);
+    modal.querySelector('[data-cmt-cancel]').onclick = () => modal.remove();
+    modal.querySelector('.json-modal-bd').onclick = () => modal.remove();
+    modal.querySelector('[data-cmt-save]').onclick = async () => {
+      const payload = {
+        deal_id: dealId,
+        event_date: modal.querySelector('#cmt-form-date').value,
+        event_type: modal.querySelector('#cmt-form-type').value,
+        amount_delta: +modal.querySelector('#cmt-form-amount').value || 0,
+        new_maturity_date: modal.querySelector('#cmt-form-maturity').value || null,
+        notes: modal.querySelector('#cmt-form-notes').value.trim() || null
+      };
+      if(existing && existing.id) payload.id = existing.id;
+      if(!payload.event_date || !payload.event_type){
+        if(typeof toast === 'function') toast('Event date + type required', 3500, { kind:'warning' }); return;
+      }
+      const r = await window.SB.upsertCommitmentEvent(payload);
+      if(!r.ok){ if(typeof toast === 'function') toast('Save failed: ' + r.reason, 5000, { kind:'error' }); return; }
+      if(typeof toast === 'function') toast('Event ' + (existing ? 'updated' : 'added'), 3000, { kind:'success' });
+      modal.remove();
+      await window.__renderCommitmentLifecycle();
+    };
+  }
+
+  // Auto-render on section open + deal change
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('b-commitment-section')?.addEventListener('toggle', e => {
+      if(e.target.open) window.__renderCommitmentLifecycle();
+    });
+    let lastKey = '';
+    setInterval(() => {
+      const cur = window.B?.deal?.dealId || '';
+      if(cur !== lastKey){
+        lastKey = cur;
+        if(document.getElementById('b-commitment-section')?.open) window.__renderCommitmentLifecycle();
+      }
+    }, 2000);
   });
 })();
 </script>
@@ -38299,7 +39273,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.06.5</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.06.6</span>
       </div>
     </div>
     <div>
