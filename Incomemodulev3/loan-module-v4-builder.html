@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.06.6</title>
+<title>PCS Loan Module · V4 · Build 2026.08.06.9</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
@@ -13,7 +13,7 @@
         corner is our version-control indicator — it must reflect the date
         of the last edit so testers can see at a glance whether they're on
         the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.06.6.2').
+        suffix (e.g. '2026.08.06.9.2').
 
      Rule of thumb: if you're editing this file, your very first edit or
      your very last edit should be bumping PCS_BUILD below. -->
@@ -113,7 +113,7 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.06.6';   // ← BUMP ME on every code change
+  window.PCS_BUILD   = '2026.08.06.9';   // ← BUMP ME on every code change
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -11588,6 +11588,30 @@ window.SB = (function(){
   };
 })();
 
+// ─── SB module boot diagnostic (2026-08-06) ─────────────────────────
+// If the SB IIFE throws mid-construction, window.SB stays undefined and the
+// login gate shows "Database not ready" forever. This makes the failure
+// loud in the console so we can identify what broke. INLINE inside the
+// existing script block — DO NOT wrap in another <script> tag (would break
+// the outer block and turn the rest of the file into raw HTML text).
+setTimeout(function(){
+  if(!window.SB){
+    console.error('%c[SB-BOOT] window.SB is UNDEFINED — the SB IIFE threw during construction. Check the console for the earlier "Uncaught" error above this one.', 'color:#DC2626; font-weight:bold; font-size:13px;');
+    return;
+  }
+  const methods = [
+    'init','auth_signIn','auth_signUp','auth_signInWithMagicLink','auth_signOut',
+    'auth_resetPasswordForEmail','fetchNotices','fetchUserDeals','saveDeal',
+    'fetchCommitmentEvents','upsertCommitmentEvent','fetchGLMappings','manualReconnect'
+  ];
+  const missing = methods.filter(m => typeof window.SB[m] !== 'function');
+  if(missing.length){
+    console.error('%c[SB-BOOT] SB partially built — missing methods:', 'color:#DC2626; font-weight:bold;', missing);
+  } else {
+    console.log('%c[SB-BOOT] window.SB ready · ' + Object.keys(window.SB).length + ' methods · connected=' + window.SB.connected, 'color:#059669; font-weight:600;');
+  }
+}, 100);
+
 /* ============================================================
    Loan Module Integration Layer — Pipeline orchestration
    ============================================================
@@ -19348,60 +19372,64 @@ function _xmlFormPF(cache){
   const s1a  = pf.section1a || {};
   const s1b  = pf.section1b_concentration || {};
   const s2a  = pf.section2a || {};
-  return ''
-    + '<?xml version="1.0" encoding="UTF-8"?>\n'
-    + '<edgarSubmission xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="eis_PF_Filer.xsd">\n'
-    + '  <headerData>\n'
-    + '    <submissionType>PF</submissionType>\n'
-    + '    <filerInfo>\n'
-    + '      <filer>\n'
-    + '        <credentials>\n'
-    + '          <cik>[FILL: 10-digit CIK]</cik>\n'
-    + '          <ccc>[FILL: CCC]</ccc>\n'
-    + '        </credentials>\n'
-    + '        <flags>\n'
-    + '          <returnCopyFlag>true</returnCopyFlag>\n'
-    + '          <overrideInternetFlag>false</overrideInternetFlag>\n'
-    + '        </flags>\n'
-    + '      </filer>\n'
-    + '    </filerInfo>\n'
-    + '    <periodOfReport>' + _xesc(_xDate(meta.asOf)) + '</periodOfReport>\n'
-    + '    <reportingFrequency>Q</reportingFrequency>\n'
-    + '  </headerData>\n'
-    + '  <formData>\n'
-    + '    <formPfData>\n'
-    + '      <section1a>\n'
-    + '        ' + _xEl('adviserName', _xesc(s1a.adviserName || meta.adviserName || '[FILL: adviser legal name]')) + '\n'
-    + '        ' + _xEl('adviserSecFileNumber', _xesc(s1a.adviserSecFileNumber || '[FILL: 801-XXXXXX]')) + '\n'
-    + '        ' + _xEl('adviserCrdNumber', _xesc(s1a.adviserCrd || '[FILL: CRD]')) + '\n'
-    + '        ' + _xEl('reportingFundName', _xesc(s1a.fundName || meta.fundName || '[FILL: fund legal name]')) + '\n'
-    + '        ' + _xEl('reportingFundLei', _xesc(s1a.fundLei || '[FILL: 20-char LEI]')) + '\n'
-    + '        ' + _xEl('fundType', 'PRIVATE_CREDIT_FUND') + '\n'
-    + '      </section1a>\n'
-    + '      <section1b>\n'
-    + '        ' + _xEl('grossAssetValue', _xNum(s1b.totalAssets || meta.fundNAV)) + '\n'
-    + '        ' + _xEl('netAssetValue', _xNum(meta.fundNAV)) + '\n'
-    + '        <borrowerConcentration>\n'
-    +          (s1b.byBorrower || []).map(b => ''
-    +            + '          <borrower>\n'
-    +            + '            ' + _xEl('borrowerName', _xesc(b.label)) + '\n'
-    +            + '            ' + _xEl('drawnAmount', _xNum(b.amount)) + '\n'
-    +            + '            ' + _xEl('percentOfPortfolio', _xNum(b.pct)) + '\n'
-    +            + '          </borrower>\n'
-    +          ).join('')
-    + '        </borrowerConcentration>\n'
-    + '      </section1b>\n'
-    + '      <section2a>\n'
-    + '        ' + _xEl('aggregateGrossExposure', _xNum(s2a.grossExposure || 0)) + '\n'
-    + '        ' + _xEl('aggregateNetExposure', _xNum(s2a.netExposure || 0)) + '\n'
-    + '        ' + _xEl('portfolioLiquidityDays', _xNum(s2a.liquidityDays || 90)) + '\n'
-    + '        ' + _xEl('valueAtRisk1M', _xNum(s2a.var1m || 0)) + '\n'
-    + '        ' + _xEl('reportingCurrency', 'USD') + '\n'
-    + '      </section2a>\n'
-    + '      <disclaimer>Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. This is a draft filing prepared from portfolio data. Complete CIK, CCC, LEI, and adviser identifiers before submission via EDGAR Online Forms.</disclaimer>\n'
-    + '    </formPfData>\n'
-    + '  </formData>\n'
-    + '</edgarSubmission>\n';
+  // Extract the per-borrower block first — keeps the outer template readable
+  // and sidesteps the "leading + inside .map() body" trap that broke this
+  // function's earlier version (SyntaxError at 19415).
+  const borrowerXml = (s1b.byBorrower || []).map(b => (
+    '          <borrower>\n' +
+    '            ' + _xEl('borrowerName', _xesc(b.label)) + '\n' +
+    '            ' + _xEl('drawnAmount', _xNum(b.amount)) + '\n' +
+    '            ' + _xEl('percentOfPortfolio', _xNum(b.pct)) + '\n' +
+    '          </borrower>\n'
+  )).join('');
+  return '' +
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<edgarSubmission xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="eis_PF_Filer.xsd">\n' +
+    '  <headerData>\n' +
+    '    <submissionType>PF</submissionType>\n' +
+    '    <filerInfo>\n' +
+    '      <filer>\n' +
+    '        <credentials>\n' +
+    '          <cik>[FILL: 10-digit CIK]</cik>\n' +
+    '          <ccc>[FILL: CCC]</ccc>\n' +
+    '        </credentials>\n' +
+    '        <flags>\n' +
+    '          <returnCopyFlag>true</returnCopyFlag>\n' +
+    '          <overrideInternetFlag>false</overrideInternetFlag>\n' +
+    '        </flags>\n' +
+    '      </filer>\n' +
+    '    </filerInfo>\n' +
+    '    <periodOfReport>' + _xesc(_xDate(meta.asOf)) + '</periodOfReport>\n' +
+    '    <reportingFrequency>Q</reportingFrequency>\n' +
+    '  </headerData>\n' +
+    '  <formData>\n' +
+    '    <formPfData>\n' +
+    '      <section1a>\n' +
+    '        ' + _xEl('adviserName', _xesc(s1a.adviserName || meta.adviserName || '[FILL: adviser legal name]')) + '\n' +
+    '        ' + _xEl('adviserSecFileNumber', _xesc(s1a.adviserSecFileNumber || '[FILL: 801-XXXXXX]')) + '\n' +
+    '        ' + _xEl('adviserCrdNumber', _xesc(s1a.adviserCrd || '[FILL: CRD]')) + '\n' +
+    '        ' + _xEl('reportingFundName', _xesc(s1a.fundName || meta.fundName || '[FILL: fund legal name]')) + '\n' +
+    '        ' + _xEl('reportingFundLei', _xesc(s1a.fundLei || '[FILL: 20-char LEI]')) + '\n' +
+    '        ' + _xEl('fundType', 'PRIVATE_CREDIT_FUND') + '\n' +
+    '      </section1a>\n' +
+    '      <section1b>\n' +
+    '        ' + _xEl('grossAssetValue', _xNum(s1b.totalAssets || meta.fundNAV)) + '\n' +
+    '        ' + _xEl('netAssetValue', _xNum(meta.fundNAV)) + '\n' +
+    '        <borrowerConcentration>\n' +
+             borrowerXml +
+    '        </borrowerConcentration>\n' +
+    '      </section1b>\n' +
+    '      <section2a>\n' +
+    '        ' + _xEl('aggregateGrossExposure', _xNum(s2a.grossExposure || 0)) + '\n' +
+    '        ' + _xEl('aggregateNetExposure', _xNum(s2a.netExposure || 0)) + '\n' +
+    '        ' + _xEl('portfolioLiquidityDays', _xNum(s2a.liquidityDays || 90)) + '\n' +
+    '        ' + _xEl('valueAtRisk1M', _xNum(s2a.var1m || 0)) + '\n' +
+    '        ' + _xEl('reportingCurrency', 'USD') + '\n' +
+    '      </section2a>\n' +
+    '      <disclaimer>Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. This is a draft filing prepared from portfolio data. Complete CIK, CCC, LEI, and adviser identifiers before submission via EDGAR Online Forms.</disclaimer>\n' +
+    '    </formPfData>\n' +
+    '  </formData>\n' +
+    '</edgarSubmission>\n';
 }
 
 // AIFMD Annex IV — ESMA reporting template.
@@ -19414,61 +19442,64 @@ function _xmlAifmdAnnexIV(cache){
   const bySec = conc.bySector || [];
   const byGeo = conc.byGeography || [];
   const byInst= conc.byInstrumentType || [];
-  return ''
-    + '<?xml version="1.0" encoding="UTF-8"?>\n'
-    + '<AIFReportingInfo xmlns="urn:esma:aif:v1.2" ReportingType="Q" ReportingPeriodType="Q4"\n'
-    + '                  ReportingPeriodStartDate="' + _xesc(_xDate(meta.periodStart)) + '"\n'
-    + '                  ReportingPeriodEndDate="' + _xesc(_xDate(meta.asOf)) + '"\n'
-    + '                  AIFMIdentifier="[FILL: AIFM LEI]" AIFMName="[FILL: AIFM name]">\n'
-    + '  <AIFRecordInfo>\n'
-    + '    ' + _xEl('AIFDescription', _xesc(meta.fundName || '[FILL: AIF legal name]')) + '\n'
-    + '    ' + _xEl('AIFIdentifier', _xesc(meta.fundLei || '[FILL: AIF LEI]')) + '\n'
-    + '    ' + _xEl('AIFReportingObligationCode', 'HIGH') + '\n'
-    + '    <AIFPrincipalInfo>\n'
-    + '      ' + _xEl('AIFMainStrategy', 'PRIVATE_CREDIT') + '\n'
-    + '      ' + _xEl('AIFPredominantAIFType', 'PE_FUND') + '\n'
-    + '      ' + _xEl('AIFAum', _xNum(meta.fundNAV || 0)) + '\n'
-    + '      ' + _xEl('AIFBaseCurrency', meta.reportingCcy || 'EUR') + '\n'
-    + '      <PrincipalMarkets>\n'
-    +        byGeo.slice(0,5).map((g,i) => ''
-    +          + '        <PrincipalMarket>\n'
-    +          + '          ' + _xEl('Ranking', String(i+1)) + '\n'
-    +          + '          ' + _xEl('MarketIdentifier', _xesc(g.label)) + '\n'
-    +          + '          ' + _xEl('AggregateValue', _xNum(g.amount)) + '\n'
-    +          + '        </PrincipalMarket>\n'
-    +        ).join('')
-    + '      </PrincipalMarkets>\n'
-    + '      <PrincipalInstruments>\n'
-    +        byInst.slice(0,5).map((it,i) => ''
-    +          + '        <PrincipalInstrument>\n'
-    +          + '          ' + _xEl('Ranking', String(i+1)) + '\n'
-    +          + '          ' + _xEl('SubAssetType', _xesc(it.label)) + '\n'
-    +          + '          ' + _xEl('AggregateValue', _xNum(it.amount)) + '\n'
-    +          + '        </PrincipalInstrument>\n'
-    +        ).join('')
-    + '      </PrincipalInstruments>\n'
-    + '    </AIFPrincipalInfo>\n'
-    + '    <AIFExposures>\n'
-    + '      ' + _xEl('AIFRegulatoryAum', _xNum(aif.regulatoryAum || meta.fundNAV || 0)) + '\n'
-    +        bySec.map(s => ''
-    +          + '      <SectorExposure>\n'
-    +          + '        ' + _xEl('Sector', _xesc(s.label)) + '\n'
-    +          + '        ' + _xEl('Value', _xNum(s.amount)) + '\n'
-    +          + '        ' + _xEl('PercentOfNav', _xNum(s.pct)) + '\n'
-    +          + '      </SectorExposure>\n'
-    +        ).join('')
-    + '    </AIFExposures>\n'
-    + '    <AIFLiquidityRisk>\n'
-    + '      ' + _xEl('PortfolioLiquidityProfileDays', _xNum(aif.liquidityDays || 180)) + '\n'
-    + '      ' + _xEl('InvestorLiquidityProfileDays', _xNum(aif.investorLiquidityDays || 365)) + '\n'
-    + '    </AIFLiquidityRisk>\n'
-    + '    <AIFLeverage>\n'
-    + '      ' + _xEl('LeverageMethodGross', _xNum(aif.leverageGross || 0)) + '\n'
-    + '      ' + _xEl('LeverageMethodCommitment', _xNum(aif.leverageCommitment || 0)) + '\n'
-    + '    </AIFLeverage>\n'
-    + '  </AIFRecordInfo>\n'
-    + '  <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft filing. Populate AIFM/AIF LEI identifiers before submission via national NCA portal. -->\n'
-    + '</AIFReportingInfo>\n';
+  const marketsXml = byGeo.slice(0,5).map((g,i) => (
+    '        <PrincipalMarket>\n' +
+    '          ' + _xEl('Ranking', String(i+1)) + '\n' +
+    '          ' + _xEl('MarketIdentifier', _xesc(g.label)) + '\n' +
+    '          ' + _xEl('AggregateValue', _xNum(g.amount)) + '\n' +
+    '        </PrincipalMarket>\n'
+  )).join('');
+  const instrumentsXml = byInst.slice(0,5).map((it,i) => (
+    '        <PrincipalInstrument>\n' +
+    '          ' + _xEl('Ranking', String(i+1)) + '\n' +
+    '          ' + _xEl('SubAssetType', _xesc(it.label)) + '\n' +
+    '          ' + _xEl('AggregateValue', _xNum(it.amount)) + '\n' +
+    '        </PrincipalInstrument>\n'
+  )).join('');
+  const sectorsXml = bySec.map(s => (
+    '      <SectorExposure>\n' +
+    '        ' + _xEl('Sector', _xesc(s.label)) + '\n' +
+    '        ' + _xEl('Value', _xNum(s.amount)) + '\n' +
+    '        ' + _xEl('PercentOfNav', _xNum(s.pct)) + '\n' +
+    '      </SectorExposure>\n'
+  )).join('');
+  return '' +
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<AIFReportingInfo xmlns="urn:esma:aif:v1.2" ReportingType="Q" ReportingPeriodType="Q4"\n' +
+    '                  ReportingPeriodStartDate="' + _xesc(_xDate(meta.periodStart)) + '"\n' +
+    '                  ReportingPeriodEndDate="' + _xesc(_xDate(meta.asOf)) + '"\n' +
+    '                  AIFMIdentifier="[FILL: AIFM LEI]" AIFMName="[FILL: AIFM name]">\n' +
+    '  <AIFRecordInfo>\n' +
+    '    ' + _xEl('AIFDescription', _xesc(meta.fundName || '[FILL: AIF legal name]')) + '\n' +
+    '    ' + _xEl('AIFIdentifier', _xesc(meta.fundLei || '[FILL: AIF LEI]')) + '\n' +
+    '    ' + _xEl('AIFReportingObligationCode', 'HIGH') + '\n' +
+    '    <AIFPrincipalInfo>\n' +
+    '      ' + _xEl('AIFMainStrategy', 'PRIVATE_CREDIT') + '\n' +
+    '      ' + _xEl('AIFPredominantAIFType', 'PE_FUND') + '\n' +
+    '      ' + _xEl('AIFAum', _xNum(meta.fundNAV || 0)) + '\n' +
+    '      ' + _xEl('AIFBaseCurrency', meta.reportingCcy || 'EUR') + '\n' +
+    '      <PrincipalMarkets>\n' +
+           marketsXml +
+    '      </PrincipalMarkets>\n' +
+    '      <PrincipalInstruments>\n' +
+           instrumentsXml +
+    '      </PrincipalInstruments>\n' +
+    '    </AIFPrincipalInfo>\n' +
+    '    <AIFExposures>\n' +
+    '      ' + _xEl('AIFRegulatoryAum', _xNum(aif.regulatoryAum || meta.fundNAV || 0)) + '\n' +
+           sectorsXml +
+    '    </AIFExposures>\n' +
+    '    <AIFLiquidityRisk>\n' +
+    '      ' + _xEl('PortfolioLiquidityProfileDays', _xNum(aif.liquidityDays || 180)) + '\n' +
+    '      ' + _xEl('InvestorLiquidityProfileDays', _xNum(aif.investorLiquidityDays || 365)) + '\n' +
+    '    </AIFLiquidityRisk>\n' +
+    '    <AIFLeverage>\n' +
+    '      ' + _xEl('LeverageMethodGross', _xNum(aif.leverageGross || 0)) + '\n' +
+    '      ' + _xEl('LeverageMethodCommitment', _xNum(aif.leverageCommitment || 0)) + '\n' +
+    '    </AIFLeverage>\n' +
+    '  </AIFRecordInfo>\n' +
+    '  <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft filing. Populate AIFM/AIF LEI identifiers before submission via national NCA portal. -->\n' +
+    '</AIFReportingInfo>\n';
 }
 
 // FR Y-14Q Schedule H.1 — Fed corporate loan schedule.
@@ -19477,73 +19508,75 @@ function _xmlAifmdAnnexIV(cache){
 function _xmlFRY14QH1(cache){
   const meta = cache.meta || {};
   const rows = (cache.y14q && cache.y14q.rows) || [];
-  return ''
-    + '<?xml version="1.0" encoding="UTF-8"?>\n'
-    + '<FRY14Q Schedule="H.1" ReportingDate="' + _xesc(_xDate(meta.asOf)) + '"\n'
-    + '        RSSDId="[FILL: 10-digit RSSD ID]" BHC="[FILL: BHC name]">\n'
-    +   rows.map(r => ''
-    +     + '  <CorporateLoan>\n'
-    +     + '    ' + _xEl('CustomerId', _xesc(r.obligorId || r.obligorName)) + '\n'
-    +     + '    ' + _xEl('ObligorName', _xesc(r.obligorName)) + '\n'
-    +     + '    ' + _xEl('NAICSCode', _xesc(r.naics || '')) + '\n'
-    +     + '    ' + _xEl('IndustryDescription', _xesc(r.industry)) + '\n'
-    +     + '    ' + _xEl('CountryCode', _xesc(r.geography)) + '\n'
-    +     + '    ' + _xEl('OriginalCommitmentAmount', _xNum(r.commitment)) + '\n'
-    +     + '    ' + _xEl('CommittedExposureAmount', _xNum(r.commitment)) + '\n'
-    +     + '    ' + _xEl('UtilizedExposureAmount', _xNum(r.drawn)) + '\n'
-    +     + '    ' + _xEl('LineReportedOnFRY9C', 'Y') + '\n'
-    +     + '    ' + _xEl('InterestRatePct', _xNum(r.couponPct)) + '\n'
-    +     + '    ' + _xEl('MaturityDate', _xesc(_xDate(r.maturity))) + '\n'
-    +     + '    ' + _xEl('ProbabilityOfDefault', _xNum(r.pd)) + '\n'
-    +     + '    ' + _xEl('LossGivenDefault', _xNum(r.lgd)) + '\n'
-    +     + '    ' + _xEl('ExposureAtDefault', _xNum(r.ead)) + '\n'
-    +     + '    ' + _xEl('CreditRating', _xesc(r.eclStage)) + '\n'
-    +     + '    ' + _xEl('CovenantBreachFlag', r.covenantBreach ? 'Y' : 'N') + '\n'
-    +     + '  </CorporateLoan>\n'
-    +   ).join('')
-    + '  <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft template. Fed submission is fixed-width flat file; this XML is for internal review + ETL. -->\n'
-    + '</FRY14Q>\n';
+  const loansXml = rows.map(r => (
+    '  <CorporateLoan>\n' +
+    '    ' + _xEl('CustomerId', _xesc(r.obligorId || r.obligorName)) + '\n' +
+    '    ' + _xEl('ObligorName', _xesc(r.obligorName)) + '\n' +
+    '    ' + _xEl('NAICSCode', _xesc(r.naics || '')) + '\n' +
+    '    ' + _xEl('IndustryDescription', _xesc(r.industry)) + '\n' +
+    '    ' + _xEl('CountryCode', _xesc(r.geography)) + '\n' +
+    '    ' + _xEl('OriginalCommitmentAmount', _xNum(r.commitment)) + '\n' +
+    '    ' + _xEl('CommittedExposureAmount', _xNum(r.commitment)) + '\n' +
+    '    ' + _xEl('UtilizedExposureAmount', _xNum(r.drawn)) + '\n' +
+    '    ' + _xEl('LineReportedOnFRY9C', 'Y') + '\n' +
+    '    ' + _xEl('InterestRatePct', _xNum(r.couponPct)) + '\n' +
+    '    ' + _xEl('MaturityDate', _xesc(_xDate(r.maturity))) + '\n' +
+    '    ' + _xEl('ProbabilityOfDefault', _xNum(r.pd)) + '\n' +
+    '    ' + _xEl('LossGivenDefault', _xNum(r.lgd)) + '\n' +
+    '    ' + _xEl('ExposureAtDefault', _xNum(r.ead)) + '\n' +
+    '    ' + _xEl('CreditRating', _xesc(r.eclStage)) + '\n' +
+    '    ' + _xEl('CovenantBreachFlag', r.covenantBreach ? 'Y' : 'N') + '\n' +
+    '  </CorporateLoan>\n'
+  )).join('');
+  return '' +
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<FRY14Q Schedule="H.1" ReportingDate="' + _xesc(_xDate(meta.asOf)) + '"\n' +
+    '        RSSDId="[FILL: 10-digit RSSD ID]" BHC="[FILL: BHC name]">\n' +
+       loansXml +
+    '  <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft template. Fed submission is fixed-width flat file; this XML is for internal review + ETL. -->\n' +
+    '</FRY14Q>\n';
 }
 
 // N-PORT — SEC Form N-PORT for registered investment companies.
 function _xmlNPORT(cache){
   const meta = cache.meta || {};
   const holdings = (cache.nport && cache.nport.itemC_holdings) || [];
-  return ''
-    + '<?xml version="1.0" encoding="UTF-8"?>\n'
-    + '<edgarSubmission xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="eis_NPORT_Filer.xsd">\n'
-    + '  <headerData>\n'
-    + '    <submissionType>NPORT-P</submissionType>\n'
-    + '    <periodOfReport>' + _xesc(_xDate(meta.asOf)) + '</periodOfReport>\n'
-    + '  </headerData>\n'
-    + '  <formData>\n'
-    + '    <genInfo>\n'
-    + '      ' + _xEl('regName', _xesc(meta.fundName || '[FILL: registrant name]')) + '\n'
-    + '      ' + _xEl('regLei', '[FILL: 20-char LEI]') + '\n'
-    + '    </genInfo>\n'
-    + '    <invstOrSecs>\n'
-    +      holdings.map(h => ''
-    +        + '      <invstOrSec>\n'
-    +        + '        ' + _xEl('name', _xesc(h.name)) + '\n'
-    +        + '        ' + _xEl('lei', _xesc(h.identifier)) + '\n'
-    +        + '        ' + _xEl('balance', _xNum(h.principal)) + '\n'
-    +        + '        ' + _xEl('units', 'PA') + '\n'
-    +        + '        ' + _xEl('curCd', 'USD') + '\n'
-    +        + '        ' + _xEl('valUSD', _xNum(h.fairValue)) + '\n'
-    +        + '        ' + _xEl('pctVal', _xNum(h.pctVal || 0)) + '\n'
-    +        + '        ' + _xEl('assetCat', 'DBT') + '\n'
-    +        + '        ' + _xEl('fairValLevel', String(h.fairValueLevel || 3)) + '\n'
-    +        + '        <debtSec>\n'
-    +        + '          ' + _xEl('maturityDt', _xesc(_xDate(h.maturity))) + '\n'
-    +        + '          ' + _xEl('couponKind', 'Fixed') + '\n'
-    +        + '          ' + _xEl('annualizedRt', _xNum(h.couponPct)) + '\n'
-    +        + '        </debtSec>\n'
-    +        + '      </invstOrSec>\n'
-    +      ).join('')
-    + '    </invstOrSecs>\n'
-    + '    <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft filing. -->\n'
-    + '  </formData>\n'
-    + '</edgarSubmission>\n';
+  const holdingsXml = holdings.map(h => (
+    '      <invstOrSec>\n' +
+    '        ' + _xEl('name', _xesc(h.name)) + '\n' +
+    '        ' + _xEl('lei', _xesc(h.identifier)) + '\n' +
+    '        ' + _xEl('balance', _xNum(h.principal)) + '\n' +
+    '        ' + _xEl('units', 'PA') + '\n' +
+    '        ' + _xEl('curCd', 'USD') + '\n' +
+    '        ' + _xEl('valUSD', _xNum(h.fairValue)) + '\n' +
+    '        ' + _xEl('pctVal', _xNum(h.pctVal || 0)) + '\n' +
+    '        ' + _xEl('assetCat', 'DBT') + '\n' +
+    '        ' + _xEl('fairValLevel', String(h.fairValueLevel || 3)) + '\n' +
+    '        <debtSec>\n' +
+    '          ' + _xEl('maturityDt', _xesc(_xDate(h.maturity))) + '\n' +
+    '          ' + _xEl('couponKind', 'Fixed') + '\n' +
+    '          ' + _xEl('annualizedRt', _xNum(h.couponPct)) + '\n' +
+    '        </debtSec>\n' +
+    '      </invstOrSec>\n'
+  )).join('');
+  return '' +
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<edgarSubmission xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="eis_NPORT_Filer.xsd">\n' +
+    '  <headerData>\n' +
+    '    <submissionType>NPORT-P</submissionType>\n' +
+    '    <periodOfReport>' + _xesc(_xDate(meta.asOf)) + '</periodOfReport>\n' +
+    '  </headerData>\n' +
+    '  <formData>\n' +
+    '    <genInfo>\n' +
+    '      ' + _xEl('regName', _xesc(meta.fundName || '[FILL: registrant name]')) + '\n' +
+    '      ' + _xEl('regLei', '[FILL: 20-char LEI]') + '\n' +
+    '    </genInfo>\n' +
+    '    <invstOrSecs>\n' +
+         holdingsXml +
+    '    </invstOrSecs>\n' +
+    '    <!-- Generated by PCS Loan Module V4 · Build ' + _xesc((window.PCS_BUILD || '')) + '. Draft filing. -->\n' +
+    '  </formData>\n' +
+    '</edgarSubmission>\n';
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -39273,7 +39306,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.06.6</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.06.9</span>
       </div>
     </div>
     <div>
@@ -39361,17 +39394,52 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       if(on) btn._origHtml = btn.innerHTML, btn.innerHTML = '<span class="v4-login-spinner"></span> Working…';
       else if(btn._origHtml) btn.innerHTML = btn._origHtml;
     },
+    // ─── Wait for SB to be truly ready (2026-08-06) ────────────────────
+    // The old checks bailed instantly with "Database not ready" if SB or
+    // the specific auth method wasn't present. But SB.init happens on
+    // DOMContentLoaded and can take a few seconds (CDN load + probe).
+    // Now we poll up to timeoutMs with a live status update, and if SB
+    // is present but not connected we force-invoke init() first so a slow
+    // boot doesn't strand the user on the login screen.
+    async _waitForSB(methodName, timeoutMs){
+      timeoutMs = timeoutMs || 8000;
+      const started = Date.now();
+      let showedStatus = false;
+      // If SB is present but disconnected, kick init in the background.
+      if(window.SB && !window.SB.connected && typeof window.SB.init === 'function'){
+        window.SB.init().catch(err => console.warn('[gate] SB.init kicked from gate failed:', err && err.message));
+      }
+      while(Date.now() - started < timeoutMs){
+        if(window.SB && typeof window.SB[methodName] === 'function' && window.SB.connected){
+          if(showedStatus) this.status('Connected — signing you in…');
+          return true;
+        }
+        if(!showedStatus && Date.now() - started > 400){
+          showedStatus = true;
+          this.status('Connecting to database… please wait.');
+        }
+        await new Promise(r => setTimeout(r, 200));
+      }
+      return false;
+    },
     async signIn(){
       this.err(null);
       const email = document.getElementById('v4-gate-email').value.trim();
       const pw    = document.getElementById('v4-gate-pw').value;
       if(!email || !pw){ this.err('Enter email + password'); return; }
-      if(!window.SB || !window.SB.auth_signIn){ this.err('Database not ready — retry in a moment'); return; }
       this._busy('v4-gate-signin-btn', true);
-      const r = await window.SB.auth_signIn(email, pw);
-      this._busy('v4-gate-signin-btn', false);
-      if(!r.ok) this.err(r.reason || 'Sign-in failed');
-      // On success, auth_onChange fires → gate hides automatically.
+      try {
+        const ready = await this._waitForSB('auth_signIn', 8000);
+        if(!ready){
+          this.err('Database not ready after 8 seconds. Reload the page — if the problem persists, check your network.');
+          return;
+        }
+        const r = await window.SB.auth_signIn(email, pw);
+        if(!r.ok) this.err(r.reason || 'Sign-in failed');
+        // On success, auth_onChange fires → gate hides automatically.
+      } finally {
+        this._busy('v4-gate-signin-btn', false);
+      }
     },
     async signUp(){
       this.err(null);
@@ -39379,23 +39447,31 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const pw    = document.getElementById('v4-gate-pw').value;
       if(!email || !pw){ this.err('Enter email + password (min 6 chars) to create account'); return; }
       if(pw.length < 6){ this.err('Password must be at least 6 characters'); return; }
-      if(!window.SB || !window.SB.auth_signUp){ this.err('Database not ready — retry in a moment'); return; }
       this._busy('v4-gate-signup-btn', true);
-      const r = await window.SB.auth_signUp(email, pw);
-      this._busy('v4-gate-signup-btn', false);
-      if(!r.ok) this.err(r.reason || 'Sign-up failed');
-      else this.status('Account created — check your email to confirm, then sign in.');
+      try {
+        const ready = await this._waitForSB('auth_signUp', 8000);
+        if(!ready){ this.err('Database not ready after 8 seconds. Reload the page.'); return; }
+        const r = await window.SB.auth_signUp(email, pw);
+        if(!r.ok) this.err(r.reason || 'Sign-up failed');
+        else this.status('Account created — check your email to confirm, then sign in.');
+      } finally {
+        this._busy('v4-gate-signup-btn', false);
+      }
     },
     async sendMagic(){
       this.err(null);
       const email = document.getElementById('v4-gate-magic-email').value.trim();
       if(!email){ this.err('Enter email'); return; }
-      if(!window.SB || !window.SB.auth_signInWithMagicLink){ this.err('Database not ready'); return; }
       this._busy('v4-gate-magic-btn', true);
-      const r = await window.SB.auth_signInWithMagicLink(email);
-      this._busy('v4-gate-magic-btn', false);
-      if(!r.ok) this.err(r.reason || 'Failed to send magic link');
-      else this.status('Magic link sent — check your inbox. Click the link to sign in.');
+      try {
+        const ready = await this._waitForSB('auth_signInWithMagicLink', 8000);
+        if(!ready){ this.err('Database not ready after 8 seconds. Reload the page.'); return; }
+        const r = await window.SB.auth_signInWithMagicLink(email);
+        if(!r.ok) this.err(r.reason || 'Failed to send magic link');
+        else this.status('Magic link sent — check your inbox. Click the link to sign in.');
+      } finally {
+        this._busy('v4-gate-magic-btn', false);
+      }
     },
     // Password-reset flow. Uses whatever email is currently in either the
     // password-tab email input or the magic-link tab. If missing, focus the
@@ -39412,8 +39488,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         if(emailEl) emailEl.focus();
         return;
       }
-      if(!window.SB || !window.SB.auth_resetPasswordForEmail){
-        this.err('Database not ready — retry in a moment');
+      const ready = await this._waitForSB('auth_resetPasswordForEmail', 8000);
+      if(!ready){
+        this.err('Database not ready after 8 seconds. Reload the page.');
         return;
       }
       this._busy('v4-gate-forgot-btn', true);
