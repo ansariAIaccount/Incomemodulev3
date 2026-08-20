@@ -3389,8 +3389,11 @@ function splitInterestJEsByCouponPeriod(journals, inst, schedule){
   if(!Array.isArray(journals) || !journals.length) return journals;
   if(!Array.isArray(schedule) || !schedule.length) return journals;
 
-  // 1. Derive coupon period length in months.
+  // 1. Derive coupon period length.
   //    Priority: inst.couponFrequency > tranche's interestComponents[0].terms[0].tenor > default 3M
+  //    Result is expressed as periodDays (integer). "weekly" is 7 days;
+  //    monthly/quarterly/etc. round-trip through periodMonths → periodDays
+  //    isn't done — we keep monthly semantics for those via setUTCMonth.
   const freqToMonths = { monthly:1, quarterly:3, 'semi-annual':6, semi:6, semiannual:6, annual:12, yearly:12 };
   const tenorToMonths = (t) => {
     if(!t) return null;
@@ -3398,16 +3401,23 @@ function splitInterestJEsByCouponPeriod(journals, inst, schedule){
     if(!m) return null;
     return m[2] === 'Y' ? +m[1] * 12 : +m[1];
   };
-  let periodMonths =
-    freqToMonths[(inst.couponFrequency || '').toLowerCase()] ||
-    tenorToMonths(inst.tranches && inst.tranches[0] && inst.tranches[0].interestComponents &&
-                  inst.tranches[0].interestComponents[0] && inst.tranches[0].interestComponents[0].terms &&
-                  inst.tranches[0].interestComponents[0].terms[0] && inst.tranches[0].interestComponents[0].terms[0].tenor) ||
-    tenorToMonths(inst.rfr && inst.rfr.tenor) ||
-    3;   // quarterly default
-  // Bullet/at-maturity flag — skip splitting entirely
-  if(String(inst.couponFrequency || '').toLowerCase() === 'at-maturity' ||
-     String(inst.couponFrequency || '').toLowerCase() === 'bullet') return journals;
+  const freqLower = String(inst.couponFrequency || '').toLowerCase();
+  // Bullet/at-maturity flag — skip splitting entirely (JE stays at maturity date)
+  if(freqLower === 'at-maturity' || freqLower === 'bullet') return journals;
+  // Weekly special case — steps by 7 days, not by month math. All other
+  // frequencies use monthly stepping. Bail out with days-based generation
+  // when weekly, then rejoin the mainline loop below.
+  const isWeekly = (freqLower === 'weekly');
+  let periodMonths = 0;
+  if(!isWeekly){
+    periodMonths =
+      freqToMonths[freqLower] ||
+      tenorToMonths(inst.tranches && inst.tranches[0] && inst.tranches[0].interestComponents &&
+                    inst.tranches[0].interestComponents[0] && inst.tranches[0].interestComponents[0].terms &&
+                    inst.tranches[0].interestComponents[0].terms[0] && inst.tranches[0].interestComponents[0].terms[0].tenor) ||
+      tenorToMonths(inst.rfr && inst.rfr.tenor) ||
+      3;   // quarterly default
+  }
 
   // 2. Derive coupon payment dates from settle → maturity stepped by periodMonths.
   //    Payment on last day of each period. E.g. settle 2026-01-15, quarterly →
@@ -3419,11 +3429,19 @@ function splitInterestJEsByCouponPeriod(journals, inst, schedule){
   const start = new Date(settleISO + 'T00:00:00Z');
   const mat   = new Date(maturityISO + 'T00:00:00Z');
   let cursor = new Date(start);
-  cursor.setUTCMonth(cursor.getUTCMonth() + periodMonths);
+  if(isWeekly){
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  } else {
+    cursor.setUTCMonth(cursor.getUTCMonth() + periodMonths);
+  }
   while(cursor <= mat){
     paymentDates.push(cursor.toISOString().slice(0,10));
     cursor = new Date(cursor);
-    cursor.setUTCMonth(cursor.getUTCMonth() + periodMonths);
+    if(isWeekly){
+      cursor.setUTCDate(cursor.getUTCDate() + 7);
+    } else {
+      cursor.setUTCMonth(cursor.getUTCMonth() + periodMonths);
+    }
   }
   // Ensure the final period ends at maturity (in case settle+N*period doesn't line up)
   const lastMaturityISO = mat.toISOString().slice(0,10);

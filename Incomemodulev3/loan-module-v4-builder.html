@@ -3,20 +3,15 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PCS Loan Module · V4 · Build 2026.08.06.9</title>
+<title>PCS Loan Module · V4</title>
 <!-- ─── V4 build stamp ─────────────────────────────────────────────────────
      Single source of truth for the build identifier shown in the fixed
      bottom-left pill, the login card, the document title, and diagnostics.
 
-     ⚠️ CONVENTION: PCS_BUILD must be bumped to today's date (YYYY.MM.DD)
-        on EVERY code change to this file. The pill in the bottom-left
-        corner is our version-control indicator — it must reflect the date
-        of the last edit so testers can see at a glance whether they're on
-        the latest build. If you make two builds in one day, use a .N
-        suffix (e.g. '2026.08.06.9.2').
-
-     Rule of thumb: if you're editing this file, your very first edit or
-     your very last edit should be bumping PCS_BUILD below. -->
+     Build date is AUTO-DERIVED from document.lastModified (the HTML file's
+     last-modified timestamp reported by the OS/server). Any edit to this
+     file automatically updates the pill on next reload — no manual bump
+     step needed. See the derivation code in the <script> block below. -->
 <!-- ─── Storage resilience shim (2026-08-04) ────────────────────────────
      Runs BEFORE any other script so all 46+ localStorage.* callsites in
      this file get a safe wrapper. Motivation: Edge/Firefox Enhanced
@@ -113,7 +108,38 @@
 </script>
 <script>
   window.PCS_VERSION = 'V4';
-  window.PCS_BUILD   = '2026.08.06.9';   // ← BUMP ME on every code change
+  // ─── Versioning — matches Real Estate module pattern ─────────────────
+  // Format: V{N} · YYYY.MM.DD[.N]
+  //   e.g.  V4 · 2026.08.19       (first build of the day)
+  //         V4 · 2026.08.19.2     (second build same day)
+  //         V4 · 2026.08.19.3     (third build same day)
+  //
+  // The DATE part is auto-derived from document.lastModified — the HTML
+  // file's last-modified timestamp reported by the OS/server. Editing this
+  // file automatically bumps the date on next reload; no manual step.
+  //
+  // The .N SUFFIX is a manual bump for multiple deploys in the same day.
+  // Leave PCS_BUILD_SUFFIX blank for the first build; set to '.2', '.3' etc.
+  // for subsequent same-day builds where you need to force a cache-buster.
+  window.PCS_BUILD_SUFFIX = '';   // ← bump to '.2', '.3', … for extra same-day builds
+  window.PCS_BUILD = (function(){
+    const FALLBACK = '2026.08.19';
+    let dateStr = FALLBACK;
+    try {
+      // document.lastModified is a string like "MM/DD/YYYY HH:MM:SS"
+      const raw = (document.lastModified || '').trim();
+      if(raw){
+        const d = new Date(raw);
+        if(!isNaN(d.getTime())){
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          dateStr = y + '.' + m + '.' + dd;
+        }
+      }
+    } catch(_){}
+    return dateStr + (window.PCS_BUILD_SUFFIX || '');
+  })();
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -1601,6 +1627,18 @@
     display: none;
   }
   .v4-sb-item .v4-sb-badge.visible { display: inline-block; }
+  /* Disabled state — used on Lifecycle events / Cashflow / Accounting /
+     Dashboard when no deal is loaded. Click is blocked in JS by a
+     capture-phase listener that reads .is-disabled. */
+  .v4-sb-item.is-disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+    pointer-events: auto;   /* keep pointer-events so tooltip shows and JS can block */
+  }
+  .v4-sb-item.is-disabled:hover {
+    background: transparent;
+    color: var(--n-600);
+  }
   .v4-sb-spacer { flex: 1; min-height: 12px; }
   .v4-sb-footer {
     padding: 10px 6px 4px;
@@ -1683,13 +1721,24 @@
   <button class="v4-sb-item active" data-v4-tab="builder"  onclick="v4NavClick(this)">
     <i class="ti ti-notebook" aria-hidden="true"></i>Loan builder
   </button>
-  <button class="v4-sb-item" data-v4-tab="stage-1" onclick="v4NavClick(this)">
+  <!-- Lifecycle events — full page (was previously a modal). Routes through
+       v4NavClick like the other Pipeline items so it appears in the same
+       tab/section framework as Loan Builder / Cashflow / Accounting /
+       Dashboard. Disabled until a deal is loaded — see __updatePipelineNavState. -->
+  <button id="v4-sb-lifecycle" class="v4-sb-item v4-sb-needs-deal" data-needs-deal="1"
+          title="Load a deal first" data-v4-tab="lifecycle" onclick="v4NavClick(this)">
+    <i class="ti ti-list-details" aria-hidden="true"></i>Lifecycle events
+  </button>
+  <button id="v4-sb-cashflow" class="v4-sb-item v4-sb-needs-deal" data-needs-deal="1"
+          title="Load a deal first" data-v4-tab="stage-1" onclick="v4NavClick(this)">
     <i class="ti ti-timeline" aria-hidden="true"></i>Cashflow
   </button>
-  <button class="v4-sb-item" data-v4-tab="stage-2" onclick="v4NavClick(this)">
+  <button id="v4-sb-accounting" class="v4-sb-item v4-sb-needs-deal" data-needs-deal="1"
+          title="Load a deal first" data-v4-tab="stage-2" onclick="v4NavClick(this)">
     <i class="ti ti-building-bank" aria-hidden="true"></i>Accounting
   </button>
-  <button class="v4-sb-item" data-v4-tab="dashboard" onclick="v4NavClick(this)">
+  <button id="v4-sb-dashboard" class="v4-sb-item v4-sb-needs-deal" data-needs-deal="1"
+          title="Load a deal first" data-v4-tab="dashboard" onclick="v4NavClick(this)">
     <i class="ti ti-layout-dashboard" aria-hidden="true"></i>Dashboard
   </button>
 
@@ -2306,6 +2355,12 @@
           <span class="tab-sub" id="tabsub-builder">Deal · facility · tranches · fees</span>
         </span>
       </button>
+      <!-- Lifecycle Events — sidebar-only nav (kept hidden here so the tab
+           router can route to it via v4NavClick → .tab-btn[data-tab="lifecycle"]). -->
+      <button class="tab-btn" data-tab="lifecycle" role="tab" aria-selected="false" style="display:none;">
+        <span class="tab-icon"><span class="material-icons-outlined">list_alt</span></span>
+        <span class="tab-text"><span class="tab-label">Lifecycle Events</span></span>
+      </button>
       <button class="tab-btn" data-tab="stage-1" role="tab" aria-selected="false">
         <span class="tab-icon"><span class="material-icons-outlined">timeline</span></span>
         <span class="tab-text">
@@ -2463,6 +2518,20 @@
        top-level `details.builder-section` block from step 6b (0.5px zinc border,
        12px radius, hover reveal). */
     .builder-section { scroll-margin-top: 180px; }
+
+    /* ─── Post-save section ordering (2026-08-19) ─────────────────────
+       Guarantors, Reporting requirements, Commitment lifecycle, and
+       Access & assignments only become relevant AFTER the deal is
+       persisted. Push them to the bottom via flex-order so the
+       primary loan-building sections (Facility · Tranches · Fees ·
+       Covenants) sit at the top where the user works.
+       Making #builder's inner container flex-column is enough — every
+       details child becomes a flex item and honours `order`. */
+    section#builder > div { display: flex; flex-direction: column; }
+    #b-guarantors-section  { order: 100; }
+    #b-reporting-section   { order: 101; }
+    #b-commitment-section  { order: 102; }
+    #b-access-section      { order: 103; }
   /* Stage 2 → Stage 1 manual sync button.
      Default state = neutral outline. "needs sync" state = amber background +
      pulsing shadow ring to grab attention without being annoying. */
@@ -2493,6 +2562,46 @@
     .builder-section > summary::after { font-family:"Material Icons Outlined"; font-size:22px; color:#9ca3af; margin-left:auto; }
     .b-input { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: white; transition: all 0.15s; }
     .b-input:focus { border-color: #21295C; outline: 0; box-shadow: 0 0 0 3px rgba(33,41,92,0.1); }
+    /* ─── Dropdown chevron on EVERY <select> — SHORTHAND version.
+       Uses the `background:` shorthand !important so ALL sub-properties
+       (image, repeat, position, size, color) are set atomically in one
+       declaration. This prevents the "chevron tiles across the field"
+       bug where a competing rule was resetting `background-repeat` while
+       our !important longhands were being applied individually.
+       Encoding: URL-encoded angle brackets (%3c/%3e) so Edge/Firefox/
+       Chrome all render the inline SVG data URL. */
+    /* Selector list: `body.v4-sidebar select, body select, select` gives us
+       specificity 0,1,2 (from the body.v4-sidebar arm) so this wins over
+       `.b-input { background: var(--n-0) !important }` (specificity 0,1,0
+       + !important) which was zeroing out our background-image in the
+       default state. `select:focus` (0,1,1) was beating `.b-input` on its
+       own, which is why the chevron was appearing ONLY on focus. */
+    body.v4-sidebar select,
+    body select,
+    select {
+      appearance: none !important;
+      -webkit-appearance: none !important;
+      -moz-appearance: none !important;
+      background: #fff url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3e%3cpath d='M3 4.5L6 7.5L9 4.5' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e") no-repeat right 8px center / 12px 12px !important;
+      padding-right: 26px !important;
+      cursor: pointer;
+    }
+    body.v4-sidebar select:focus,
+    body select:focus,
+    select:focus {
+      background: #fff url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3e%3cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2321295C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e") no-repeat right 8px center / 12px 12px !important;
+    }
+    /* Suppress native IE/legacy dropdown arrow */
+    select::-ms-expand { display: none !important; }
+    /* Multi-select lists get native rendering back */
+    select[multiple] {
+      appearance: auto !important;
+      -webkit-appearance: auto !important;
+      -moz-appearance: auto !important;
+      background: #fff !important;
+      padding-right: 10px !important;
+      cursor: default;
+    }
     .b-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #6b7280; margin-bottom: 5px; display: block; }
     /* v3 — required-field marker. Red asterisk after the label text, used on
        any field that the saveDeal() pre-flight validator checks against. */
@@ -2917,13 +3026,24 @@
     <details class="builder-section" open>
       <summary>
         <div class="builder-section-icon icon-emerald"><span class="material-icons-outlined" style="font-size:20px;">account_balance</span></div>
-        <div><div class="builder-section-title">Facility Setup</div><div class="builder-section-subtitle">Total commitment, availability period, day basis, holiday calendar</div></div>
+        <div><div class="builder-section-title">Facility Setup</div><div class="builder-section-subtitle">Total commitment, availability period, day count convention, holiday calendar</div></div>
       </summary>
       <div class="builder-section-body">
         <div class="b-field-grid">
-          <div><label class="b-label required">Total Commitment</label><input id="b-commitment" type="number" min="0" step="100000" placeholder="e.g. 25000000" class="b-input"/></div>
+          <div>
+            <label class="b-label required">Total Commitment</label>
+            <!-- Text input with live thousands-separator formatting (2026-08-19).
+                 Real value lives in the hidden #b-commitment number input the
+                 engine reads; oninput syncs the two so digit-only characters
+                 flow to the engine while the visible field always shows commas
+                 (e.g. 25,000,000). Placeholder shows the format so users can
+                 tell 2.5M / 25M / 250M apart at a glance. -->
+            <input id="b-commitment-display" type="text" inputmode="numeric" placeholder="e.g. 25,000,000" class="b-input" style="font-variant-numeric:tabular-nums;"
+                   oninput="(function(el){var digits=el.value.replace(/[^0-9]/g,'');var n=digits?parseInt(digits,10):0;el.value=digits?n.toLocaleString('en-US'):'';var hidden=document.getElementById('b-commitment');if(hidden){hidden.value=digits;hidden.dispatchEvent(new Event('input',{bubbles:true}));hidden.dispatchEvent(new Event('change',{bubbles:true}));}})(this)"/>
+            <input id="b-commitment" type="hidden"/>
+          </div>
           <div><label class="b-label">Availability End</label><input id="b-avail-end" type="date" class="b-input"/></div>
-          <div><label class="b-label">Day Basis</label>
+          <div><label class="b-label">Day Count Convention</label>
             <select id="b-day-basis" class="b-input"><option value="ACT/360">ACT/360</option><option value="ACT/365">ACT/365</option><option value="ACT/ACT">ACT/ACT</option><option value="30/360">30/360</option><option value="30E/360">30E/360</option></select>
           </div>
           <div><label class="b-label">Holiday Calendar</label>
@@ -2934,6 +3054,17 @@
           </div>
           <div><label class="b-label">Facility Type</label>
             <select id="b-facility-type" class="b-input" onchange="(function(sel){var bb=document.getElementById('b-bb-section');if(bb){var isBB=sel.value==='revolvingBorrowingBase';bb.style.display=isBB?'':'none';bb.open=isBB;if(isBB && typeof window.__renderBBSubPanels==='function')window.__renderBBSubPanels();}})(this)"><option value="termLoan">Term Loan</option><option value="revolver">Revolving Credit Facility</option><option value="delayedDraw">Delayed-Draw Term Loan</option><option value="revolvingBorrowingBase">Revolving Borrowing Base (livestock / commodities)</option></select>
+          </div>
+          <div>
+            <label class="b-label" title="How often the daily-accrued interest is posted to the GL as a journal entry. Daily accrual itself never changes — this only controls posting frequency.">Interest Accrual Period</label>
+            <select id="b-interest-accrual-freq" class="b-input" title="How often the daily-accrued interest is posted to the GL as a JE. Same for all tranches on this deal.">
+              <option value="weekly">Weekly</option>
+              <option value="monthly" selected>Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="semi-annual">Semi-annual</option>
+              <option value="annual">Annual</option>
+              <option value="at-maturity">At maturity (bullet)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -2957,7 +3088,10 @@
       <summary>
         <div class="builder-section-icon icon-rose"><span class="material-icons-outlined" style="font-size:20px;">request_quote</span></div>
         <div style="flex:1;"><div class="builder-section-title">Fees <span id="fees-count-chip" style="font-size:10px; font-weight:600; background:#ffe4e6; color:#9f1239; padding:2px 8px; border-radius:10px; margin-left:6px;">0</span></div><div class="builder-section-subtitle">Fix · Float · % over interest component · % over funded / unfunded balances</div></div>
-        <button id="btn-add-fee" class="add-btn-pill" onclick="event.stopPropagation()"><i class="ti ti-plus" aria-hidden="true"></i>Add fee</button>
+        <!-- Add fee routes to the centralized Lifecycle Events form. Existing
+             fees still render below (read-only lite) but new entry is
+             centralized so users have one place to add ALL business events. -->
+        <button id="btn-add-fee" class="add-btn-pill" onclick="event.stopPropagation(); document.querySelector('.v4-sb-item[data-v4-tab=\'lifecycle\']')?.click(); setTimeout(()=>window.__leOpenEventForm&&window.__leOpenEventForm('fee'),120);"><i class="ti ti-plus" aria-hidden="true"></i>Add fee (in Lifecycle Events)</button>
       </summary>
       <div class="builder-section-body">
         <div id="fees-container" style="display:grid; gap:10px;"></div>
@@ -3027,6 +3161,108 @@
   </div>
 </section>
 
+<!-- ═══════════════════════════════════════════════════════════════
+     Lifecycle Events — full page (previously a modal). Sits between the
+     Loan Builder and Cashflow pages both in DOM order and sidebar order.
+     Renders when v4NavClick routes to tab-btn[data-tab="lifecycle"], and
+     the pipeline nav gate keeps it disabled until a deal is loaded.
+     Aggregates drawdowns / paydowns / fees from B.tranches + B.fees plus
+     every Tier 1 / Tier 2 transtype from currentInstrument().principalSchedule.
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="lifecycle" class="stage-card stage-tab-content p-5">
+  <!-- v4 hero — matches Loan Builder / Cashflow / Accounting hero pattern -->
+  <div class="builder-hero" style="display:flex; align-items:flex-start; gap:14px; padding:14px 16px; margin-bottom:14px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:12px;">
+    <div style="flex-shrink:0; width:36px; height:36px; border-radius:10px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+      <i class="ti ti-list-details" aria-hidden="true" style="font-size:20px;"></i>
+    </div>
+    <div style="flex:1; min-width:0;">
+      <div style="font-size:10.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">Loan lifecycle events</div>
+      <h2 style="font-size:18px; font-weight:700; color:var(--n-900); letter-spacing:-0.3px; margin:2px 0 0;">Transaction Types</h2>
+      <p style="font-size:12px; color:var(--n-500); margin:4px 0 0; line-height:1.55;">Every business event on this deal in one place — drawdowns, paydowns, fees, and every Tier 1 / Tier 2 lifecycle transtype. Click a row to edit at the source.</p>
+    </div>
+    <div id="le-kpi-active" style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:96px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Active events</div>
+      <div style="font-size:20px; font-weight:700; color:var(--n-900); font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+    <div id="le-kpi-pending" style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:96px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Pending review</div>
+      <div style="font-size:20px; font-weight:700; color:#B45309; font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+  </div>
+
+  <!-- Content panel — search / add / tranche tabs / table -->
+  <div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; overflow:visible; position:relative;">
+    <!-- Toolbar -->
+    <div style="padding:12px 16px; border-bottom:0.5px solid var(--n-200); display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div style="position:relative; flex:1; min-width:220px; max-width:340px;">
+        <i class="ti ti-search" style="position:absolute; left:9px; top:50%; transform:translateY(-50%); font-size:13px; color:var(--n-400);"></i>
+        <input id="le-filter" type="text" placeholder="Filter transaction types..." oninput="window.__leRender && window.__leRender()"
+               style="width:100%; padding:6px 10px 6px 28px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; background:var(--n-0);"/>
+      </div>
+      <div style="flex:1;"></div>
+      <button onclick="window.__leOpenAddPicker && window.__leOpenAddPicker()" class="mat-btn primary !py-1.5 !px-3" style="font-size:12px; background:var(--indigo-600,#4F46E5); color:white; border-color:var(--indigo-600,#4F46E5); position:relative;">
+        <i class="ti ti-plus" style="font-size:14px;"></i> Add Business Event
+      </button>
+      <!-- Picker dropdown — absolutely positioned inside the panel -->
+      <div id="le-add-picker" style="display:none; position:absolute; right:16px; top:56px; width:340px; max-height:60vh; overflow-y:auto; background:var(--n-0); border:0.5px solid var(--n-300); border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,0.15); z-index:20; padding:8px;"></div>
+    </div>
+
+    <!-- Tranche tab strip (hidden for single-tranche deals) -->
+    <div id="le-tranche-tabs" style="display:none; padding:8px 16px 0; border-bottom:0.5px solid var(--n-200);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600; margin-bottom:4px;">Tranche</div>
+      <div id="le-tranche-tabs-strip" style="display:flex; gap:2px;"></div>
+    </div>
+
+    <!-- Inline event-entry form. Opened by __leOpenEventForm(key), populated
+         from EVENT_FORMS[key] schema, closed by Cancel/Save. Sits above the
+         events table so the user's context stays visible. -->
+    <div id="le-form-panel" style="display:none; padding:14px 16px; border-bottom:0.5px solid var(--n-200); background:#F8FAFC;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+        <span id="le-form-icon" style="width:26px; height:26px; border-radius:6px; background:var(--indigo-50,#EEF2FF); color:var(--indigo-700,#4338CA); display:inline-flex; align-items:center; justify-content:center;"><i class="ti ti-plus" style="font-size:14px;"></i></span>
+        <div style="flex:1;">
+          <div id="le-form-title" style="font-size:13px; font-weight:700; color:var(--n-900);">New event</div>
+          <div id="le-form-hint" style="font-size:10.5px; color:var(--n-500); margin-top:1px;"></div>
+        </div>
+        <button type="button" onclick="window.__leCloseForm && window.__leCloseForm()" class="mat-btn outline !py-1 !px-2" style="font-size:11px;">Cancel</button>
+        <button type="button" id="le-form-save" onclick="window.__leSubmitForm && window.__leSubmitForm()" class="mat-btn primary !py-1 !px-3" style="font-size:11px; background:var(--indigo-600,#4F46E5); color:white; border-color:var(--indigo-600,#4F46E5);">
+          <i class="ti ti-check" style="font-size:13px;"></i>Save event
+        </button>
+      </div>
+      <div id="le-form-fields" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px;"></div>
+      <div id="le-form-error" style="display:none; margin-top:8px; padding:6px 10px; background:#FEF2F2; border:0.5px solid #FCA5A5; border-radius:6px; font-size:11px; color:#991B1B;"></div>
+    </div>
+
+    <!-- Events table -->
+    <div id="le-body" style="overflow:auto; max-height:calc(100vh - 340px); min-height:280px;">
+      <div id="le-empty" class="v4-empty" style="padding:36px 20px; display:none;">
+        <div class="v4-empty-icon"><i class="ti ti-list-details" aria-hidden="true"></i></div>
+        <div class="v4-empty-title">No business events yet</div>
+        <div class="v4-empty-body">Load a deal, then click "+ Add Business Event" to add drawdowns, paydowns, fees, or Tier 1 / Tier 2 lifecycle events.</div>
+      </div>
+      <table id="le-table" style="width:100%; font-size:12px; border-collapse:collapse; display:none;">
+        <thead style="position:sticky; top:0; background:var(--n-50); z-index:1;">
+          <tr style="border-bottom:0.5px solid var(--n-200);">
+            <th style="text-align:left; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Event name</th>
+            <th style="text-align:left; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Transaction type</th>
+            <th style="text-align:left; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Category</th>
+            <th style="text-align:left; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Tranche</th>
+            <th style="text-align:right; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Amount</th>
+            <th style="text-align:left; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Status</th>
+            <th style="text-align:left; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Date</th>
+            <th style="text-align:center; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="le-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Footer -->
+    <div style="padding:10px 16px; border-top:0.5px solid var(--n-200); display:flex; justify-content:space-between; gap:8px;">
+      <div id="le-footer-summary" style="font-size:10.5px; color:var(--n-500);">—</div>
+    </div>
+  </div>
+</section>
+
 <!-- ===== STAGE 1: Cashflow Generation (v2 — replaces PortF Inbound) ===== -->
 <section id="stage-1" class="stage-card stage-tab-content p-5">
   <div class="step-indicator">
@@ -3065,6 +3301,10 @@
       </span>
       <h3 style="font-size:13px; font-weight:600; color:var(--n-900); letter-spacing:-0.15px; margin:0;">Forward cashflow stream</h3>
       <span id="cf-stage1-chip" class="chip gray" style="font-size:10px; font-variant-numeric:tabular-nums;">0 periods</span>
+      <!-- Tranche toggle — All / Tranche A / Tranche B / … Populated by
+           renderStage1Cashflows() from B.tranches. Selecting a tranche
+           reprojects every row from its per-tranche breakdown fields. -->
+      <div id="cf-tranche-filter" style="display:inline-flex; align-items:center; gap:4px; margin-left:6px; padding:2px; background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:6px;"></div>
       <!-- Period picker — auto-defaults to the deal's natural cadence
            (weekly for 7D revolvers, monthly for PIK cap, quarterly otherwise). -->
       <label style="display:inline-flex; align-items:center; gap:5px; font-size:10.5px; color:var(--n-600); margin-left:auto;">
@@ -3081,10 +3321,33 @@
       <button onclick="window.openRateFixingsModal && window.openRateFixingsModal()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Shortcut to workspace Rate curves (also in the sidebar).">
         <i class="ti ti-chart-line" style="font-size:12px;"></i>Rate curves
       </button>
+      <button id="btn-cf-columns" onclick="window.__cfOpenColumnPicker && window.__cfOpenColumnPicker(event)" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px; position:relative;" title="Choose which columns to show — saved per user">
+        <i class="ti ti-columns-3" style="font-size:12px;"></i>Columns
+      </button>
+      <!-- Column picker dropdown — absolutely positioned relative to the toolbar. -->
+      <div id="cf-column-picker" style="display:none; position:absolute; right:16px; top:60px; width:280px; max-height:70vh; overflow-y:auto; background:var(--n-0); border:0.5px solid var(--n-300); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.15); z-index:30; padding:10px;"></div>
+      <button id="btn-cf-export-xlsx" onclick="window.__cfExportXlsx && window.__cfExportXlsx()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Download the current cashflow table as Excel (.xlsx)">
+        <i class="ti ti-file-spreadsheet" style="font-size:12px;"></i>Export XLSX
+      </button>
       <span style="font-size:10.5px; color:var(--n-500);">Click any row to expand</span>
     </div>
     <div id="cf-stage1-kpis" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2"></div>
-    <div id="cf-stage1-host" style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px; font-size:11px; max-height:600px; overflow-y:auto; font-variant-numeric:tabular-nums;">
+    <!-- All-in yield chart — EIR over the deal period. Renders as inline SVG
+         (no external chart lib). Populated by renderStage1AllInYield(). -->
+    <div id="cf-yield-panel" style="display:none; margin-bottom:10px; padding:10px 12px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <span style="width:22px; height:22px; border-radius:6px; background:#EEF2FF; color:#4338CA; display:inline-flex; align-items:center; justify-content:center;">
+          <i class="ti ti-chart-line" style="font-size:13px;"></i>
+        </span>
+        <div style="font-size:12px; font-weight:600; color:var(--n-900); letter-spacing:-0.1px;">All-in yield over the deal period</div>
+        <span id="cf-yield-eir-chip" class="chip blue" style="font-size:10px; font-variant-numeric:tabular-nums;">EIR —</span>
+        <span style="flex:1;"></span>
+        <span style="font-size:10px; color:var(--n-500);">Base + spread + ratchet + ESG + OID/PIK amort + fees</span>
+      </div>
+      <div id="cf-yield-chart"></div>
+      <div id="cf-yield-legend" style="display:flex; gap:12px; font-size:10.5px; color:var(--n-600); margin-top:4px; flex-wrap:wrap;"></div>
+    </div>
+    <div id="cf-stage1-host" style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px; font-size:11px; max-height:600px; overflow-x:scroll; overflow-y:auto; font-variant-numeric:tabular-nums; scrollbar-width:auto; scrollbar-color:#94A3B8 #F1F5F9;">
       <div class="v4-empty" style="padding:36px 20px;">
         <div class="v4-empty-icon"><i class="ti ti-chart-histogram" aria-hidden="true"></i></div>
         <div class="v4-empty-title">No cashflows yet</div>
@@ -3186,6 +3449,32 @@
         <button id="btn-gl-date-auto" class="text-[10px] text-indigo-700 hover:underline" title="Clear override — glDate auto-matches effectiveDate per row">auto</button>
         <span id="gl-date-mode" class="chip green text-[10px]" style="font-size:9.5px">AUTO</span>
       </div>
+      <!-- Up-until (accounting end) date — engine only produces JE rows with
+           effectiveDate ≤ this date. Blank = "run through the whole horizon".
+           Wired in the engine at runAccountingImpl() (see filter around line
+           17762 area). Persists per deal via B.deal.acctUpUntil. -->
+      <div class="flex items-center gap-1 border border-gray-300 rounded px-2 py-1 bg-white" title="Only generate GL bookings up to and including this effective date. Leave blank to run through the whole horizon.">
+        <span class="material-icons-outlined text-[14px] text-gray-500">event_note</span>
+        <label for="opt-acct-up-until" class="text-[10px] font-semibold uppercase tracking-wider text-gray-600">Up until date</label>
+        <input id="opt-acct-up-until" type="date" class="border-0 px-1 py-0 text-[12px] bg-white" placeholder="whole horizon"
+               onchange="try{if(window.B&&window.B.deal){window.B.deal.acctUpUntil=this.value||null;} }catch(_){}"/>
+        <button id="btn-acct-up-until-clear" class="text-[10px] text-indigo-700 hover:underline"
+                onclick="const el=document.getElementById('opt-acct-up-until'); if(el){el.value=''; el.dispatchEvent(new Event('change'));}"
+                title="Clear — engine runs to the deal's maturity">clear</button>
+      </div>
+      <!-- Post-back status — user picks the status the JE batch is delivered
+           to PCS/Investran with. Three states (Draft / Approved / Posted)
+           mirror the internal approval-pill states. Read by handlePostJeClick. -->
+      <div class="flex items-center gap-1 border border-gray-300 rounded px-2 py-1 bg-white" title="Status the JE batch is delivered to PCS / Investran with.">
+        <span class="material-icons-outlined text-[14px] text-gray-500">outbound</span>
+        <label for="opt-postback-status" class="text-[10px] font-semibold uppercase tracking-wider text-gray-600">Post-back status</label>
+        <select id="opt-postback-status" class="border-0 px-1 py-0 text-[12px] bg-white" style="min-width:110px;"
+                onchange="try{ if(window.B&&window.B.deal){ window.B.deal.postbackStatus=this.value; } window.PCS_POSTBACK_STATUS=this.value; }catch(_){}">
+          <option value="draft">Draft</option>
+          <option value="approved">Approved</option>
+          <option value="posted" selected>Posted</option>
+        </select>
+      </div>
       <span id="acct-status" class="chip gray self-center">Awaiting Stage 1</span>
       <!-- Participation scale badge — green when JEs are at participation
            (i.e. accounting-correct for the lender's share), amber warning
@@ -3199,6 +3488,13 @@
        amounts but JEs are auto-scaled to participation, so the user can see
        the relationship between what's displayed and what's booked. -->
   <div id="participation-banner" class="hidden mb-3"></div>
+
+  <!-- Tranches summary strip — populated by renderAcctTranchesStrip() from
+       B.tranches whenever the Accounting tab paints. Shows every tranche in
+       the current deal so the user can see, at the top of the grid, which
+       tranches this JE run spans. Multi-tranche only — hidden for 1-tranche
+       deals to keep the header clean. -->
+  <div id="acct-tranches-strip" style="display:none; margin-bottom:10px;"></div>
 
   <!-- ═══ Approval workflow strip (#231) — Draft → Approved → Posted ═══
        Auto-shown once a run has been persisted. Maker-checker enforced by SB:
@@ -3687,12 +3983,12 @@
         <div id="mod-events-list" class="text-[11px]"></div>
       </div>
 
-      <!-- ─────────── Tier 1 Transtype Editor (#3–#12) ─────────── -->
-      <!-- Editable inline injectors for the Tier 1 lifecycle transtypes that
-           previously had no UI affordance. Tier 1 #1 (OID) and #2 (Premium)
-           are already exposed via the Section 0-tris dropdown above; this
-           section covers the remaining Tier 1 events #3–#12. -->
-      <div class="mt-3 pt-3 border-t-2 border-indigo-200">
+      <!-- ─────────── Tier 1 Transtype Editor (#3–#12) — LEGACY ────
+           These transtypes are now entered centrally on the Lifecycle Events
+           page. Hidden by CSS class .le-legacy-transtypes; DOM retained so
+           existing wiring (status chips, event lists) still updates when the
+           inline form on Lifecycle Events writes to inst.principalSchedule. -->
+      <div class="mt-3 pt-3 border-t-2 border-indigo-200 le-legacy-transtypes">
         <div class="flex items-center gap-2 mb-2 flex-wrap">
           <span class="material-icons-outlined text-[16px]" style="color:#4338ca">timeline</span>
           <h4 class="text-[12px] font-bold text-indigo-900">Tier 1 Transtypes — Loan Lifecycle Events</h4>
@@ -3849,13 +4145,10 @@
         </div>
       </div>
 
-      <!-- ─────────── Tier 2 Transtype Editor (#13–#18) ─────────── -->
-      <!-- Editable inline injectors for the six Tier 2 transtypes added
-           after the Tier 1 lifecycle (OID through Capitalised Costs). Each
-           sub-panel shows the current state on the active deal, a status
-           chip, and inline buttons to add a test event so the auditor can
-           watch a JE pair flow through the engine to the DIU export. -->
-      <div class="mt-3 pt-3 border-t-2 border-indigo-200">
+      <!-- ─────────── Tier 2 Transtype Editor (#13–#18) — LEGACY ────
+           Now entered centrally on the Lifecycle Events page. Hidden by CSS
+           class .le-legacy-transtypes. -->
+      <div class="mt-3 pt-3 border-t-2 border-indigo-200 le-legacy-transtypes">
         <div class="flex items-center gap-2 mb-2 flex-wrap">
           <span class="material-icons-outlined text-[16px]" style="color:#4338ca">swap_horiz</span>
           <h4 class="text-[12px] font-bold text-indigo-900">Tier 2 Transtypes — Disposal · Restructuring · Timing</h4>
@@ -4203,8 +4496,10 @@
     </div>
   </div>
 
-  <!-- ─────────── IFRS Capabilities Demonstrator ─────────── -->
-  <div class="mb-4">
+  <!-- ─────────── IFRS Capabilities Demonstrator — HIDDEN (per user request:
+       remove from Run&JE and Treatment overrides tabs). Kept in the DOM so
+       the render functions that write to #capability-grid don't NPE. -->
+  <div class="mb-4 acct-capabilities-panel" style="display:none;">
     <div class="flex items-center gap-2 mb-2">
       <span class="material-icons-outlined text-[18px]" style="color:var(--brand-600)">checklist</span>
       <h3 data-fw-capability-header class="text-[13px] font-bold">IFRS-Aligned Accounting Capabilities</h3>
@@ -4232,8 +4527,11 @@
     </div>
   </div>
 
-  <!-- ─────────── Change Handling & Audit (5 cards from the deck) ─────────── -->
-  <div id="change-handling-panel" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 hidden">
+  <!-- ─────────── Change Handling & Audit — HIDDEN (per user request:
+       remove from Run&JE and Treatment overrides tabs). Always kept hidden;
+       existing render code (renderChangeHandlingPanel) still writes here but
+       it's never seen by users. -->
+  <div id="change-handling-panel" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 hidden" style="display:none !important;">
     <div class="flex items-center gap-2 mb-3">
       <span class="material-icons-outlined text-[18px]" style="color:var(--brand-600)">history_edu</span>
       <h3 class="text-[13px] font-bold">Accounting — Change Handling &amp; Audit</h3>
@@ -4392,6 +4690,44 @@
         Show EIR Trace
       </button>
     </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Inline Journal Entries panel — full JE detail on the page (was
+       previously hidden behind a small chip that opened a modal). Renders
+       via renderInlineJETable() whenever accounting is run.
+       ═══════════════════════════════════════════════════════════════ -->
+  <div id="acct-inline-je-section" data-substab="run" class="hidden" style="margin-bottom:14px;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+      <span style="width:24px; height:24px; border-radius:6px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-book-2" style="font-size:14px;"></i>
+      </span>
+      <h3 style="font-size:14px; font-weight:600; color:var(--n-900); margin:0; letter-spacing:-0.15px;">Journal entries</h3>
+      <span id="inline-je-count-chip" class="chip blue" style="font-size:10.5px; font-variant-numeric:tabular-nums;">0 rows</span>
+      <span id="inline-je-balance-chip" class="chip green" style="font-size:10.5px;">balanced</span>
+      <span style="flex:1;"></span>
+      <div style="position:relative; min-width:220px; max-width:320px;">
+        <i class="ti ti-search" style="position:absolute; left:9px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--n-400);"></i>
+        <input id="inline-je-filter" type="text" placeholder="Filter by tx type / account / comment..." oninput="window.__renderInlineJETable && window.__renderInlineJETable()"
+               style="width:100%; padding:5px 10px 5px 26px; border:0.5px solid var(--n-300); border-radius:6px; font-size:11.5px; background:var(--n-0);"/>
+      </div>
+      <label style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; color:var(--n-600);">
+        <i class="ti ti-layers-subtract" style="font-size:12px;"></i>Group by:
+        <select id="inline-je-groupby" class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white" onchange="window.__renderInlineJETable && window.__renderInlineJETable()">
+          <option value="je">Journal entry (#)</option>
+          <option value="tx">Transaction type</option>
+          <option value="account">Account</option>
+          <option value="flat">Flat rows</option>
+        </select>
+      </label>
+      <button onclick="window.__inlineJECopyTsv && window.__inlineJECopyTsv()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Copy visible JE rows as TSV">
+        <i class="ti ti-copy" style="font-size:12px;"></i>Copy
+      </button>
+      <button onclick="window.openJEDetailModal && window.openJEDetailModal()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Open the full-screen JE detail modal">
+        <i class="ti ti-external-link" style="font-size:12px;"></i>Expand
+      </button>
+    </div>
+    <div id="acct-inline-je-host" style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px; max-height:520px; overflow:auto;"></div>
   </div>
 
   <!-- Daily schedule view — rebuilt on every Run Accounting / treatment change.
@@ -6081,6 +6417,40 @@
   </div>
 </div>
 <style>
+  /* Lifecycle-events centralization — hide the legacy per-tranche drawdown
+     and paydown editors on the Loan Builder tranche cards. The underlying
+     arrays (t.drawdowns[], t.repayments[]) are still authoritative; entry
+     now happens on the Lifecycle Events page. Existing rows still render
+     for read-only reference via the events list on that page. */
+  /* Hide EVERY legacy drawdown/paydown surface in the Loan Builder — the
+     row list (.le-legacy-drawpay) and the compact summary column
+     (.le-legacy-drawpay-summary) that showed "X scheduled · + add". Do NOT
+     scope to body.v4-sidebar — the class isn't always present at boot.
+     Underlying data (t.drawdowns / t.repayments) stays authoritative. */
+  .le-legacy-drawpay,
+  .le-legacy-drawpay-summary { display: none !important; }
+  /* Hide the two legacy transtype editors on Accounting → Treatment. Users
+     enter these events centrally on Lifecycle Events. */
+  .le-legacy-transtypes { display: none !important; }
+
+  /* Force always-visible scrollbars on the Cashflow table container — macOS
+     hides them by default ("when scrolling"), so users didn't realise the
+     table scrolls horizontally when 14 columns are visible. */
+  #cf-stage1-host::-webkit-scrollbar {
+    width: 12px; height: 12px;
+  }
+  #cf-stage1-host::-webkit-scrollbar-track {
+    background: #F1F5F9; border-radius: 6px;
+  }
+  #cf-stage1-host::-webkit-scrollbar-thumb {
+    background: #94A3B8; border-radius: 6px; border: 2px solid #F1F5F9;
+  }
+  #cf-stage1-host::-webkit-scrollbar-thumb:hover {
+    background: #64748B;
+  }
+  #cf-stage1-host::-webkit-scrollbar-corner {
+    background: #F1F5F9;
+  }
   #bench-modal .bench-panel {
     padding:12px; border:0.5px solid var(--n-200); border-radius:10px; background:var(--n-0);
   }
@@ -6090,6 +6460,36 @@
   #bench-modal .bench-note {
     font-size:10.5px; color:var(--n-500); margin-top:6px; font-variant-numeric:tabular-nums;
   }
+</style>
+
+<!-- Lifecycle Events page section + tab-btn are defined near the other stage
+     sections (see #lifecycle around line ~3156). Styles for its inner UI: -->
+<style>
+  #lifecycle .le-row:hover { background: var(--n-50, #FAFAFA); }
+  #lifecycle .le-tab {
+    padding:6px 14px; font-size:11.5px; font-weight:600; color:var(--n-600);
+    border:0.5px solid transparent; border-bottom:none;
+    border-top-left-radius:6px; border-top-right-radius:6px;
+    background:transparent; cursor:pointer; margin-bottom:-0.5px;
+  }
+  #lifecycle .le-tab:hover { color: var(--n-900); background: var(--n-50); }
+  #lifecycle .le-tab.active {
+    color: var(--indigo-700, #4338CA);
+    background: var(--indigo-50, #EEF2FF);
+    border-color: var(--n-200);
+  }
+  #lifecycle .le-pick-item {
+    display:flex; align-items:flex-start; gap:8px; padding:8px 10px;
+    border-radius:6px; cursor:pointer; margin-bottom:2px;
+  }
+  #lifecycle .le-pick-item:hover { background: var(--n-50); }
+  #lifecycle .le-pick-icon {
+    width:26px; height:26px; border-radius:6px; flex-shrink:0;
+    display:inline-flex; align-items:center; justify-content:center;
+    background: var(--n-100); color: var(--n-700);
+  }
+  #lifecycle .le-pick-name { font-size:12px; font-weight:600; color: var(--n-900); }
+  #lifecycle .le-pick-hint { font-size:10.5px; color: var(--n-500); margin-top:1px; line-height:1.35; }
 </style>
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -10146,6 +10546,8 @@ window.SB = (function(){
         is_preset:         false,
         complexity:        B.complexity || null,
         tag:               B.tag || null,
+        // GL JE posting frequency — drives splitInterestJEsByCouponPeriod
+        interest_accrual_freq: B.facility.interestAccrualFreq || null,
         // ─── Mezz support (2026-07): construction-finance + waterfall fields.
         // All nullable — plain term loans leave these blank and the row saves
         // as before. RE mezzanine, borrowing-base and syndicated construction
@@ -10875,8 +11277,11 @@ window.SB = (function(){
             dayBasis:    row.facility.day_basis,
             holiday:     row.facility.holiday_calendar,
             repayment:   row.facility.repayment_type,
-            type:        row.facility.facility_type
-          } : { commitment: 0, availEnd: '', dayBasis:'ACT/360', holiday:'none', repayment:'AtMaturity', type:'termLoan' },
+            type:        row.facility.facility_type,
+            // Interest accrual JE posting frequency lives on the deal row (not the
+            // facility sub-table) so ALL tranches share the same cadence.
+            interestAccrualFreq: row.interest_accrual_freq || 'monthly'
+          } : { commitment: 0, availEnd: '', dayBasis:'ACT/360', holiday:'none', repayment:'AtMaturity', type:'termLoan', interestAccrualFreq:'monthly' },
           tranches: sort(row.tranches, 'tranche_no').map((t, ti) => ({
             id:               t.id || ('TRN_' + (ti+1)),
             name:             t.name,
@@ -12059,6 +12464,58 @@ if(document.readyState === 'loading'){
   document.addEventListener('DOMContentLoaded', window.__applyAdminVisibility);
 } else {
   window.__applyAdminVisibility();
+}
+
+// ─── Pipeline nav gating — no deal, no downstream tabs ────────────────
+// Lifecycle events / Cashflow / Accounting / Dashboard all read from
+// window.B or currentInstrument(). Without a loaded deal, clicking them
+// takes the user to an empty screen which is confusing. This gate:
+//   • Adds .is-disabled to every [data-needs-deal="1"] element until a
+//     deal has been loaded (window.B.deal.name populated).
+//   • Blocks click events at the capture phase so the disabled item
+//     neither navigates nor opens its modal.
+//   • Called by populateDealForm() / resetBuilder() / loadPresetByObject().
+window.__updatePipelineNavState = function(){
+  const B_ = window.B || {};
+  const hasDeal = !!(B_.deal && B_.deal.name && String(B_.deal.name).trim());
+  document.querySelectorAll('[data-needs-deal="1"]').forEach(el => {
+    if(hasDeal){
+      el.classList.remove('is-disabled');
+      el.removeAttribute('aria-disabled');
+      // Restore original title if we stashed one
+      const orig = el.getAttribute('data-orig-title');
+      if(orig != null){ el.setAttribute('title', orig); }
+      else if((el.getAttribute('title') || '').indexOf('Load a deal') !== -1){
+        el.removeAttribute('title');
+      }
+    } else {
+      el.classList.add('is-disabled');
+      el.setAttribute('aria-disabled', 'true');
+      // Stash the current title once so we can restore it later
+      if(el.getAttribute('title') && !el.hasAttribute('data-orig-title')){
+        el.setAttribute('data-orig-title', el.getAttribute('title'));
+      }
+      el.setAttribute('title', 'Load a deal in Loan Builder first');
+    }
+  });
+};
+// Capture-phase click blocker — runs before the button's own onclick.
+document.addEventListener('click', function(ev){
+  const el = ev.target.closest('[data-needs-deal="1"]');
+  if(el && el.classList.contains('is-disabled')){
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation();
+    if(typeof toast === 'function'){
+      toast('Load a deal in the Loan Builder first', 3200, { kind:'info', id:'nav:needsDeal' });
+    }
+  }
+}, true);
+// Fire on init + poll briefly during boot for the first deal load
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', window.__updatePipelineNavState);
+} else {
+  window.__updatePipelineNavState();
 }
 
 // ─── Deal-structure-driven section visibility ─────────────────────────────
@@ -13869,6 +14326,16 @@ function handlePostJeClick(){
       if(typeof toast === 'function') toast('Accounting produced no journals — check the active deal', 4000);
       return;
     }
+    // Read the user-selected post-back status (Draft / Approved / Posted) and
+    // stamp each JE row before delivery so PCS/Investran receives them at the
+    // chosen state. Also expose the status on window for the transport layer.
+    const statusEl = document.getElementById('opt-postback-status');
+    const postbackStatus = (statusEl && statusEl.value) ||
+                           ((window.B && window.B.deal && window.B.deal.postbackStatus)) || 'posted';
+    window.PCS_POSTBACK_STATUS = postbackStatus;
+    M.acctJournals.forEach(j => { j.postbackStatus = postbackStatus; });
+    console.log('[Investran] posting ' + M.acctJournals.length + ' JEs with status=' + postbackStatus);
+    if(typeof toast === 'function') toast('Sending ' + M.acctJournals.length + ' JE rows to PCS · status "' + postbackStatus + '"', 3000);
     postJEsToInvestran();
   } catch(err) {
     console.error('[Investran] handlePostJeClick failed:', err);
@@ -17370,6 +17837,16 @@ function runAccountingImpl(){
   // effectiveDate). Filled value applies the same close date to every row.
   const glPostDate = $('opt-gl-date')?.value || null;
   M.acctJournals = generateDIU(inst, M.summary, { glDate: glPostDate });
+  // ─── "Up until date" filter — drop any JE row with effectiveDate > cutoff.
+  //     Applied post-generation so we don't have to refactor the engine.
+  //     Cutoff is inclusive: rows with effectiveDate === cutoff are kept.
+  const _upUntil = ($('opt-acct-up-until')?.value)
+                || ((window.B && window.B.deal && window.B.deal.acctUpUntil) || null);
+  if(_upUntil){
+    const beforeN = M.acctJournals.length;
+    M.acctJournals = M.acctJournals.filter(j => !j.effectiveDate || j.effectiveDate <= _upUntil);
+    console.log('[engine] Up-until filter ' + _upUntil + ': ' + beforeN + ' → ' + M.acctJournals.length + ' JE rows kept');
+  }
   // Post-process: split the aggregated interest JE pair (which the base
   // engine emits once at maturity) into per-coupon-period pairs. This gives
   // Notices Rec column something to match against, and matches real-world
@@ -17455,6 +17932,9 @@ function runAccountingImpl(){
     `<div class="kpi"><div class="label">${k.label}</div><div class="value text-[14px]">${k.value}</div>${k.sub ? `<div class="sub text-[10px] text-gray-500">${k.sub}</div>` : ''}</div>`
   ).join('');
   $('acct-kpis').classList.remove('hidden');
+  // Reveal + paint the always-visible inline JE table (was previously buried
+  // behind a small chip on the header that opened a modal).
+  try { window.__renderInlineJETable && window.__renderInlineJETable(); } catch(_){}
   // Journal coverage panel
   const usedAccts = new Map();
   for(const j of M.acctJournals){
@@ -17716,6 +18196,151 @@ window.makeAcctStatusClickable = makeAcctStatusClickable;
 window.openJEDetailModal      = openJEDetailModal;
 window.closeJEDetailModal     = closeJEDetailModal;
 window.copyJEDetailTSV        = copyJEDetailTSV;
+
+// ─── Inline JE table (always visible on the Run&JE tab) ─────────────
+// Renders M.acctJournals directly on the accounting page — no modal, no
+// small chip. Supports filter + group-by (Journal / Tx Type / Account /
+// Flat). Balance chip goes red if any group is unbalanced.
+window.__renderInlineJETable = function(){
+  const section = document.getElementById('acct-inline-je-section');
+  const host = document.getElementById('acct-inline-je-host');
+  const chipCount = document.getElementById('inline-je-count-chip');
+  const chipBal = document.getElementById('inline-je-balance-chip');
+  if(!section || !host) return;
+  const rowsAll = (typeof M !== 'undefined' && Array.isArray(M.acctJournals)) ? M.acctJournals : [];
+  if(!rowsAll.length){
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+  const q = ((document.getElementById('inline-je-filter') || {}).value || '').toLowerCase();
+  const groupBy = (document.getElementById('inline-je-groupby') || {}).value || 'je';
+  const rows = q ? rowsAll.filter(r =>
+    ((r.transactionType || '') + ' ' + (r.account || '') + ' ' + (r.glAccountName || '') + ' ' + (r.transactionComments || '')).toLowerCase().indexOf(q) !== -1
+  ) : rowsAll;
+  if(chipCount) chipCount.textContent = rows.length.toLocaleString() + ' of ' + rowsAll.length.toLocaleString() + ' rows';
+  const fmtAmt = a => (a == null || isNaN(a)) ? '—' :
+    Number(a).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 });
+  // Total DR/CR balance check
+  let totDr = 0, totCr = 0;
+  rows.forEach(r => { if(r.isDebit) totDr += (+r.amountLE || 0); else totCr += (+r.amountLE || 0); });
+  const balanced = Math.abs(totDr - totCr) < 0.005;
+  if(chipBal){
+    chipBal.className = 'chip ' + (balanced ? 'green' : 'red');
+    chipBal.textContent = balanced ? ('balanced · DR/CR ' + fmtAmt(totDr)) : ('UNBALANCED · Δ ' + fmtAmt(totDr - totCr));
+  }
+  // Flat rows path — render as one table
+  if(groupBy === 'flat'){
+    host.innerHTML = '<table style="width:100%; font-size:11px; border-collapse:collapse;">' +
+      '<thead style="position:sticky; top:0; background:var(--n-50); z-index:1;">' +
+        '<tr>' +
+          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">JE#</th>' +
+          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Effective</th>' +
+          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">GL date</th>' +
+          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Transaction type</th>' +
+          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Account</th>' +
+          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">DR/CR</th>' +
+          '<th style="text-align:right; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Amount</th>' +
+          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Comment</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>' + rows.map(r => (
+        '<tr style="border-top:0.5px solid var(--n-100);' + (r.isDebit ? '' : ' background:#FDFDFF;') + '">' +
+          '<td style="padding:6px 10px; color:var(--n-700); font-variant-numeric:tabular-nums;">' + (r.jeIndex != null ? r.jeIndex : '—') + '</td>' +
+          '<td style="padding:6px 10px; color:var(--n-700);">' + (r.effectiveDate || '—') + '</td>' +
+          '<td style="padding:6px 10px; color:var(--n-600);">' + (r.glDate || '—') + '</td>' +
+          '<td style="padding:6px 10px; color:var(--n-800); font-weight:500;">' + (r.transactionType || '—') + '</td>' +
+          '<td style="padding:6px 10px; color:var(--n-800); font-family:ui-monospace,monospace; font-size:11px;">' + (r.account || '—') + '</td>' +
+          '<td style="padding:6px 10px; color:' + (r.isDebit ? '#1E40AF' : '#9A3412') + '; font-weight:600;">' + (r.isDebit ? 'DR' : 'CR') + '</td>' +
+          '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtAmt(r.amountLE) + '</td>' +
+          '<td style="padding:6px 10px; color:var(--n-500); font-size:10.5px;">' + (r.transactionComments || '') + '</td>' +
+        '</tr>'
+      )).join('') + '</tbody></table>';
+    return;
+  }
+  // Grouped paths — bucket rows by je / tx / account
+  const groups = new Map();
+  rows.forEach(r => {
+    let k;
+    if(groupBy === 'je') k = r.jeIndex != null ? ('JE #' + r.jeIndex) : 'JE —';
+    else if(groupBy === 'tx') k = r.transactionType || '—';
+    else k = (r.account || '—') + (r.glAccountName ? ' · ' + r.glAccountName : '');
+    if(!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  });
+  const parts = [];
+  groups.forEach((grpRows, groupKey) => {
+    const dr = grpRows.filter(r => r.isDebit).reduce((s, r) => s + (+r.amountLE || 0), 0);
+    const cr = grpRows.filter(r => !r.isDebit).reduce((s, r) => s + (+r.amountLE || 0), 0);
+    const bal = Math.abs(dr - cr) < 0.005;
+    const first = grpRows[0];
+    const balancePill = bal
+      ? '<span style="padding:1px 7px; border-radius:9px; background:#DCFCE7; color:#166534; font-size:9.5px; font-weight:600;">balanced</span>'
+      : '<span style="padding:1px 7px; border-radius:9px; background:#FEE2E2; color:#991B1B; font-size:9.5px; font-weight:600;">Δ ' + fmtAmt(dr - cr) + '</span>';
+    parts.push(
+      '<details open style="border-top:0.5px solid var(--n-200);">' +
+        '<summary style="background:var(--n-50,#FAFAFA); padding:7px 12px; cursor:pointer; display:flex; align-items:center; gap:10px; font-size:11.5px;">' +
+          '<span style="font-weight:600; color:var(--n-900);">' + groupKey + '</span>' +
+          (groupBy === 'je' && first.effectiveDate ? '<span style="color:var(--n-500); font-size:10.5px;">' + first.effectiveDate + '</span>' : '') +
+          '<span style="color:var(--n-500); font-size:10.5px;">' + grpRows.length + ' row' + (grpRows.length === 1 ? '' : 's') + '</span>' +
+          '<span style="margin-left:auto; display:flex; gap:8px; align-items:center; font-variant-numeric:tabular-nums;">' +
+            '<span style="font-size:10.5px; color:var(--n-700);">DR ' + fmtAmt(dr) + ' · CR ' + fmtAmt(cr) + '</span>' +
+            balancePill +
+          '</span>' +
+        '</summary>' +
+        '<div style="overflow-x:auto;">' +
+          '<table style="width:100%; font-size:11px; border-collapse:collapse;">' +
+            '<thead><tr style="background:var(--n-50,#FAFAFA);">' +
+              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Effective</th>' +
+              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">GL date</th>' +
+              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Transaction type</th>' +
+              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Account</th>' +
+              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">DR/CR</th>' +
+              '<th style="padding:6px 10px; text-align:right; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Amount</th>' +
+              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Comment</th>' +
+            '</tr></thead>' +
+            '<tbody>' + grpRows.map(r => (
+              '<tr style="border-top:0.5px solid var(--n-100);' + (r.isDebit ? '' : ' background:#FDFDFF;') + '">' +
+                '<td style="padding:6px 10px; color:var(--n-700);">' + (r.effectiveDate || '—') + '</td>' +
+                '<td style="padding:6px 10px; color:var(--n-600);">' + (r.glDate || '—') + '</td>' +
+                '<td style="padding:6px 10px; color:var(--n-800);">' + (r.transactionType || '—') + '</td>' +
+                '<td style="padding:6px 10px; color:var(--n-800); font-family:ui-monospace,monospace; font-size:11px;">' + (r.account || '—') + '</td>' +
+                '<td style="padding:6px 10px; color:' + (r.isDebit ? '#1E40AF' : '#9A3412') + '; font-weight:600;">' + (r.isDebit ? 'DR' : 'CR') + '</td>' +
+                '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtAmt(r.amountLE) + '</td>' +
+                '<td style="padding:6px 10px; color:var(--n-500); font-size:10.5px;">' + (r.transactionComments || '') + '</td>' +
+              '</tr>'
+            )).join('') + '</tbody>' +
+          '</table>' +
+        '</div>' +
+      '</details>'
+    );
+  });
+  host.innerHTML = parts.join('');
+};
+
+window.__inlineJECopyTsv = function(){
+  const rows = (typeof M !== 'undefined' && Array.isArray(M.acctJournals)) ? M.acctJournals : [];
+  if(!rows.length){ if(typeof toast === 'function') toast('No JE rows to copy'); return; }
+  const q = ((document.getElementById('inline-je-filter') || {}).value || '').toLowerCase();
+  const filtered = q ? rows.filter(r =>
+    ((r.transactionType || '') + ' ' + (r.account || '') + ' ' + (r.glAccountName || '') + ' ' + (r.transactionComments || '')).toLowerCase().indexOf(q) !== -1
+  ) : rows;
+  const hdr = ['JE#','Effective','GL date','Transaction type','Account','DR/CR','Amount','Comment'].join('\t');
+  const body = filtered.map(r => [
+    r.jeIndex != null ? r.jeIndex : '',
+    r.effectiveDate || '', r.glDate || '',
+    r.transactionType || '', r.account || '',
+    r.isDebit ? 'DR' : 'CR',
+    Number(r.amountLE || 0).toFixed(2),
+    (r.transactionComments || '').replace(/[\t\n]/g, ' ')
+  ].join('\t')).join('\n');
+  const tsv = hdr + '\n' + body;
+  navigator.clipboard.writeText(tsv).then(() => {
+    if(typeof toast === 'function') toast('Copied ' + filtered.length + ' JE rows to clipboard', 2500);
+  }, () => {
+    if(typeof toast === 'function') toast('Copy failed — see console', 3000, { kind:'error' });
+  });
+};
 
 // Belt-and-braces — a document-level click delegate that ALWAYS catches
 // data-close-je clicks (even if init() hadn't run yet, or the per-modal
@@ -24626,6 +25251,9 @@ function filterScheduleRows(rows, mode){
 }
 
 function renderScheduleTable(){
+  // Refresh the top-of-page tranches strip on every render — cheap and
+  // guarantees the badge appears the moment accounting is (re-)run.
+  try { renderAcctTranchesStrip(); } catch(_){}
   if(!M.schedule || !M.schedule.length){ $('acct-schedule-section').classList.add('hidden'); return; }
   const inst = INSTRUMENTS.find(i => i.id === M.portfData?.instrument?.id) || currentInstrument();
   const ccy = inst?.currency || 'GBP';
@@ -24659,6 +25287,49 @@ function renderScheduleTable(){
     <thead><tr>${headerRow}</tr></thead>
     <tbody>${rowsHtml || '<tr><td colspan="' + SCHEDULE_DISPLAY_COLS.length + '" class="text-[11px] text-gray-500" style="text-align:center;padding:10px">No rows match the filter.</td></tr>'}</tbody>
   </table>${truncated ? `<div class="text-[11px] text-gray-500 mt-1">Preview truncated at ${SCHEDULE_PREVIEW_LIMIT.toLocaleString()} rows. Click <strong>Download full CSV</strong> to export every row (${M.schedule.length.toLocaleString()} total).</div>` : ''}`;
+}
+
+// Tranches summary strip — always visible above the Stage 2 accounting grid
+// when the current deal has 2+ tranches. Reads B.tranches (Loan Builder) so
+// the user can see at a glance which tranches this JE run covers. Because
+// JE rows can carry a trancheId in their reference/context fields, this
+// serves as the "specify in the top section which tranche" call-out from
+// the multi-tranche requirement.
+function renderAcctTranchesStrip(){
+  const host = document.getElementById('acct-tranches-strip');
+  if(!host) return;
+  const tranches = (typeof B !== 'undefined' && Array.isArray(B.tranches)) ? B.tranches : [];
+  if(tranches.length <= 1){ host.style.display = 'none'; host.innerHTML = ''; return; }
+  host.style.display = 'block';
+  const fmtAud = (window.PCS && PCS.fmtAud) ? PCS.fmtAud
+    : (v => v == null ? '—' : ('$' + Math.round(v).toLocaleString('en-AU')));
+  const chips = tranches.map(t => {
+    const face = +t.face || 0;
+    const draw = +t.drawnInitially || 0;
+    const rate = (t.interestComponents && t.interestComponents[0] && +t.interestComponents[0].baseValue) || 0;
+    const rateStr = rate ? (rate * 100).toFixed(2) + '%' : '—';
+    return '' +
+      '<div style="display:inline-flex; flex-direction:column; padding:6px 10px; background:var(--n-0); ' +
+        'border:0.5px solid var(--n-200); border-left:3px solid var(--fis-green-600,#16A34A); border-radius:6px; min-width:130px;">' +
+        '<div style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-500); ' +
+             'line-height:1;">' + (t.name || t.id || '—') + '</div>' +
+        '<div style="font-size:12px; font-weight:600; color:var(--n-900); font-variant-numeric:tabular-nums; margin-top:3px; line-height:1;">' +
+          fmtAud(face) +
+        '</div>' +
+        '<div style="font-size:9.5px; color:var(--n-500); margin-top:3px; letter-spacing:0.2px;">' +
+          'drawn ' + fmtAud(draw) + ' · rate ' + rateStr +
+        '</div>' +
+      '</div>';
+  }).join('');
+  host.innerHTML =
+    '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+      '<span style="font-size:10.5px; font-weight:600; color:var(--n-600); letter-spacing:0.2px; text-transform:uppercase;">' +
+        '<i class="ti ti-layers-subtract" style="font-size:12px; vertical-align:-1px; margin-right:4px; color:var(--fis-green-600,#16A34A);"></i>' +
+        'Tranches in this run · ' + tranches.length +
+      '</span>' +
+      chips +
+      '<span style="font-size:10px; color:var(--n-500); margin-left:auto;">Every JE row carries its tranche context — filter by tranche in the JE Trace modal.</span>' +
+    '</div>';
 }
 
 function downloadScheduleCSV(){
@@ -27561,7 +28232,7 @@ document.addEventListener('DOMContentLoaded', window._applyAdvancedStagesVisibil
 try { window._applyAdvancedStagesVisibility(); } catch(_){}
 
 (function(){
-  const TAB_IDS = ['builder','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
+  const TAB_IDS = ['builder','lifecycle','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
 
   function switchTab(tabId){
     if(!TAB_IDS.includes(tabId)) tabId = 'stage-1';
@@ -27580,6 +28251,11 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     if(btn){ btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
     // Render dashboard live every time it's shown
     if(tabId === 'dashboard') renderDashboard();
+    // Lifecycle Events page — rows come from live B.tranches / B.fees /
+    // currentInstrument().principalSchedule, so we re-render on every visit.
+    if(tabId === 'lifecycle' && typeof window.__leRender === 'function'){
+      try { window.__leRender(); } catch(_){}
+    }
     // When Stage 2 is shown, re-paint its status chip + JE journal from M
     // state so the user always sees their JEs (they were observed to "vanish"
     // when navigating back from Stage 1 — the data was still in M.acctJournals
@@ -30029,15 +30705,22 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             </select>
           </div>
           <div><label class="text-[10px] uppercase text-gray-600 block">Face Value <span style="color:#DC2626; font-weight:900;">*</span></label>
-            <input data-t-field="face" data-tidx="${idx}" type="number" min="0" step="100000" value="${t.face || ''}"
-                   class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <!-- Text input with live thousands-separator formatting (2026-08-19).
+                 data-fmt-num="1" marker makes wireTrancheInputs strip commas
+                 before parsing as a number. Placeholder shows expected shape. -->
+            <input data-t-field="face" data-fmt-num="1" data-tidx="${idx}" type="text" inputmode="numeric"
+                   value="${t.face ? Number(t.face).toLocaleString('en-US') : ''}" placeholder="e.g. 25,000,000"
+                   class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"
+                   style="font-variant-numeric:tabular-nums;"/></div>
           <div><label class="text-[10px] uppercase text-gray-600 block">Initial Draw</label>
-            <input data-t-field="drawnInitially" data-tidx="${idx}" type="number" min="0" step="100000" value="${t.drawnInitially || ''}"
-                   class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
-          <div><label class="text-[10px] uppercase text-gray-600 block">Drawdowns</label>
-            <span class="text-[11px] py-1 text-gray-600">${t.drawdowns.length} scheduled · <button data-t-action="addDraw" data-tidx="${idx}" class="text-indigo-700 underline">+ add</button></span></div>
-          <div><label class="text-[10px] uppercase text-gray-600 block">Paydowns</label>
-            <span class="text-[11px] py-1 text-gray-600">${(t.repayments || []).length} scheduled · <button data-t-action="addPaydown" data-tidx="${idx}" class="text-emerald-700 underline">+ add</button></span></div>
+            <input data-t-field="drawnInitially" data-fmt-num="1" data-tidx="${idx}" type="text" inputmode="numeric"
+                   value="${t.drawnInitially ? Number(t.drawnInitially).toLocaleString('en-US') : ''}" placeholder="e.g. 25,000,000"
+                   class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"
+                   style="font-variant-numeric:tabular-nums;"/></div>
+          <div class="le-legacy-drawpay-summary"><label class="text-[10px] uppercase text-gray-600 block">Drawdowns</label>
+            <span class="text-[11px] py-1 text-gray-600">${t.drawdowns.length} scheduled · <a href="javascript:void(0)" onclick="document.querySelector('.v4-sb-item[data-v4-tab=\'lifecycle\']')?.click(); setTimeout(()=>window.__leOpenEventForm&&window.__leOpenEventForm('drawdown'),120);" class="text-indigo-700 underline">+ add</a></span></div>
+          <div class="le-legacy-drawpay-summary"><label class="text-[10px] uppercase text-gray-600 block">Paydowns</label>
+            <span class="text-[11px] py-1 text-gray-600">${(t.repayments || []).length} scheduled · <a href="javascript:void(0)" onclick="document.querySelector('.v4-sb-item[data-v4-tab=\'lifecycle\']')?.click(); setTimeout(()=>window.__leOpenEventForm&&window.__leOpenEventForm('paydown'),120);" class="text-emerald-700 underline">+ add</a></span></div>
         </div>
 
         <!-- ─── Mezz support: investor attribution + PIK cadence + coupon
@@ -30116,9 +30799,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           })()}
         </details>
 
-        <!-- Drawdown / paydown schedules -->
+        <!-- Drawdown / paydown schedules — hidden by .le-legacy-drawpay CSS.
+             Entry moved to the Lifecycle Events page; the underlying arrays
+             (t.drawdowns / t.repayments) are still the source of truth. -->
         ${(t.drawdowns.length || (t.repayments || []).length) ? `
-          <div class="bg-white border border-indigo-100 rounded p-2 mb-2 text-[11px]">
+          <div class="bg-white border border-indigo-100 rounded p-2 mb-2 text-[11px] le-legacy-drawpay">
             ${t.drawdowns.length ? `<div class="font-semibold text-rose-700 mb-1 flex items-center gap-1"><span class="material-icons-outlined text-[12px]">south_west</span>Drawdowns <span class="text-[9px] text-gray-500 font-normal">cash out from lender</span></div>` + t.drawdowns.map((d,di) => {
               // Inline gating validation — errors show red-shield icon, warns show amber.
               const v = (window.PCS && window.PCS.validateDrawdown) ? window.PCS.validateDrawdown(B?.deal, d) : { ok:true, warnings:[] };
@@ -30132,7 +30817,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
               return `
               <div class="flex gap-2 items-center mb-1">
                 <input data-t-draw-date="${di}" data-tidx="${idx}" type="date" value="${d.date || ''}" class="border rounded px-1 py-0.5 text-[11px]"/>
-                <input data-t-draw-amount="${di}" data-tidx="${idx}" type="number" min="0" step="100000" value="${d.amount || ''}" placeholder="amount" class="border rounded px-1 py-0.5 text-[11px] w-36"/>
+                <input data-t-draw-amount="${di}" data-fmt-num="1" data-tidx="${idx}" type="text" inputmode="numeric" value="${d.amount ? Number(d.amount).toLocaleString('en-US') : ''}" placeholder="amount (e.g. 5,000,000)" class="border rounded px-1 py-0.5 text-[11px] w-36" style="font-variant-numeric:tabular-nums;"/>
                 <input data-t-draw-reason="${di}" data-tidx="${idx}" type="text" value="${(d.reason || '').replace(/"/g,'&quot;')}" placeholder="reason / QS evidence" class="border rounded px-1 py-0.5 text-[11px] flex-1"/>
                 <span>${icon}</span>
                 <button data-t-action="rmDraw" data-tidx="${idx}" data-didx="${di}" class="text-red-600 underline text-[11px]">remove</button>
@@ -30141,7 +30826,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             ${(t.repayments || []).length ? `<div class="font-semibold text-emerald-700 mb-1 mt-2 flex items-center gap-1"><span class="material-icons-outlined text-[12px]">north_east</span>Paydowns <span class="text-[9px] text-gray-500 font-normal">cash in to lender</span></div>` + t.repayments.map((r,ri) => `
               <div class="flex gap-2 items-center mb-1">
                 <input data-t-pay-date="${ri}" data-tidx="${idx}" type="date" value="${r.date || ''}" class="border rounded px-1 py-0.5 text-[11px]"/>
-                <input data-t-pay-amount="${ri}" data-tidx="${idx}" type="number" min="0" step="100000" value="${r.amount || ''}" placeholder="amount" class="border rounded px-1 py-0.5 text-[11px] w-36"/>
+                <input data-t-pay-amount="${ri}" data-fmt-num="1" data-tidx="${idx}" type="text" inputmode="numeric" value="${r.amount ? Number(r.amount).toLocaleString('en-US') : ''}" placeholder="amount (e.g. 5,000,000)" class="border rounded px-1 py-0.5 text-[11px] w-36" style="font-variant-numeric:tabular-nums;"/>
                 <select data-t-pay-kind="${ri}" data-tidx="${idx}" class="border rounded px-1 py-0.5 text-[11px] bg-white" title="Paydown type">
                   <option value="scheduled" ${(r.kind||'scheduled')==='scheduled'?'selected':''}>Scheduled</option>
                   <option value="voluntary" ${r.kind==='voluntary'?'selected':''}>Voluntary prepayment</option>
@@ -30341,6 +31026,30 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         const f = el.dataset.tField;
         let val;
         if(el.type === 'checkbox')          val = !!el.checked;
+        else if(el.dataset.fmtNum === '1'){
+          // Formatted-number text input (Face Value, Initial Draw).
+          // Strip commas + non-digits, reformat live so the caret shows
+          // "25,000,000" as the user types. Store raw number on t[f].
+          const digits = (el.value || '').replace(/[^0-9]/g, '');
+          val = digits === '' ? null : parseInt(digits, 10);
+          // Preserve caret position — reformatting the value moves it to end
+          // by default. Approximate: count digits to the LEFT of the caret
+          // in the old string, then find that same digit-count position in
+          // the new formatted string and place caret there.
+          const oldLen = el.value.length;
+          const oldCaret = el.selectionStart == null ? oldLen : el.selectionStart;
+          const digitsLeft = (el.value.slice(0, oldCaret).match(/[0-9]/g) || []).length;
+          const formatted = digits === '' ? '' : Number(digits).toLocaleString('en-US');
+          if(el.value !== formatted){
+            el.value = formatted;
+            // Restore caret to the position matching `digitsLeft` digits in the new string
+            let seen = 0, pos = 0;
+            for(; pos < formatted.length && seen < digitsLeft; pos++){
+              if(/[0-9]/.test(formatted[pos])) seen++;
+            }
+            try { el.setSelectionRange(pos, pos); } catch(_){}
+          }
+        }
         else if(el.type === 'number')       val = (el.value === '') ? null : (parseFloat(el.value) || 0);
         else                                val = el.value || null;
         t[f] = val;
@@ -30353,7 +31062,27 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       el.oninput = el.onchange = () => { t.drawdowns[+el.dataset.tDrawDate].date = el.value; recompute(); };
     });
     document.querySelectorAll(`[data-tidx="${idx}"][data-t-draw-amount]`).forEach(el => {
-      el.oninput = el.onchange = () => { t.drawdowns[+el.dataset.tDrawAmount].amount = parseFloat(el.value)||0; recompute(); };
+      el.oninput = el.onchange = () => {
+        // Formatted-number input — strip commas + live-reformat, preserve caret
+        if(el.dataset.fmtNum === '1'){
+          const digits = (el.value || '').replace(/[^0-9]/g, '');
+          const oldCaret = el.selectionStart == null ? el.value.length : el.selectionStart;
+          const digitsLeft = (el.value.slice(0, oldCaret).match(/[0-9]/g) || []).length;
+          const formatted = digits === '' ? '' : Number(digits).toLocaleString('en-US');
+          if(el.value !== formatted){
+            el.value = formatted;
+            let seen = 0, pos = 0;
+            for(; pos < formatted.length && seen < digitsLeft; pos++){
+              if(/[0-9]/.test(formatted[pos])) seen++;
+            }
+            try { el.setSelectionRange(pos, pos); } catch(_){}
+          }
+          t.drawdowns[+el.dataset.tDrawAmount].amount = digits === '' ? 0 : parseInt(digits, 10);
+        } else {
+          t.drawdowns[+el.dataset.tDrawAmount].amount = parseFloat(el.value) || 0;
+        }
+        recompute();
+      };
     });
     document.querySelectorAll(`[data-tidx="${idx}"][data-t-draw-reason]`).forEach(el => {
       el.oninput = el.onchange = () => { t.drawdowns[+el.dataset.tDrawReason].reason = el.value; recompute(); };
@@ -30417,7 +31146,23 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         t.repayments = t.repayments || [];
         const i = +el.dataset.tPayAmount;
         if(!t.repayments[i]) t.repayments[i] = {};
-        t.repayments[i].amount = parseFloat(el.value) || 0;
+        if(el.dataset.fmtNum === '1'){
+          const digits = (el.value || '').replace(/[^0-9]/g, '');
+          const oldCaret = el.selectionStart == null ? el.value.length : el.selectionStart;
+          const digitsLeft = (el.value.slice(0, oldCaret).match(/[0-9]/g) || []).length;
+          const formatted = digits === '' ? '' : Number(digits).toLocaleString('en-US');
+          if(el.value !== formatted){
+            el.value = formatted;
+            let seen = 0, pos = 0;
+            for(; pos < formatted.length && seen < digitsLeft; pos++){
+              if(/[0-9]/.test(formatted[pos])) seen++;
+            }
+            try { el.setSelectionRange(pos, pos); } catch(_){}
+          }
+          t.repayments[i].amount = digits === '' ? 0 : parseInt(digits, 10);
+        } else {
+          t.repayments[i].amount = parseFloat(el.value) || 0;
+        }
         recompute();
       };
     });
@@ -30622,6 +31367,15 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             <!-- FirstAg support: undrawn fee with ramp mechanic -->
             <option ${f.mode==='undrawnRamp'?'selected':''} value="undrawnRamp">Undrawn (ramp: notional limit for first N months)</option>
           </select>
+          <!-- Applies-to-tranche picker — promoted to top row (was buried inside Attribution & recipient).
+               Different tranches can carry different fee attributes, so this needs to be always visible. -->
+          <label class="inline-flex items-center gap-1 text-[10px] uppercase text-gray-600" title="Attribute this fee to a specific tranche (or Facility-wide)">
+            <span>Applies to</span>
+            <select data-f-field="trancheRef" data-fidx="${idx}" class="border border-gray-300 rounded px-1 py-0.5 bg-white text-[11px] normal-case" title="Which tranche this fee is attributed to (or Facility-wide)">
+              <option value="" ${!f.trancheRef?'selected':''}>Facility-wide</option>
+              ${B.tranches.map(t => `<option value="${t.id}" ${f.trancheRef===t.id?'selected':''}>${escapeHtml(t.name || t.id)}</option>`).join('')}
+            </select>
+          </label>
           <button data-f-action="remove" data-fidx="${idx}" class="ml-auto text-red-600 underline">remove</button>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-1">
@@ -30803,11 +31557,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             <div><label class="text-[10px] uppercase text-gray-600 block">Recipient</label>
               <input data-f-field="recipient" data-fidx="${idx}" type="text" value="${escapeHtml(f.recipient || '')}" placeholder="e.g. Investor A · Barrenjoey"
                      class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
-            <div><label class="text-[10px] uppercase text-gray-600 block">Applies to tranche</label>
-              <select data-f-field="trancheRef" data-fidx="${idx}" class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]">
-                <option value="" ${!f.trancheRef?'selected':''}>Facility-wide</option>
-                ${B.tranches.map(t => `<option value="${t.id}" ${f.trancheRef===t.id?'selected':''}>${escapeHtml(t.name || t.id)}</option>`).join('')}
-              </select></div>
+            <!-- "Applies to tranche" moved to top row (always visible). -->
             <div><label class="text-[10px] uppercase text-gray-600 block">Cap amount ($)</label>
               <input data-f-field="capAmount" data-fidx="${idx}" type="number" min="0" step="100000" value="${f.capAmount != null ? f.capAmount : ''}" placeholder="Total-payment cap"
                      class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
@@ -31602,7 +32352,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
   }
   function syncDealForm(){
+    const _prevName = (B.deal && B.deal.name) || '';
     B.deal.name        = $b('b-deal-name')?.value || '';
+    // If the deal-name transitions between empty ↔ non-empty, refresh the
+    // Pipeline nav gate live so the downstream tabs enable/disable as the
+    // user types (matches user's intent: "no deal loaded ⇒ tabs disabled").
+    if((!_prevName) !== (!B.deal.name) && typeof window.__updatePipelineNavState === 'function'){
+      window.__updatePipelineNavState();
+    }
     B.deal.dealId      = $b('b-deal-id')?.value || '';
     B.deal.counterparty= $b('b-counterparty')?.value || '';
     B.deal.le          = $b('b-le')?.value || '';
@@ -31616,6 +32373,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.facility.holiday      = $b('b-holiday')?.value || 'none';
     B.facility.repayment    = $b('b-repayment')?.value || 'AtMaturity';
     B.facility.type         = $b('b-facility-type')?.value || 'termLoan';
+    // Interest accrual frequency — drives GL JE posting cadence. Daily accrual
+    // itself is unchanged; this only controls how often the aggregated
+    // accrued interest gets posted to the ledger. Same for all tranches.
+    B.facility.interestAccrualFreq = $b('b-interest-accrual-freq')?.value || 'monthly';
     // ─── Mezz support fields (all optional — blank means "not applicable") ───
     // Deal structure is now driven by the top-level dropdown (b-deal-structure).
     // Falls back to the legacy b-structure input if it still exists on some deals.
@@ -32353,6 +33114,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       // ratio formulas find it via deal.facility.commitment lookup path.
       inst.facility = inst.facility || {};
       inst.facility.commitment = +B.facility.commitment || 0;
+      // Pass interest-accrual JE frequency into the engine. The splitter
+      // (splitInterestJEsByCouponPeriod) reads inst.couponFrequency to
+      // decide how to group daily accruals into JE periods. User pick on
+      // Facility Setup drives this — if unset, engine default (quarterly)
+      // applies. Daily calc is unchanged.
+      if(B.facility.interestAccrualFreq){
+        inst.couponFrequency = B.facility.interestAccrualFreq;
+      }
     }
     // Preserve Builder tranches shape (with face + isPikToggle + interestComponents)
     // for the PIK-coupon estimator inside covenantKpiValue. Stored on
@@ -34253,11 +35022,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     $b('b-settle').value        = B.deal.settle;
     $b('b-maturity').value      = B.deal.maturity;
     $b('b-commitment').value    = B.facility.commitment || '';
+    // Sync the visible thousands-separator display input from the hidden number
+    var _cd = document.getElementById('b-commitment-display');
+    if(_cd) _cd.value = (B.facility.commitment != null && B.facility.commitment !== '')
+      ? Number(B.facility.commitment).toLocaleString('en-US')
+      : '';
     $b('b-avail-end').value     = B.facility.availEnd;
     $b('b-day-basis').value     = B.facility.dayBasis;
     $b('b-holiday').value       = B.facility.holiday;
     $b('b-repayment').value     = B.facility.repayment;
     $b('b-facility-type').value = B.facility.type;
+    // Restore Interest Accrual Period — legacy deals without it default to monthly
+    var _iaf = $b('b-interest-accrual-freq');
+    if(_iaf) _iaf.value = B.facility.interestAccrualFreq || 'monthly';
+    // Restore Accounting "Up until date" + post-back status persisted on the deal.
+    var _upu = document.getElementById('opt-acct-up-until');
+    if(_upu) _upu.value = (B.deal && B.deal.acctUpUntil) ? B.deal.acctUpUntil : '';
+    var _pbs = document.getElementById('opt-postback-status');
+    if(_pbs) _pbs.value = (B.deal && B.deal.postbackStatus) ? B.deal.postbackStatus : 'posted';
     // ─── Mezz support fields — auto-open the section if any are populated
     // so users see them on deal load rather than needing to expand a closed
     // details panel. Empty deals leave the section collapsed.
@@ -34351,6 +35133,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       guarSection.open = hasG;
     }
     // Legal auto-open logic already exists further above — nothing to add here.
+    // Refresh the Pipeline nav gate — populate a deal name and the downstream
+    // Pipeline items (Lifecycle events / Cashflow / Accounting / Dashboard)
+    // become clickable; blank name re-locks them.
+    if(typeof window.__updatePipelineNavState === 'function') window.__updatePipelineNavState();
   }
 
   // ─── Reset ──────────────────────────────────────────────────────────
@@ -34371,6 +35157,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     populateDealForm();
     renderTranches(); renderFees(); recompute();
+    // Re-lock the downstream Pipeline nav items (Lifecycle events / Cashflow /
+    // Accounting / Dashboard) — user cleared the deal, so they should navigate
+    // back through the Loan Builder to load or build one.
+    if(typeof window.__updatePipelineNavState === 'function') window.__updatePipelineNavState();
   }
 
   // ─── Hydrate deal's RFR fixings from shared curves ─────────────────
@@ -34447,6 +35237,75 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(pick.value !== target){ pick.value = target; }
   }, 1500);
 
+  // ─── Tranche filter for Stage 1 Cashflow view ─────────────────────
+  // Rebuild the toolbar filter chip strip from B.tranches. Selecting a
+  // tranche name reprojects the cashflow rows down to just that tranche's
+  // slice using the per-tranche breakdown fields the engine already emits.
+  // Selection persists in window.__cfTrancheFilter ('all' | trancheName).
+  function renderCfTrancheFilter(){
+    const host = document.getElementById('cf-tranche-filter');
+    if(!host) return;
+    const tranches = (typeof B !== 'undefined' && Array.isArray(B.tranches)) ? B.tranches : [];
+    // Hide the filter entirely for single-tranche deals — no toggle needed.
+    if(tranches.length <= 1){ host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = 'inline-flex';
+    const cur = window.__cfTrancheFilter || 'all';
+    const opts = [{ key: 'all', label: 'All tranches' }].concat(
+      tranches.map(t => ({ key: t.name || t.id, label: t.name || t.id }))
+    );
+    host.innerHTML = opts.map(o => {
+      const active = o.key === cur;
+      return '<button type="button" data-cf-tf="' + escapeHtml(o.key) + '" ' +
+             'style="padding:3px 9px; border-radius:5px; font-size:10.5px; font-weight:600; letter-spacing:0.1px; ' +
+             'border:0.5px solid ' + (active ? 'var(--fis-green-600,#16A34A)' : 'transparent') + '; ' +
+             'background:' + (active ? 'var(--fis-green-50,#ECFDF5)' : 'transparent') + '; ' +
+             'color:' + (active ? 'var(--fis-green-700,#15803D)' : 'var(--n-600)') + '; ' +
+             'cursor:pointer;">' + escapeHtml(o.label) + '</button>';
+    }).join('');
+    host.querySelectorAll('[data-cf-tf]').forEach(btn => {
+      btn.onclick = () => {
+        window.__cfTrancheFilter = btn.dataset.cfTf;
+        try {
+          const rows = (typeof computeCashflows === 'function') ? computeCashflows() : [];
+          renderStage1Cashflows(rows);
+        } catch(err){ console.warn('[CF] tranche re-render failed:', err); }
+      };
+    });
+  }
+
+  // Project a full-deal row into a single tranche's slice using the
+  // breakdown arrays (each item carries trancheName). Interest / fees /
+  // drawdowns / repayments are re-summed for the chosen tranche; balance
+  // is recomputed from that tranche's opening drawn balance.
+  function projectRowForTranche(r, trancheName){
+    if(!r) return r;
+    if(!trancheName || trancheName === 'all') return r;
+    const ib = (r.interestBreakdown || []).filter(x => x.trancheName === trancheName);
+    const fb = (r.feeBreakdown || []).filter(x => {
+      // fee.trancheRef stored on B.fees; feeBreakdown items don't always
+      // carry it. Fall back to "no filter" behaviour — show fees only
+      // attributed to this tranche (label heuristic later).
+      return x.trancheName === trancheName;
+    });
+    const db = (r.drawdownsBreakdown || []).filter(x => x.trancheName === trancheName);
+    const rb = (r.repaymentsBreakdown || []).filter(x => x.trancheName === trancheName);
+    const interest = ib.reduce((s, x) => s + (+x.accrual || 0), 0);
+    const fees = fb.reduce((s, x) => s + (+x.amount || 0), 0);
+    const drawdowns = db.reduce((s, x) => s + (+x.amount || 0), 0);
+    const repayments = rb.reduce((s, x) => s + (+x.amount || 0), 0);
+    // Approximate balance = mean drawnBalance across interest components for this tranche
+    const balances = ib.map(x => +x.drawnBalance || 0);
+    const balance = balances.length ? (balances.reduce((s,x)=>s+x,0) / balances.length) : 0;
+    const netCash = interest + fees + repayments - drawdowns;
+    return Object.assign({}, r, {
+      balance, drawdowns, repayments, interest, fees, netCash,
+      total: interest + fees,
+      interestBreakdown: ib, feeBreakdown: fb,
+      drawdownsBreakdown: db, repaymentsBreakdown: rb,
+      _filteredTranche: trancheName
+    });
+  }
+
   // ─── Stage 1 — Cashflow Generation view (consumes builder output) ───
   function renderStage1Cashflows(rows){
     const host = $b('cf-stage1-host');
@@ -34454,6 +35313,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const kpis = $b('cf-stage1-kpis');
     const status = document.getElementById('portf-status');
     if(!host) return;
+    // Refresh the tranche toggle strip (idempotent).
+    renderCfTrancheFilter();
+    // Apply tranche filter if set.
+    const tf = window.__cfTrancheFilter || 'all';
+    if(rows && rows.length && tf !== 'all'){
+      rows = rows.map(r => projectRowForTranche(r, tf));
+    }
     if(!rows || !rows.length){
       // v4 empty state — matches Notices / Watchlist / Portfolio.
       host.innerHTML =
@@ -34546,35 +35412,125 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         '</ul>' +
       '</div>'
     ) : '';
+    // ─── Enrich rows with running totals for the new columns ─────
+    // Commitment to date  — running total of the facility commitment
+    //                       (base commitment + any commitment_events increases;
+    //                        for now we hold the current commitment flat since
+    //                        deal_commitment_events aren't hydrated onto B).
+    // Drawdown to date    — running sum of drawdowns
+    // Undrawn balance     — commitment_to_date − drawdown_to_date
+    // Interest accrued to date — running sum of period interest
+    // Interest paid       — assume paid per period (equal to accrued for now;
+    //                       will refine when coupon-split fields land)
+    // Capitalized cost to date — running sum of fees classified as
+    //                       origination/arrangement/capitalisedCost (Tier 1 #12)
+    const facilityCommitment = ((window.B || {}).facility || {}).commitment || 0;
+    let cumDraw = 0, cumIntAcc = 0, cumIntPaid = 0, cumCapCost = 0;
+    // Sum of currently-known capitalised costs (Tier 1 #12) — flat, applied
+    // in the period that contains each event's date.
+    const inst2 = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    const capCostEvents = (inst2 && Array.isArray(inst2.principalSchedule))
+      ? inst2.principalSchedule.filter(e => e.type === 'capitalisedCost')
+      : [];
+    // Enrich each row in place with the new derived fields
+    rows = rows.map(r => {
+      cumDraw += (+r.drawdowns || 0);
+      cumIntAcc += (+r.interest || 0);
+      // Interest paid — approximate as the accrued interest of this period.
+      // When coupon frequency < accrual frequency this understates, but the
+      // engine's schedule-JE splitter fills that in downstream.
+      const paidThisPeriod = (+r.interest || 0);
+      cumIntPaid += paidThisPeriod;
+      // Capitalised costs falling in this period
+      const capThisPeriod = capCostEvents
+        .filter(e => e.date && e.date >= r.start && e.date < r.end)
+        .reduce((s, e) => s + (+e.amount || 0), 0);
+      cumCapCost += capThisPeriod;
+      return Object.assign({}, r, {
+        commitmentToDate: facilityCommitment,
+        drawdownToDate:   cumDraw,
+        undrawnBalance:   Math.max(0, facilityCommitment - cumDraw),
+        outstandingBalance: r.balance,
+        interestAccruedToDate: cumIntAcc,
+        interestPaidThisPeriod: paidThisPeriod,
+        interestPaidToDate:    cumIntPaid,
+        capCostThisPeriod:     capThisPeriod,
+        capCostToDate:         cumCapCost
+      });
+    });
+    // Stash the enriched rows for the XLSX exporter to reuse
+    window.__cfLastEnrichedRows = rows;
+    // Also render the All-in Yield chart alongside the table
+    try { renderStage1AllInYield(rows); } catch(err){ console.warn('[CF] yield chart failed:', err); }
+
+    // ─── Column definitions — pipe every visible cell through here ─────
+    // Each column: key (stable id used in prefs), label, align, tooltip, cell
+    // renderer taking (r) → HTML fragment. Visibility comes from the user
+    // preference (localStorage, per user email). See __cfGetVisibleCols().
+    const CF_COL_DEFS = [
+      { key:'period_start', label:'Period start', align:'left',  render:r => `<td style="padding:6px 10px; color:var(--n-800);">${r.start}</td>` },
+      { key:'period_end',   label:'Period end',   align:'left',  render:r => `<td style="padding:6px 10px; color:var(--n-800);">${r.end}</td>` },
+      { key:'commitment_to_date', label:'Commitment to date', align:'right', title:'Facility commitment as of this period (base + upsizes)',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:var(--n-700); font-weight:500;">${fmtCcy(r.commitmentToDate)}</td>` },
+      { key:'drawdown_to_date', label:'Drawdown to date', align:'right', title:'Cumulative drawdowns disbursed',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:var(--n-800); font-weight:500;">${fmtCcy(r.drawdownToDate)}</td>` },
+      { key:'undrawn_balance', label:'Balance (undrawn)', align:'right', title:'Commitment to date − Drawdown to date',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:${r.undrawnBalance>0?'var(--fis-green-700,#15803D)':'var(--n-400)'}; font-weight:600;">${fmtCcy(r.undrawnBalance)}</td>` },
+      { key:'outstanding', label:'Outstanding', align:'right', title:'Currently drawn (outstanding) balance',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:var(--n-900); font-weight:500;">${fmtCcy(r.outstandingBalance)}</td>` },
+      { key:'drawdowns', label:'Drawdowns', align:'right', title:'Cash disbursed to borrower this period',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:${r.drawdowns>0?'#B91C1C':'var(--n-400)'}; font-weight:${r.drawdowns>0?'600':'400'};">${r.drawdowns>0 ? '−'+fmtCcy(r.drawdowns) : '—'}</td>` },
+      { key:'interest_accrued', label:'Interest accrued', align:'right',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:500;">${fmtCcy(r.interest)}</td>` },
+      { key:'interest_accrued_to_date', label:'Interest accrued to date', align:'right', title:'Cumulative interest accrued',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:400; opacity:0.8;">${fmtCcy(r.interestAccruedToDate)}</td>` },
+      { key:'interest_paid', label:'Interest paid', align:'right', title:'Cash interest paid this period (splits on coupon cadence)',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:500;">${fmtCcy(r.interestPaidThisPeriod)}</td>` },
+      { key:'fees', label:'Fees', align:'right',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:#B45309; font-weight:500;">${fmtCcy(r.fees)}</td>` },
+      { key:'cap_cost_to_date', label:'Cap. cost to date', align:'right', title:'Capitalised origination / arrangement / transaction costs — feeds realised G/L on sale',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:${r.capCostToDate>0?'#7C2D12':'var(--n-400)'}; font-weight:${r.capCostToDate>0?'600':'400'};">${r.capCostToDate>0?fmtCcy(r.capCostToDate):'—'}</td>` },
+      { key:'paydowns', label:'Paydowns', align:'right', title:'Principal paid down (incl. Stage 2 cash transtypes)',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:${r.repayments>0?'var(--fis-green-700,#15803D)':'var(--n-400)'}; font-weight:${r.repayments>0?'600':'400'};">${r.repayments>0 ? fmtCcy(r.repayments) : '—'}</td>` },
+      { key:'net_cash', label:'Net cash', align:'right', title:'Interest + Fees + Paydowns − Drawdowns',
+        render:r => `<td style="padding:6px 10px; text-align:right; color:${r.netCash<0?'#7F1D1D':'var(--fis-green-700,#15803D)'}; font-weight:600;">${r.netCash<0?'−'+fmtCcy(-r.netCash):fmtCcy(r.netCash)}</td>` }
+    ];
+    // Stash definitions on window so the column picker + XLSX exporter can
+    // read the same source of truth.
+    window.__cfColDefs = CF_COL_DEFS;
+    // Read the user's visibility preference (per-user localStorage) — merge
+    // with defaults for any newly added columns.
+    const visibleKeys = __cfGetVisibleCols(CF_COL_DEFS);
+    const visibleCols = CF_COL_DEFS.filter(c => visibleKeys.indexOf(c.key) !== -1);
+    const colSpanN = visibleCols.length;
+
     // v4 table — neutral zinc header, sentence-case columns, tabular
     // numerics, tight row rhythm, quiet hover, muted em-dashes.
-    const html = stage2CashBanner + bannerHtml + `<table class="w-full" style="font-size:11px; font-variant-numeric:tabular-nums;">
+    // Per-column WIDTH (not min-width — tables ignore min-width under the
+    // auto layout algorithm). Use table-layout:fixed + explicit widths so
+    // the total table width is deterministic and forces horizontal overflow
+    // of the container.
+    const _colW = { period_start:110, period_end:110 };   // dates
+    const _wFor = k => _colW[k] || 130;                   // money default
+    const _tableW = visibleCols.reduce((s, c) => s + _wFor(c.key), 0);
+    const html = stage2CashBanner + bannerHtml + `<table style="width:${_tableW}px; table-layout:fixed; font-size:11px; font-variant-numeric:tabular-nums; border-collapse:collapse;">
+      <colgroup>
+        ${visibleCols.map(c => `<col style="width:${_wFor(c.key)}px;">`).join('')}
+      </colgroup>
       <thead style="position:sticky; top:0; background:var(--n-50, #FAFAFA); z-index:1;">
         <tr style="border-bottom:0.5px solid var(--n-200);">
-          <th style="text-align:left; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Period start</th>
-          <th style="text-align:left; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Period end</th>
-          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Balance</th>
-          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;" title="Cash disbursed to borrower">Drawdowns</th>
-          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Interest</th>
-          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Fees</th>
-          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;" title="Principal paid down (incl. Stage 2 cash transtypes)">Paydowns</th>
-          <th style="text-align:right; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;" title="Interest + Fees + Paydowns − Drawdowns">Net cash</th>
+          ${visibleCols.map(c =>
+            `<th style="text-align:${c.align}; padding:8px 10px 7px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"${c.title?` title="${c.title.replace(/"/g,'&quot;')}"`:''}>${c.label}</th>`
+          ).join('')}
         </tr>
       </thead>
       <tbody>
       ${rows.map((r, i) => `
         <tr class="s1-row" style="cursor:pointer; border-top:0.5px solid var(--n-100); transition:background 100ms ease;" data-s1-row="${i}">
-          <td style="padding:6px 10px; color:var(--n-800);">${r.start}</td>
-          <td style="padding:6px 10px; color:var(--n-800);">${r.end}</td>
-          <td style="padding:6px 10px; text-align:right; color:var(--n-900); font-weight:500;">${fmtCcy(r.balance)}</td>
-          <td style="padding:6px 10px; text-align:right; color:${r.drawdowns>0?'#B91C1C':'var(--n-400)'}; font-weight:${r.drawdowns>0?'600':'400'};">${r.drawdowns>0 ? '−'+fmtCcy(r.drawdowns) : '—'}</td>
-          <td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:500;">${fmtCcy(r.interest)}</td>
-          <td style="padding:6px 10px; text-align:right; color:#B45309; font-weight:500;">${fmtCcy(r.fees)}</td>
-          <td style="padding:6px 10px; text-align:right; color:${r.repayments>0?'var(--fis-green-700,#15803D)':'var(--n-400)'}; font-weight:${r.repayments>0?'600':'400'};">${r.repayments>0 ? fmtCcy(r.repayments) : '—'}</td>
-          <td style="padding:6px 10px; text-align:right; color:${r.netCash<0?'#7F1D1D':'var(--fis-green-700,#15803D)'}; font-weight:600;">${r.netCash<0?'−'+fmtCcy(-r.netCash):fmtCcy(r.netCash)}</td>
+          ${visibleCols.map(c => c.render(r)).join('')}
         </tr>
         <tr class="hidden" data-s1-detail="${i}">
-          <td colspan="8" style="background:var(--n-50, #FAFAFA); padding:8px 12px; border-top:0.5px dashed var(--n-200); border-bottom:0.5px dashed var(--n-200);">${renderRowDetail(r)}</td>
+          <td colspan="${colSpanN}" style="background:var(--n-50, #FAFAFA); padding:8px 12px; border-top:0.5px dashed var(--n-200); border-bottom:0.5px dashed var(--n-200);">${renderRowDetail(r)}</td>
         </tr>
       `).join('')}
       </tbody>
@@ -34589,6 +35545,308 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       };
     });
   }
+
+  // ─── All-in Yield chart — EIR-style rate curve per period ─────────────
+  // Composes the effective rate for each period from every rate & fee input
+  // on the deal: base rate + spread + ratchet + ESG + OID/PIK amort + fees
+  // amortised straight-line over the deal life. This is a visual, not an
+  // audit-grade EIR — for the exact IFRS EIR use the Accounting Engine.
+  function renderStage1AllInYield(enrichedRows){
+    const panel = document.getElementById('cf-yield-panel');
+    const host  = document.getElementById('cf-yield-chart');
+    const chip  = document.getElementById('cf-yield-eir-chip');
+    const leg   = document.getElementById('cf-yield-legend');
+    if(!panel || !host) return;
+    const B_ = window.B;
+    if(!B_ || !enrichedRows || !enrichedRows.length){ panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    const t0 = B_.tranches && B_.tranches[0];
+    const ic0 = t0 && t0.interestComponents && t0.interestComponents[0];
+    if(!t0 || !ic0){ host.innerHTML = '<div style="font-size:11px;color:var(--n-500);padding:8px 0;">No interest component to plot.</div>'; return; }
+    // Total capitalised costs + arrangement/OID/exit fees — amortised
+    // straight-line across the deal life to feed the all-in yield bump.
+    const totalCommit = (B_.facility && +B_.facility.commitment) || t0.face || 1;
+    let feeSumForAmort = 0;
+    (B_.fees || []).forEach(f => {
+      if(f.mode === 'fixAmount' && (f.kind === 'arrangement' || f.kind === 'origination' || f.kind === 'agency')){
+        feeSumForAmort += (+f.flatAmount || 0);
+      }
+      // Approximate OID/PIK contribution using capitalised costs (Tier 1 #12)
+    });
+    const settle = B_.deal && B_.deal.settle ? new Date(B_.deal.settle) : null;
+    const maturity = B_.deal && B_.deal.maturity ? new Date(B_.deal.maturity) : null;
+    const yearsLife = (settle && maturity) ? Math.max(0.5, (maturity - settle) / (365.25 * 86400000)) : 3;
+    const feeBps = totalCommit > 0 ? Math.round((feeSumForAmort / totalCommit) / yearsLife * 10000) : 0;
+    // Series: for each row midpoint compute base + spread + esg + ratchet + fee-amort
+    const series = enrichedRows.map(r => {
+      const mid = r.start;
+      const base = +ic0.baseValue || 0;
+      const band = (ic0.spreads || []).find(s => (!s.from || s.from <= mid) && (!s.to || s.to >= mid));
+      const spreadBps = band ? (+band.bps || 0) : 0;
+      const esgBps = +ic0.esgAdjustmentBps || 0;
+      let ratchetBps = 0;
+      if(ic0.ratchet && ic0.ratchet.tiers && ic0.ratchet.tiers.length){
+        ratchetBps = +ic0.ratchet.tiers[0].marginBps || 0;
+      }
+      const allIn = base + (spreadBps + esgBps + ratchetBps + feeBps) / 10000;
+      return { date: r.end, allIn, base, spreadBps, esgBps, ratchetBps, feeBps };
+    });
+    // Simple mean for the header EIR chip
+    const meanAllIn = series.reduce((s,x)=>s+x.allIn, 0) / (series.length || 1);
+    if(chip) chip.textContent = 'EIR ≈ ' + (meanAllIn * 100).toFixed(3) + '%';
+    // Draw as inline SVG line chart
+    const W = 1100, H = 160, PADL = 44, PADR = 16, PADT = 10, PADB = 24;
+    const innerW = W - PADL - PADR, innerH = H - PADT - PADB;
+    const ys = series.map(s => s.allIn);
+    const minY = Math.min(...ys) * 0.98;
+    const maxY = Math.max(...ys) * 1.02;
+    const yRange = Math.max(0.0001, maxY - minY);
+    const xStep = innerW / Math.max(1, series.length - 1);
+    const pts = series.map((s, i) => {
+      const x = PADL + i * xStep;
+      const y = PADT + innerH - ((s.allIn - minY) / yRange) * innerH;
+      return { x, y, s };
+    });
+    const path = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+    // Y-axis labels
+    const yTicks = 4;
+    let yTickLabels = '';
+    for(let i = 0; i <= yTicks; i++){
+      const val = minY + (yRange * i / yTicks);
+      const y = PADT + innerH - (i / yTicks) * innerH;
+      yTickLabels += '<line x1="' + PADL + '" y1="' + y + '" x2="' + (W - PADR) + '" y2="' + y + '" stroke="#F3F4F6" stroke-width="0.5"/>' +
+        '<text x="' + (PADL - 6) + '" y="' + (y + 3) + '" font-size="9" fill="#6B7280" text-anchor="end">' + (val * 100).toFixed(2) + '%</text>';
+    }
+    // X-axis labels: first, quartiles, last
+    const xIdx = [0, Math.floor(series.length/4), Math.floor(series.length/2), Math.floor(series.length*3/4), series.length - 1];
+    let xTickLabels = '';
+    xIdx.forEach(i => {
+      if(!series[i]) return;
+      const x = PADL + i * xStep;
+      xTickLabels += '<text x="' + x + '" y="' + (H - 4) + '" font-size="9" fill="#6B7280" text-anchor="middle">' + series[i].date + '</text>';
+    });
+    // Area fill under the line
+    const area = 'M ' + pts[0].x + ' ' + (PADT + innerH) + ' ' + pts.map(p => 'L ' + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ') +
+                 ' L ' + pts[pts.length - 1].x + ' ' + (PADT + innerH) + ' Z';
+    host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="none" style="max-height:180px;">' +
+      yTickLabels + xTickLabels +
+      '<path d="' + area + '" fill="#4338CA" fill-opacity="0.08"/>' +
+      '<path d="' + path + '" stroke="#4338CA" stroke-width="1.6" fill="none"/>' +
+      pts.filter((_, i) => i % Math.max(1, Math.floor(series.length/12)) === 0).map(p =>
+        '<circle cx="' + p.x + '" cy="' + p.y + '" r="2" fill="#4338CA">' +
+          '<title>' + p.s.date + ' · ' + (p.s.allIn*100).toFixed(3) + '%\nbase ' + (p.s.base*100).toFixed(2) + '%\nspread ' + p.s.spreadBps + ' bps\nratchet ' + p.s.ratchetBps + ' bps\nESG ' + p.s.esgBps + ' bps\nfee amort ' + p.s.feeBps + ' bps</title>' +
+        '</circle>'
+      ).join('') +
+      '</svg>';
+    // Legend
+    if(leg){
+      const s0 = series[0] || {};
+      leg.innerHTML =
+        '<span><span style="display:inline-block;width:8px;height:8px;background:#4338CA;border-radius:2px;margin-right:4px;"></span>All-in EIR</span>' +
+        '<span>Base ' + ((s0.base||0)*100).toFixed(2) + '%</span>' +
+        '<span>Spread ' + (s0.spreadBps||0) + ' bps</span>' +
+        '<span>Ratchet ' + (s0.ratchetBps||0) + ' bps</span>' +
+        '<span>ESG ' + (s0.esgBps||0) + ' bps</span>' +
+        '<span>Fee amort ' + (s0.feeBps||0) + ' bps <span style="color:var(--n-400)">(over ' + yearsLife.toFixed(1) + 'y life)</span></span>';
+    }
+  }
+
+  // Expose so external callers (period-picker, tranche filter) can refresh.
+  window.renderStage1AllInYield = renderStage1AllInYield;
+
+  // ─── Cashflow column visibility — per-user preferences ─────────────────
+  // Storage key includes the current user email so different sign-ins on the
+  // same browser don't clobber each other. Falls back to a generic key for
+  // anonymous sessions. Preference format: JSON array of column keys.
+  function __cfPrefsKey(){
+    const email = (window.SB && window.SB.userEmail) ||
+                  (window.SB && window.SB.session && window.SB.session.user && window.SB.session.user.email) ||
+                  '_anon';
+    return 'cf-cols:' + String(email).toLowerCase();
+  }
+  function __cfGetVisibleCols(defs){
+    try {
+      const raw = localStorage.getItem(__cfPrefsKey());
+      if(raw){
+        const arr = JSON.parse(raw);
+        if(Array.isArray(arr) && arr.length){
+          // Keep only known column keys — drop stale entries silently
+          const validKeys = new Set(defs.map(c => c.key));
+          const kept = arr.filter(k => validKeys.has(k));
+          if(kept.length) return kept;
+        }
+      }
+    } catch(_){}
+    // Default: everything visible
+    return defs.map(c => c.key);
+  }
+  function __cfSetVisibleCols(keys){
+    try { localStorage.setItem(__cfPrefsKey(), JSON.stringify(keys)); } catch(_){}
+  }
+  // Expose so the XLSX exporter can honour the same visibility set
+  window.__cfGetVisibleCols = () => (window.__cfColDefs ? __cfGetVisibleCols(window.__cfColDefs) : []);
+
+  window.__cfOpenColumnPicker = function(ev){
+    if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+    const panel = document.getElementById('cf-column-picker');
+    if(!panel) return;
+    if(panel.style.display === 'block'){ panel.style.display = 'none'; return; }
+    const defs = window.__cfColDefs || [];
+    if(!defs.length){
+      panel.innerHTML = '<div style="font-size:11px;color:var(--n-500);padding:8px;">Build a deal first — columns appear once cashflows are generated.</div>';
+      panel.style.display = 'block';
+      return;
+    }
+    const cur = new Set(__cfGetVisibleCols(defs));
+    const items = defs.map(c => (
+      '<label style="display:flex; align-items:center; gap:8px; padding:5px 6px; border-radius:5px; cursor:pointer; font-size:12px;">' +
+        '<input type="checkbox" data-cf-col="' + c.key + '"' + (cur.has(c.key) ? ' checked' : '') + ' style="accent-color:#4338CA;"/>' +
+        '<span style="flex:1;">' + c.label + '</span>' +
+      '</label>'
+    )).join('');
+    panel.innerHTML =
+      '<div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">' +
+        '<div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-500);">Choose columns</div>' +
+        '<span style="flex:1;"></span>' +
+        '<button type="button" id="cf-col-all" style="font-size:10.5px; color:var(--indigo-700,#4338CA); background:none; border:none; cursor:pointer; padding:2px 6px;">All</button>' +
+        '<button type="button" id="cf-col-none" style="font-size:10.5px; color:var(--n-500); background:none; border:none; cursor:pointer; padding:2px 6px;">Min</button>' +
+      '</div>' +
+      '<div id="cf-col-list" style="display:flex; flex-direction:column;">' + items + '</div>' +
+      '<div style="border-top:0.5px solid var(--n-200); margin-top:8px; padding-top:8px; display:flex; gap:6px; align-items:center;">' +
+        '<span style="font-size:10px; color:var(--n-500); flex:1;">Saved to your profile — persists across sessions.</span>' +
+        '<button type="button" id="cf-col-close" style="font-size:11px; padding:4px 10px; border:0.5px solid var(--n-300); border-radius:5px; background:var(--n-0); cursor:pointer;">Done</button>' +
+      '</div>';
+    panel.style.display = 'block';
+    const commit = () => {
+      const keys = Array.from(panel.querySelectorAll('input[data-cf-col]:checked')).map(el => el.getAttribute('data-cf-col'));
+      // Guard against 0 columns — always keep at least the two date columns.
+      const finalKeys = keys.length ? keys : ['period_start', 'period_end'];
+      __cfSetVisibleCols(finalKeys);
+      try {
+        const rows = (typeof computeCashflows === 'function') ? computeCashflows() : [];
+        renderStage1Cashflows(rows);
+      } catch(err){ console.warn('[CF] col re-render failed:', err); }
+    };
+    panel.querySelectorAll('input[data-cf-col]').forEach(cb => cb.addEventListener('change', commit));
+    const _all = panel.querySelector('#cf-col-all');
+    const _none = panel.querySelector('#cf-col-none');
+    if(_all) _all.addEventListener('click', () => {
+      panel.querySelectorAll('input[data-cf-col]').forEach(cb => { cb.checked = true; });
+      commit();
+    });
+    if(_none) _none.addEventListener('click', () => {
+      // "Min" preset: just show the essentials
+      const minSet = new Set(['period_start','period_end','undrawn_balance','interest_accrued','net_cash']);
+      panel.querySelectorAll('input[data-cf-col]').forEach(cb => { cb.checked = minSet.has(cb.getAttribute('data-cf-col')); });
+      commit();
+    });
+    const _close = panel.querySelector('#cf-col-close');
+    if(_close) _close.addEventListener('click', () => { panel.style.display = 'none'; });
+  };
+  // Click-outside closes the picker
+  document.addEventListener('click', function(ev){
+    const panel = document.getElementById('cf-column-picker');
+    if(!panel || panel.style.display !== 'block') return;
+    if(panel.contains(ev.target)) return;
+    if(ev.target.closest && ev.target.closest('#btn-cf-columns')) return;
+    panel.style.display = 'none';
+  });
+
+  // ─── Cashflow → Excel exporter ───────────────────────────────────────
+  // Uses SheetJS (XLSX global — loaded via CDN in the page head, verified
+  // present at line ~182). Falls back to CSV if SheetJS is missing.
+  window.__cfExportXlsx = function(){
+    const rows = window.__cfLastEnrichedRows;
+    if(!rows || !rows.length){
+      if(typeof toast === 'function') toast('No cashflows to export — build a deal first', 3000, { kind:'info' });
+      return;
+    }
+    const dealName = ((window.B || {}).deal || {}).name || 'deal';
+    const safeName = String(dealName).replace(/[^A-Za-z0-9 _.-]/g, '_').replace(/\s+/g, '_');
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const filename = 'cashflows_' + safeName + '_' + dateStamp + '.xlsx';
+    // Honour the user's column-picker preference — export only visible cols.
+    // Map: column key → (label, valueFn). Keep separate from the render defs
+    // because the exporter needs raw numeric values, not styled HTML.
+    const EXPORT_COLS = {
+      period_start:             { label: 'Period start',                v: r => r.start },
+      period_end:               { label: 'Period end',                  v: r => r.end },
+      commitment_to_date:       { label: 'Commitment to date',          v: r => +r.commitmentToDate || 0 },
+      drawdown_to_date:         { label: 'Drawdown to date',            v: r => +r.drawdownToDate || 0 },
+      undrawn_balance:          { label: 'Balance (undrawn)',           v: r => +r.undrawnBalance || 0 },
+      outstanding:              { label: 'Outstanding balance',         v: r => +r.outstandingBalance || 0 },
+      drawdowns:                { label: 'Drawdown (this period)',     v: r => +r.drawdowns || 0 },
+      interest_accrued:         { label: 'Interest accrued (this period)', v: r => +r.interest || 0 },
+      interest_accrued_to_date: { label: 'Interest accrued to date',    v: r => +r.interestAccruedToDate || 0 },
+      interest_paid:            { label: 'Interest paid (this period)', v: r => +r.interestPaidThisPeriod || 0 },
+      fees:                     { label: 'Fees (this period)',          v: r => +r.fees || 0 },
+      cap_cost_to_date:         { label: 'Capitalised cost to date',    v: r => +r.capCostToDate || 0 },
+      paydowns:                 { label: 'Paydowns (this period)',      v: r => +r.repayments || 0 },
+      net_cash:                 { label: 'Net cash (this period)',      v: r => +r.netCash || 0 }
+    };
+    // Fallback if the visibility helper isn't available (first paint edge case)
+    const visKeys = (typeof window.__cfGetVisibleCols === 'function' && window.__cfGetVisibleCols().length)
+      ? window.__cfGetVisibleCols()
+      : Object.keys(EXPORT_COLS);
+    const activeCols = visKeys.filter(k => EXPORT_COLS[k]);
+    const header = activeCols.map(k => EXPORT_COLS[k].label);
+    const body = rows.map(r => activeCols.map(k => EXPORT_COLS[k].v(r)));
+    // Prefer SheetJS for a real .xlsx; fallback to CSV if missing.
+    if(typeof XLSX !== 'undefined' && XLSX.utils){
+      const ws = XLSX.utils.aoa_to_sheet([header].concat(body));
+      // Column widths — dates 12ch, money cols 20ch (comfortable auto-fit)
+      const dateKeys = new Set(['period_start', 'period_end']);
+      ws['!cols'] = activeCols.map(k => ({ wch: dateKeys.has(k) ? 12 : 20 }));
+      // Number format on money columns (everything that isn't a date col)
+      const nfmt = '#,##0.00;[Red]-#,##0.00;-';
+      for(let r = 1; r <= body.length; r++){
+        for(let c = 0; c < activeCols.length; c++){
+          if(dateKeys.has(activeCols[c])) continue;
+          const addr = XLSX.utils.encode_cell({ r, c });
+          if(ws[addr]) ws[addr].z = nfmt;
+        }
+      }
+      // Freeze the header row (and first two cols if date cols are present)
+      const dateColsInSet = activeCols.filter(k => dateKeys.has(k)).length;
+      ws['!freeze'] = { xSplit: dateColsInSet, ySplit: 1 };
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Cashflows');
+      // Meta sheet — deal identity, run stamp, tranche filter, period cadence
+      const metaAoA = [
+        ['Deal name', dealName],
+        ['Deal ID', ((window.B || {}).deal || {}).dealId || ''],
+        ['Currency', ((window.B || {}).deal || {}).currency || ''],
+        ['Settle', ((window.B || {}).deal || {}).settle || ''],
+        ['Maturity', ((window.B || {}).deal || {}).maturity || ''],
+        ['Commitment', ((window.B || {}).facility || {}).commitment || 0],
+        ['Period cadence', (document.getElementById('cf-period-picker') || {}).value || ''],
+        ['Tranche filter', window.__cfTrancheFilter || 'all'],
+        ['Generated', new Date().toISOString()],
+        ['Build', window.PCS_BUILD_LABEL || 'V4']
+      ];
+      const wsMeta = XLSX.utils.aoa_to_sheet(metaAoA);
+      wsMeta['!cols'] = [{ wch: 18 }, { wch: 40 }];
+      XLSX.utils.book_append_sheet(wb, wsMeta, 'Deal meta');
+      XLSX.writeFile(wb, filename);
+      if(typeof toast === 'function') toast('Exported ' + rows.length + ' periods → ' + filename, 3500, { kind:'success' });
+    } else {
+      // CSV fallback — commas + quoting
+      const rowsCsv = [header].concat(body).map(r =>
+        r.map(v => {
+          if(v == null) return '';
+          const s = String(v);
+          return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        }).join(',')
+      ).join('\n');
+      const blob = new Blob(['﻿' + rowsCsv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename.replace(/\.xlsx$/, '.csv');
+      a.click();
+      URL.revokeObjectURL(url);
+      if(typeof toast === 'function') toast('SheetJS missing — exported as CSV instead', 3500, { kind:'info' });
+    }
+  };
 
   // Stage 1 buttons
   function wireStage1Buttons(){
@@ -34613,7 +35871,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       $b(id)?.addEventListener('change', recompute);
     });
     $b('btn-add-tranche')?.addEventListener('click', () => { B.tranches.push(newTranche()); renderTranches(); recompute(); });
-    $b('btn-add-fee')?.addEventListener('click', () => { B.fees.push(newFee()); renderFees(); recompute(); });
+    // btn-add-fee now routes to Lifecycle Events via inline onclick — the
+    // legacy addEventListener wire is left disabled so it doesn't double-fire
+    // (would inject an empty fee card in the Loan Builder every click).
+    // $b('btn-add-fee')?.addEventListener('click', () => { B.fees.push(newFee()); renderFees(); recompute(); });
     $b('btn-add-covenant')?.addEventListener('click', () => {
       B.covenants = B.covenants || [];
       B.covenants.push(newCovenant());
@@ -34707,6 +35968,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const btn = $('.tab-btn[data-tab="' + tab + '"]');
     if(btn) btn.click();
     v4SyncActive();
+    // Auto-render the Lifecycle Events page on nav — the tab is a static
+    // section, but its rows come from live B.tranches / B.fees / inst state
+    // so we always want a fresh paint.
+    if(tab === 'lifecycle'){
+      setTimeout(() => { window.__leRender && window.__leRender(); }, 30);
+    }
   };
 
   function v4SyncActive(){
@@ -38052,6 +39319,740 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const el = $('bench-modal'); if(el) el.style.display = 'none';
   };
 
+  // ─── Lifecycle Events modal — one place to see + add every event ─────
+  // Local escape (this IIFE doesn't inherit the Loan Builder's escapeHtml).
+  function _leEsc(s){ return String(s == null ? '' : s).replace(/[<>&"']/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[ch])); }
+  // Catalog of business events supported. Each entry describes:
+  //   key         — stable id
+  //   name        — display name
+  //   type        — 'Credit' | 'Debit' | 'Adjustment'
+  //   category    — grouping label shown in the table
+  //   tier        — 'core' | 'tier1' | 'tier2' (for the Add picker layout)
+  //   trancheAware — true if the event belongs to a specific tranche
+  //   jumpTo      — function that navigates to the correct editor
+  const LE_EVENT_CATALOG = [
+    // ─── Core events (Loan Builder) ───
+    { key:'drawdown',   name:'Drawdown',           type:'Credit',     category:'Funding',      tier:'core', trancheAware:true,
+      icon:'ti-arrow-up-right',
+      hint:'Cash disbursed to the borrower — anchored to a tranche.',
+      jumpTo: function(){ _leGoto('builder', 'tranches-section'); } },
+    { key:'paydown',    name:'Paydown',            type:'Debit',      category:'Repayment',    tier:'core', trancheAware:true,
+      icon:'ti-arrow-down-right',
+      hint:'Principal repayment scheduled or ad-hoc.',
+      jumpTo: function(){ _leGoto('builder', 'tranches-section'); } },
+    { key:'fee',        name:'Fee (arrangement / commitment / …)', type:'Credit', category:'Fees', tier:'core', trancheAware:false,
+      icon:'ti-receipt',
+      hint:'Add an arrangement, commitment, utilisation, agency, or performance fee.',
+      jumpTo: function(){ _leGoto('builder', 'b-fees-section'); } },
+    // ─── Tier 1 transtypes (Accounting → Treatment) ───
+    { key:'t3',  name:'Mid-Period Purchase',  type:'Debit',      category:'Trading',       tier:'tier1', trancheAware:false, icon:'ti-shopping-cart', hint:'Accrued interest paid to seller at trade date.', jumpTo: () => _leGoto('stage-2', 't3-status-chip') },
+    { key:'t4',  name:'Prepayment (voluntary)', type:'Debit',    category:'Repayment',     tier:'tier1', trancheAware:false, icon:'ti-fast-forward', hint:'Voluntary early repayment with optional penalty schedule.', jumpTo: () => _leGoto('stage-2', 't4-status-chip') },
+    { key:'t5',  name:'Prepayment penalty schedule', type:'Credit', category:'Fees',       tier:'tier1', trancheAware:false, icon:'ti-clipboard-list', hint:'Time-banded penalty (2% Yr1 · 1% Yr2 · 0% thereafter).', jumpTo: () => _leGoto('stage-2', 't5-status-chip') },
+    { key:'t67', name:'Default interest & fee', type:'Credit',   category:'Default',       tier:'tier1', trancheAware:false, icon:'ti-alert-triangle', hint:'Covenant-breach penalty rate (+bps) plus one-off default fee.', jumpTo: () => _leGoto('stage-2', 't67-status-chip') },
+    { key:'t8',  name:'Write-Off',            type:'Adjustment', category:'Loss',          tier:'tier1', trancheAware:false, icon:'ti-circle-x',       hint:'Stage 3 derecognition — allowance absorbs first, residual to P&L.', jumpTo: () => _leGoto('stage-2', 't8-status-chip') },
+    { key:'t9',  name:'Recovery',             type:'Credit',     category:'Recovery',      tier:'tier1', trancheAware:false, icon:'ti-coin',           hint:'Cash recovered post-write-off — reverses prior impairment.', jumpTo: () => _leGoto('stage-2', 't9-status-chip') },
+    { key:'t10', name:'Cure (Stage reversal)', type:'Adjustment', category:'Modification', tier:'tier1', trancheAware:false, icon:'ti-heart-rate-monitor', hint:'Borrower returns to performing — release ECL allowance.', jumpTo: () => _leGoto('stage-2', 't10-status-chip') },
+    { key:'t11', name:'Forbearance (payment holiday)', type:'Adjustment', category:'Modification', tier:'tier1', trancheAware:false, icon:'ti-player-pause', hint:'Defers expected interest into 40100 reclass.', jumpTo: () => _leGoto('stage-2', 't11-status-chip') },
+    { key:'t12', name:'Capitalised origination costs', type:'Debit', category:'Fees',      tier:'tier1', trancheAware:false, icon:'ti-file-invoice',    hint:'Legal / transaction / valuation costs capitalised at signing.', jumpTo: () => _leGoto('stage-2', 't12-status-chip') },
+    // ─── Tier 2 transtypes (Accounting → Treatment) ───
+    { key:'t13', name:'Loan Sale (Full Derecognition)', type:'Credit', category:'Disposal', tier:'tier2', trancheAware:false, icon:'ti-tag',           hint:'Full derecognition — gain/loss to P&L per IFRS 9 §3.2.3.', jumpTo: () => _leGoto('stage-2', 't13-status-chip') },
+    { key:'t14', name:'Loan Participation (Partial Sell-Down)', type:'Credit', category:'Disposal', tier:'tier2', trancheAware:false, icon:'ti-chart-pie', hint:'Partial sale — fully-proportionate share transfer test.', jumpTo: () => _leGoto('stage-2', 't14-status-chip') },
+    { key:'t15', name:'Debt-for-Equity Swap', type:'Adjustment', category:'Restructuring', tier:'tier2', trancheAware:false, icon:'ti-arrows-exchange', hint:'IFRIC 19 — extinguish loan, recognise equity at fair value.', jumpTo: () => _leGoto('stage-2', 't15-status-chip') },
+    { key:'t16', name:'Mandatory Prepayment', type:'Debit', category:'Repayment',         tier:'tier2', trancheAware:false, icon:'ti-alert-square', hint:'Change-of-control · ECF sweep · asset sale · IPO · insurance.', jumpTo: () => _leGoto('stage-2', 't16-status-chip') },
+    { key:'t17', name:'Amortisation profile change', type:'Adjustment', category:'Modification', tier:'tier2', trancheAware:false, icon:'ti-stairs', hint:'Convert bullet to amortising, or reshape existing amort schedule.', jumpTo: () => _leGoto('stage-2', 't17-status-chip') },
+    { key:'t18', name:'Trade Date settlement', type:'Adjustment', category:'Timing',      tier:'tier2', trancheAware:false, icon:'ti-calendar-event', hint:'Trade-date vs settlement-date accounting split.', jumpTo: () => _leGoto('stage-2', 't18-status-chip') }
+  ];
+
+  // Legacy navigate-to-tab helper — kept for the pencil "edit" action which
+  // still jumps to the source editor for fees (Loan Builder Fees) since fee
+  // editing is complex. Drawdown / paydown / Tier 1&2 all now use the inline
+  // form via __leOpenEventForm() below.
+  function _leGoto(tabName, targetId){
+    try {
+      const tab = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
+      if(tab) tab.click();
+      setTimeout(() => {
+        const t = document.getElementById(targetId);
+        if(t){
+          t.scrollIntoView({ behavior:'smooth', block:'center' });
+          const orig = t.style.background || '';
+          t.style.transition = 'background 200ms ease';
+          t.style.background = '#FEF3C7';
+          setTimeout(() => { t.style.background = orig; }, 1600);
+        }
+      }, 320);
+    } catch(err){ console.warn('[LE] goto failed:', err); }
+  }
+
+  // ─── Inline event-entry form (centralized creation) ────────────────────
+  // Each event key maps to a form schema: title, hint, fields[], onSubmit(vals).
+  // Fields are lightweight { name, label, type, required, options?, default? }
+  // and get rendered as native inputs into #le-form-fields. onSubmit mutates
+  // the underlying deal state (B.tranches[i].drawdowns, B.fees, or the
+  // instrument's principalSchedule) then re-renders + persists.
+
+  function _leTrancheOptions(){
+    const B_ = window.B || {};
+    return (B_.tranches || []).map((t, i) => ({
+      value: t.id || ('#' + i),
+      label: t.name || ('Tranche ' + String.fromCharCode(65 + i))
+    }));
+  }
+
+  function _leTrancheByRef(ref){
+    const B_ = window.B || {};
+    const tranches = B_.tranches || [];
+    if(!ref) return tranches[0] || null;
+    if(ref.charAt(0) === '#') return tranches[+ref.slice(1)] || null;
+    return tranches.find(t => t.id === ref) || tranches[0] || null;
+  }
+
+  // Recompute + autosave hook — fires whatever the deal state needs after any
+  // event mutation so the Cashflow / Accounting / Dashboard views stay in sync.
+  function _leAfterMutate(){
+    try { if(typeof window.recomputeStage1 === 'function') window.recomputeStage1(); } catch(_){}
+    try { if(window.AutoSave && window.AutoSave.isEnabled && window.AutoSave.isEnabled()) window.AutoSave.schedule(); } catch(_){}
+    try { if(typeof window.renderTranches === 'function') window.renderTranches(); } catch(_){}
+    try { if(typeof window.renderFees === 'function') window.renderFees(); } catch(_){}
+    setTimeout(() => { try { window.__leRender && window.__leRender(); } catch(_){} }, 30);
+  }
+
+  // Ensure inst.principalSchedule exists and push an event onto it. Used by
+  // every Tier 1 / Tier 2 form so we mutate the same array the engine reads.
+  function _lePushInstEvent(ev){
+    const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    if(!inst){
+      throw new Error('No active instrument — load a deal first');
+    }
+    if(!Array.isArray(inst.principalSchedule)) inst.principalSchedule = [];
+    inst.principalSchedule.push(ev);
+    // Force the Stage 1 sync banner to flag "unsynced" — user can then click
+    // the Sync to Cashflow button on Stage 2 (or Cashflow tab re-renders live).
+    try { if(typeof window.syncCashflowsFromStage2 === 'function') window.syncCashflowsFromStage2(); } catch(_){}
+  }
+
+  const EVENT_FORMS = {
+    drawdown: {
+      title: 'Add drawdown',
+      hint: 'Cash disbursed to the borrower on a specific date.',
+      icon: 'ti-arrow-up-right',
+      fields: [
+        { name:'tranche', label:'Tranche', type:'select', required:true, options: _leTrancheOptions },
+        { name:'date',    label:'Date',    type:'date',   required:true, default: () => ((window.B && window.B.deal && window.B.deal.settle) || '') },
+        { name:'amount',  label:'Amount ($)', type:'money',  required:true, placeholder:'e.g. 5,000,000' },
+        { name:'label',   label:'Label (optional)', type:'text', placeholder:'e.g. Construction draw #2' }
+      ],
+      submit: function(v){
+        const t = _leTrancheByRef(v.tranche);
+        if(!t) throw new Error('Tranche not found');
+        t.drawdowns = t.drawdowns || [];
+        t.drawdowns.push({ date: v.date, amount: +v.amount, label: v.label || '' });
+      }
+    },
+    paydown: {
+      title: 'Add paydown',
+      hint: 'Principal repayment scheduled on a specific date.',
+      icon: 'ti-arrow-down-right',
+      fields: [
+        { name:'tranche', label:'Tranche', type:'select', required:true, options: _leTrancheOptions },
+        { name:'date',    label:'Date',    type:'date',   required:true },
+        { name:'amount',  label:'Amount ($)', type:'money',  required:true, placeholder:'e.g. 2,500,000' },
+        { name:'kind',    label:'Kind', type:'select', options: () => [
+          { value:'scheduled', label:'Scheduled' },
+          { value:'bullet',    label:'Bullet at maturity' },
+          { value:'prepay',    label:'Voluntary prepay' }
+        ], default: () => 'scheduled' }
+      ],
+      submit: function(v){
+        const t = _leTrancheByRef(v.tranche);
+        if(!t) throw new Error('Tranche not found');
+        t.repayments = t.repayments || [];
+        t.repayments.push({ date: v.date, amount: +v.amount, kind: v.kind });
+      }
+    },
+    fee: {
+      title: 'Add fee',
+      hint: 'Arrangement, commitment, utilisation, performance, or exit fee.',
+      icon: 'ti-receipt',
+      fields: [
+        { name:'label', label:'Fee name', type:'text', required:true, placeholder:'e.g. Arrangement fee' },
+        { name:'kind',  label:'Kind', type:'select', required:true, options: () => [
+          'arrangement','commitment','utilisation','agency','origination','management','performance','exitFeeIrrHurdle','other'
+        ].map(x => ({ value:x, label:x })), default: () => 'arrangement' },
+        { name:'mode',  label:'Mode', type:'select', required:true, options: () => [
+          { value:'fixPct',        label:'Fix % over base' },
+          { value:'fixAmount',     label:'Fix amount' },
+          { value:'floatBps',      label:'Float bps' },
+          { value:'overFunded',    label:'% over funded balance' },
+          { value:'overUnfunded',  label:'% over unfunded balance' }
+        ], default: () => 'fixPct' },
+        { name:'pct',        label:'% (as decimal, e.g. 0.0075)', type:'number' },
+        { name:'flatAmount', label:'Flat amount ($)',              type:'money' },
+        { name:'bps',        label:'Basis points',                 type:'number' },
+        { name:'base',       label:'Base',                         type:'select', options: () => [
+          { value:'commitment', label:'Commitment' },
+          { value:'funded',     label:'Funded balance' },
+          { value:'unfunded',   label:'Unfunded balance' }
+        ], default: () => 'commitment' },
+        { name:'frequency',  label:'Frequency', type:'select', options: () => [
+          'oneOff','monthly','quarterly','semi','annual'
+        ].map(x => ({ value:x, label:x })), default: () => 'oneOff' },
+        { name:'trancheRef', label:'Applies to tranche', type:'select', options: () => [{ value:'', label:'Facility-wide' }].concat(_leTrancheOptions()) },
+        { name:'paymentDate', label:'Payment date',      type:'date' }
+      ],
+      submit: function(v){
+        const B_ = window.B; if(!B_) throw new Error('No deal loaded');
+        B_.fees = B_.fees || [];
+        B_.fees.push({
+          id: 'FEE_' + Math.random().toString(36).slice(2,8),
+          label: v.label, kind: v.kind, mode: v.mode,
+          pct: v.pct ? +v.pct : 0, flatAmount: v.flatAmount ? +v.flatAmount : 0, bps: v.bps ? +v.bps : 0,
+          base: v.base || 'commitment', frequency: v.frequency || 'oneOff',
+          trancheRef: v.trancheRef || null, paymentDate: v.paymentDate || null
+        });
+      }
+    },
+    // ─── Tier 1 transtypes ───
+    t3: {
+      title: 'Mid-period purchase — accrued interest',
+      hint: 'Accrued-but-unpaid interest paid to seller at the trade date.',
+      icon: 'ti-shopping-cart',
+      fields: [
+        { name:'amount', label:'Trade accrued interest ($)', type:'money', required:true, placeholder:'e.g. 12,500' }
+      ],
+      submit: function(v){
+        const inst = currentInstrument(); if(!inst) throw new Error('No active instrument');
+        inst.tradeAccruedInterest = +v.amount;
+      }
+    },
+    t4: {
+      title: 'Voluntary prepayment',
+      hint: 'Borrower repays early. Penalty (if any) auto-applied from the schedule.',
+      icon: 'ti-fast-forward',
+      fields: [
+        { name:'date',   label:'Date',   type:'date',  required:true },
+        { name:'amount', label:'Amount ($)', type:'money', required:true, placeholder:'e.g. 3,000,000' },
+        { name:'reason', label:'Reason (optional)', type:'text', placeholder:'e.g. Covenant amendment refi' }
+      ],
+      submit: v => _lePushInstEvent({ type:'prepayment', date:v.date, amount:+v.amount, reason:v.reason || '' })
+    },
+    t67: {
+      title: 'Default interest & fee',
+      hint: 'Covenant breach triggers penalty rate (bps) and a one-off default fee.',
+      icon: 'ti-alert-triangle',
+      fields: [
+        { name:'date',   label:'Date',   type:'date',   required:true },
+        { name:'bps',    label:'Default rate (bps)', type:'number', placeholder:'e.g. 200' },
+        { name:'fee',    label:'Default fee amount ($)', type:'money', placeholder:'e.g. 10,000' },
+        { name:'reason', label:'Reason (optional)', type:'text', placeholder:'e.g. Leverage covenant breach' }
+      ],
+      submit: v => _lePushInstEvent({ type:'defaultInterest', date:v.date, bps:+v.bps || 0, fee:+v.fee || 0, reason:v.reason || '' })
+    },
+    t8: {
+      title: 'Write-off',
+      hint: 'Stage 3 derecognition — allowance absorbs first, residual to P&L (IFRS 9 §5.4.4).',
+      icon: 'ti-circle-x',
+      fields: [
+        { name:'date',   label:'Date',   type:'date',   required:true },
+        { name:'amount', label:'Amount ($) — leave blank for full balance', type:'money' },
+        { name:'reason', label:'Reason (optional)', type:'text', placeholder:'e.g. Borrower insolvency' }
+      ],
+      submit: v => _lePushInstEvent({ type:'writeOff', date:v.date, amount:v.amount ? +v.amount : null, reason:v.reason || '' })
+    },
+    t9: {
+      title: 'Recovery',
+      hint: 'Cash recovered after write-off — reverses prior impairment expense.',
+      icon: 'ti-coin',
+      fields: [
+        { name:'date',   label:'Date',   type:'date',   required:true },
+        { name:'amount', label:'Recovery amount ($)', type:'money', required:true, placeholder:'e.g. 2,500,000' },
+        { name:'reason', label:'Reason (optional)', type:'text', placeholder:'e.g. Bankruptcy estate distribution' }
+      ],
+      submit: v => _lePushInstEvent({ type:'recovery', date:v.date, amount:+v.amount, reason:v.reason || '' })
+    },
+    t10: {
+      title: 'Cure (stage reversal)',
+      hint: 'Borrower returns to performing — release ECL allowance to P&L.',
+      icon: 'ti-heart-rate-monitor',
+      fields: [
+        { name:'date',   label:'Date',   type:'date',   required:true },
+        { name:'amount', label:'Release amount ($)', type:'money', placeholder:'e.g. 50,000' },
+        { name:'reason', label:'Reason (optional)', type:'text', placeholder:'e.g. Stage 2 → 1 return to performing' }
+      ],
+      submit: v => _lePushInstEvent({ type:'cure', date:v.date, amount:+v.amount || 0, reason:v.reason || '' })
+    },
+    t11: {
+      title: 'Forbearance (payment holiday)',
+      hint: 'Defers expected interest — reclass to 40100.',
+      icon: 'ti-player-pause',
+      fields: [
+        { name:'date',   label:'Date',   type:'date',   required:true },
+        { name:'amount', label:'Deferred interest ($)', type:'money', placeholder:'e.g. 175,000' },
+        { name:'reason', label:'Reason (optional)', type:'text', placeholder:'e.g. 6-month COVID forbearance' }
+      ],
+      submit: v => _lePushInstEvent({ type:'forbearance', date:v.date, amount:+v.amount || 0, reason:v.reason || '' })
+    },
+    t12: {
+      title: 'Capitalised origination costs',
+      hint: 'Legal / transaction / valuation costs capitalised at signing (IFRS 9 §B5.4).',
+      icon: 'ti-file-invoice',
+      fields: [
+        { name:'date',     label:'Date',     type:'date',   required:true },
+        { name:'amount',   label:'Amount ($)', type:'money', required:true, placeholder:'e.g. 150,000' },
+        { name:'category', label:'Category', type:'text', placeholder:'e.g. legal + transaction' }
+      ],
+      submit: v => _lePushInstEvent({ type:'capitalisedCost', date:v.date, amount:+v.amount, category:v.category || '' })
+    },
+    // ─── Tier 2 transtypes ───
+    t13: {
+      title: 'Loan sale (full derecognition)',
+      hint: 'Derecognise entire loan, recognise gain/loss on disposal (IFRS 9 §3.2.3).',
+      icon: 'ti-tag',
+      fields: [
+        { name:'date',      label:'Sale date',      type:'date',  required:true },
+        { name:'salePrice', label:'Sale price ($)', type:'money', required:true, placeholder:'e.g. 9,500,000' },
+        { name:'reason',    label:'Reason (optional)', type:'text', placeholder:'e.g. Portfolio rebalancing' }
+      ],
+      submit: v => _lePushInstEvent({ type:'loanSale', date:v.date, salePrice:+v.salePrice, reason:v.reason || '' })
+    },
+    t14: {
+      title: 'Loan participation (partial sell-down)',
+      hint: 'Fully-proportionate share transfer (IFRS 9 §3.2.6).',
+      icon: 'ti-chart-pie',
+      fields: [
+        { name:'date',        label:'Date',              type:'date',   required:true },
+        { name:'fraction',    label:'Fraction sold (%)', type:'number', required:true, placeholder:'e.g. 50' },
+        { name:'salePrice',   label:'Sale price ($)',    type:'money',  required:true, placeholder:'e.g. 10,050,000' },
+        { name:'participant', label:'Participant (optional)', type:'text', placeholder:'e.g. Pacific Credit Partners' }
+      ],
+      submit: v => _lePushInstEvent({ type:'participation', date:v.date, fraction:(+v.fraction || 0) / 100, salePrice:+v.salePrice, participant:v.participant || '' })
+    },
+    t15: {
+      title: 'Debt-for-equity swap',
+      hint: 'IFRIC 19 — extinguish loan, recognise equity at fair value, restructuring loss.',
+      icon: 'ti-arrows-exchange',
+      fields: [
+        { name:'date',         label:'Swap date',         type:'date',   required:true },
+        { name:'equityFairValue', label:'Equity fair value ($)', type:'money',  required:true, placeholder:'e.g. 9,000,000' },
+        { name:'shares',       label:'Shares received (optional)', type:'number', placeholder:'e.g. 1,500,000' },
+        { name:'reason',       label:'Reason (optional)', type:'text', placeholder:'e.g. Restructuring agreement' }
+      ],
+      submit: v => _lePushInstEvent({ type:'debtEquitySwap', date:v.date, equityFairValue:+v.equityFairValue, shares:+v.shares || 0, reason:v.reason || '' })
+    },
+    t16: {
+      title: 'Mandatory prepayment',
+      hint: 'Change-of-control · ECF sweep · asset sale · IPO · insurance.',
+      icon: 'ti-alert-square',
+      fields: [
+        { name:'date',    label:'Date',    type:'date',   required:true },
+        { name:'amount',  label:'Amount ($) — leave blank for full balance', type:'money' },
+        { name:'trigger', label:'Trigger', type:'select', options: () => [
+          { value:'changeOfControl', label:'Change-of-control' },
+          { value:'excessCashFlow',  label:'Excess cash flow sweep' },
+          { value:'assetSale',       label:'Asset sale proceeds' },
+          { value:'ipo',             label:'IPO proceeds' },
+          { value:'insurance',       label:'Insurance / condemnation' }
+        ], default: () => 'changeOfControl' },
+        { name:'reason',  label:'Reason (optional)', type:'text' }
+      ],
+      submit: v => _lePushInstEvent({ type:'mandatoryPrepayment', date:v.date, amount:v.amount ? +v.amount : null, trigger:v.trigger, reason:v.reason || '' })
+    },
+    t5: {
+      title: 'Prepayment penalty schedule',
+      hint: 'Time-banded penalty rate applied to voluntary prepayments.',
+      icon: 'ti-clipboard-list',
+      fields: [
+        { name:'y1', label:'Year 1 penalty %', type:'number', default: () => 2.0 },
+        { name:'y2', label:'Year 2 penalty %', type:'number', default: () => 1.0 },
+        { name:'y3', label:'Year 3 penalty %', type:'number', default: () => 0 }
+      ],
+      submit: function(v){
+        const inst = currentInstrument(); if(!inst) throw new Error('No active instrument');
+        inst.prepaymentPenaltySchedule = [
+          { yearFrom:0, yearTo:1, pct:(+v.y1 || 0) / 100 },
+          { yearFrom:1, yearTo:2, pct:(+v.y2 || 0) / 100 },
+          { yearFrom:2, yearTo:99, pct:(+v.y3 || 0) / 100 }
+        ];
+      }
+    },
+    t17: {
+      title: 'Amortisation profile change',
+      hint: 'Reshape amortisation — convert bullet to amortising or update schedule.',
+      icon: 'ti-stairs',
+      fields: [
+        { name:'date',    label:'Effective date', type:'date', required:true },
+        { name:'profile', label:'New profile', type:'select', options: () => [
+          { value:'bullet',        label:'Bullet at maturity' },
+          { value:'straightLine',  label:'Straight-line' },
+          { value:'annuity',       label:'Annuity (equal instalments)' },
+          { value:'custom',        label:'Custom' }
+        ], default: () => 'bullet' },
+        { name:'reason',  label:'Reason (optional)', type:'text' }
+      ],
+      submit: v => _lePushInstEvent({ type:'amortProfile', date:v.date, profile:v.profile, reason:v.reason || '' })
+    },
+    t18: {
+      title: 'Trade date settlement',
+      hint: 'Trade-date vs settlement-date accounting split.',
+      icon: 'ti-calendar-event',
+      fields: [
+        { name:'date',    label:'Trade date',      type:'date', required:true },
+        { name:'settle',  label:'Settlement date', type:'date' }
+      ],
+      submit: function(v){
+        const inst = currentInstrument(); if(!inst) throw new Error('No active instrument');
+        inst.tradeDate = v.date;
+        if(v.settle) inst.settleDate = v.settle;
+      }
+    }
+  };
+
+  function _leCurrentFormKey(){ return window.__leCurrentFormKey || null; }
+
+  window.__leOpenEventForm = function(key){
+    const form = EVENT_FORMS[key];
+    const panel = document.getElementById('le-form-panel');
+    const title = document.getElementById('le-form-title');
+    const hint  = document.getElementById('le-form-hint');
+    const iconWrap = document.getElementById('le-form-icon');
+    const fields = document.getElementById('le-form-fields');
+    const err   = document.getElementById('le-form-error');
+    if(!form || !panel){
+      if(typeof toast === 'function') toast('This event type is not yet wired for inline entry', 3000, { kind:'info' });
+      return;
+    }
+    window.__leCurrentFormKey = key;
+    if(err) err.style.display = 'none';
+    if(title) title.textContent = form.title;
+    if(hint)  hint.textContent = form.hint || '';
+    if(iconWrap) iconWrap.innerHTML = '<i class="ti ' + (form.icon || 'ti-plus') + '" style="font-size:14px;"></i>';
+    // Render each field
+    fields.innerHTML = form.fields.map(f => {
+      const req = f.required ? ' <span style="color:#DC2626;">*</span>' : '';
+      let ctrl = '';
+      if(f.type === 'select'){
+        const opts = (typeof f.options === 'function' ? f.options() : (f.options || []));
+        const def = (typeof f.default === 'function' ? f.default() : (f.default || ''));
+        ctrl = '<select data-le-fld="' + f.name + '" class="b-input" style="width:100%; padding:5px 8px; font-size:12px;">' +
+          opts.map(o => '<option value="' + _leEsc(o.value) + '"' + (o.value === def ? ' selected' : '') + '>' + _leEsc(o.label) + '</option>').join('') +
+        '</select>';
+      } else if(f.type === 'date'){
+        const def = (typeof f.default === 'function' ? f.default() : (f.default || ''));
+        ctrl = '<input type="date" data-le-fld="' + f.name + '" value="' + _leEsc(def) + '" class="b-input" style="width:100%; padding:5px 8px; font-size:12px;"/>';
+      } else if(f.type === 'money'){
+        ctrl = '<input type="text" inputmode="numeric" data-le-fld="' + f.name + '" data-le-money="1" placeholder="' + _leEsc(f.placeholder || '') + '" class="b-input" style="width:100%; padding:5px 8px; font-size:12px; font-variant-numeric:tabular-nums;"/>';
+      } else if(f.type === 'number'){
+        const def = (typeof f.default === 'function' ? f.default() : (f.default != null ? f.default : ''));
+        ctrl = '<input type="number" step="any" data-le-fld="' + f.name + '" value="' + _leEsc(def) + '" placeholder="' + _leEsc(f.placeholder || '') + '" class="b-input" style="width:100%; padding:5px 8px; font-size:12px;"/>';
+      } else {
+        const def = (typeof f.default === 'function' ? f.default() : (f.default || ''));
+        ctrl = '<input type="text" data-le-fld="' + f.name + '" value="' + _leEsc(def) + '" placeholder="' + _leEsc(f.placeholder || '') + '" class="b-input" style="width:100%; padding:5px 8px; font-size:12px;"/>';
+      }
+      return '<label style="display:flex; flex-direction:column; gap:3px; font-size:10px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; color:var(--n-600);">' +
+        '<span>' + _leEsc(f.label) + req + '</span>' + ctrl +
+      '</label>';
+    }).join('');
+    // Live comma-formatting for money inputs
+    fields.querySelectorAll('input[data-le-money="1"]').forEach(el => {
+      el.addEventListener('input', function(){
+        const digits = (this.value || '').replace(/[^0-9]/g, '');
+        this.value = digits === '' ? '' : Number(digits).toLocaleString('en-US');
+      });
+    });
+    panel.style.display = 'block';
+    panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+    // Focus the first field for immediate typing
+    const first = fields.querySelector('input, select');
+    if(first) setTimeout(() => first.focus(), 60);
+  };
+
+  window.__leCloseForm = function(){
+    const panel = document.getElementById('le-form-panel');
+    if(panel) panel.style.display = 'none';
+    window.__leCurrentFormKey = null;
+  };
+
+  window.__leSubmitForm = function(){
+    const key = _leCurrentFormKey();
+    if(!key) return;
+    const form = EVENT_FORMS[key];
+    if(!form) return;
+    const err = document.getElementById('le-form-error');
+    if(err) err.style.display = 'none';
+    // Collect values
+    const values = {};
+    const fields = document.getElementById('le-form-fields');
+    fields.querySelectorAll('[data-le-fld]').forEach(el => {
+      let v = el.value;
+      if(el.getAttribute('data-le-money') === '1'){
+        v = String(v || '').replace(/[^0-9.]/g, '');
+      }
+      values[el.getAttribute('data-le-fld')] = v;
+    });
+    // Validate required
+    const missing = form.fields.filter(f => f.required && !values[f.name]);
+    if(missing.length){
+      if(err){ err.textContent = 'Please fill in: ' + missing.map(f => f.label).join(', '); err.style.display = 'block'; }
+      return;
+    }
+    try {
+      form.submit(values);
+      _leAfterMutate();
+      window.__leCloseForm();
+      if(typeof toast === 'function') toast(form.title.replace(/^Add /,'').replace(/^[a-z]/, c => c.toUpperCase()) + ' saved', 2500, { kind:'success' });
+    } catch(e){
+      console.error('[LE] submit failed:', e);
+      if(err){ err.textContent = e.message || String(e); err.style.display = 'block'; }
+    }
+  };
+
+  // Collect all business events from the current deal — B.tranches (drawdowns,
+  // paydowns) + B.fees + inst.principalSchedule (Tier 1/2 events already sent).
+  // B is exposed on window.B (see line ~30162 window.B = B) so we read it there
+  // — this controller sits outside the Loan Builder IIFE.
+  function _leCollectEvents(){
+    const out = [];
+    const B_ = (typeof window !== 'undefined' && window.B) ? window.B : null;
+    if(!B_) return out;
+    const tranches = B_.tranches || [];
+    tranches.forEach((t, ti) => {
+      const trName = t.name || ('Tranche ' + String.fromCharCode(65 + ti));
+      // Initial draw
+      if((+t.drawnInitially || 0) > 0){
+        out.push({
+          key:'drawdown', name:'Drawdown · Initial', type:'Credit', category:'Funding',
+          tranche: trName, amount:+t.drawnInitially, date: (B_.deal || {}).settle || '', status:'Active',
+          source:'builder', tier:'core'
+        });
+      }
+      (t.drawdowns || []).forEach((d, di) => {
+        out.push({
+          key:'drawdown', name:'Drawdown', type:'Credit', category:'Funding',
+          tranche: trName, amount:+d.amount || 0, date: d.date || '',
+          status: (d.date && new Date(d.date) > new Date()) ? 'Scheduled' : 'Active',
+          source:'builder', tier:'core'
+        });
+      });
+      (t.repayments || []).forEach((r, ri) => {
+        out.push({
+          key:'paydown', name:'Paydown', type:'Debit', category:'Repayment',
+          tranche: trName, amount:+r.amount || 0, date: r.date || '',
+          status: (r.date && new Date(r.date) > new Date()) ? 'Scheduled' : 'Active',
+          source:'builder', tier:'core'
+        });
+      });
+    });
+    // Fees
+    (B_.fees || []).forEach(f => {
+      let tranche = 'Facility-wide';
+      if(f.trancheRef){
+        const t = tranches.find(x => x.id === f.trancheRef);
+        if(t) tranche = t.name || t.id;
+      }
+      const amount = (+f.pct ? null : (+f.flatAmount || +f.bps || 0));
+      out.push({
+        key:'fee', name: f.label || 'Fee', type:'Credit', category:'Fees',
+        tranche, amount: amount, date: f.paymentDate || '',
+        status:'Active', source:'builder', tier:'core',
+        meta: f.kind + ' · ' + f.mode
+      });
+    });
+    // Tier 1/2 events from inst.principalSchedule
+    const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    if(inst && Array.isArray(inst.principalSchedule)){
+      inst.principalSchedule.forEach(ev => {
+        const meta = LE_EVENT_CATALOG.find(x => (
+          (ev.type === 'prepayment' && x.key === 't4') ||
+          (ev.type === 'mandatoryPrepayment' && x.key === 't16') ||
+          (ev.type === 'loanSale' && x.key === 't13') ||
+          (ev.type === 'recovery' && x.key === 't9') ||
+          (ev.type === 'writeOff' && x.key === 't8') ||
+          (ev.type === 'debtEquitySwap' && x.key === 't15') ||
+          (ev.type === 'participation' && x.key === 't14') ||
+          (ev.type === 'defaultInterest' && x.key === 't67') ||
+          (ev.type === 'cure' && x.key === 't10') ||
+          (ev.type === 'forbearance' && x.key === 't11') ||
+          (ev.type === 'capitalisedCost' && x.key === 't12')
+        ));
+        if(!meta) return;
+        out.push({
+          key: meta.key, name: meta.name, type: meta.type, category: meta.category,
+          tranche: (tranches[0] && (tranches[0].name || tranches[0].id)) || 'Deal-level',
+          amount: +ev.amount || +ev.salePrice || +ev.equityFairValue || 0,
+          date: ev.date || '',
+          status: (ev.status || 'Active'),
+          source: 'treatment', tier: meta.tier,
+          meta: ev.reason || ''
+        });
+      });
+    }
+    // Sort by date ascending (blanks last)
+    out.sort((a, b) => {
+      if(!a.date && !b.date) return 0;
+      if(!a.date) return 1;
+      if(!b.date) return -1;
+      return a.date.localeCompare(b.date);
+    });
+    return out;
+  }
+
+  // Lifecycle events is now a full page — route to the tab and render.
+  // Keep the old function names as thin shims so anything that used to
+  // trigger the modal (palette actions, deep links, existing onclick) still
+  // works without change.
+  window.openLifecycleEventsModal = function(){
+    window.__leTrancheFilter = 'all';
+    if(typeof window.v4NavClick === 'function'){
+      const btn = document.querySelector('.v4-sb-item[data-v4-tab="lifecycle"]');
+      if(btn){ window.v4NavClick(btn); }
+    } else {
+      // Fallback — click the underlying tab-btn directly
+      const tb = document.querySelector('.tab-btn[data-tab="lifecycle"]');
+      if(tb) tb.click();
+    }
+    // Render on the next tick so the section has been shown by then
+    setTimeout(() => { window.__leRender && window.__leRender(); }, 30);
+  };
+  window.closeLifecycleEventsModal = function(){
+    const p = document.getElementById('le-add-picker');
+    if(p) p.style.display = 'none';
+  };
+
+  window.__leRender = function(){
+    const tbody = document.getElementById('le-tbody');
+    const tabl  = document.getElementById('le-table');
+    const empt  = document.getElementById('le-empty');
+    const kActive = document.querySelector('#le-kpi-active div:last-child');
+    const kPending = document.querySelector('#le-kpi-pending div:last-child');
+    const foot = document.getElementById('le-footer-summary');
+    if(!tbody) return;
+    const events = _leCollectEvents();
+    // Tranche tabs
+    const B_ = (typeof window !== 'undefined' && window.B) ? window.B : null;
+    const tranches = (B_ && B_.tranches) || [];
+    const tabsHost = document.getElementById('le-tranche-tabs');
+    const strip = document.getElementById('le-tranche-tabs-strip');
+    if(tranches.length > 1 && tabsHost && strip){
+      tabsHost.style.display = 'block';
+      const cur = window.__leTrancheFilter || 'all';
+      const items = [{ key:'all', label:'All tranches' }].concat(
+        tranches.map(t => ({ key: t.name || t.id, label: t.name || t.id }))
+      );
+      strip.innerHTML = items.map(o => (
+        '<button type="button" class="le-tab ' + (o.key === cur ? 'active' : '') + '" data-le-tab="' + _leEsc(o.key) + '">' + _leEsc(o.label) + '</button>'
+      )).join('');
+      strip.querySelectorAll('[data-le-tab]').forEach(btn => {
+        btn.onclick = () => { window.__leTrancheFilter = btn.dataset.leTab; window.__leRender(); };
+      });
+    } else if(tabsHost){ tabsHost.style.display = 'none'; }
+    // Filter
+    const q = ((document.getElementById('le-filter') || {}).value || '').toLowerCase();
+    const tf = window.__leTrancheFilter || 'all';
+    const filtered = events.filter(e => {
+      if(tf !== 'all' && e.tranche !== tf) return false;
+      if(!q) return true;
+      return (e.name + ' ' + e.category + ' ' + e.type + ' ' + (e.meta || '')).toLowerCase().indexOf(q) !== -1;
+    });
+    // KPIs
+    const active = filtered.filter(e => e.status === 'Active').length;
+    const pending = filtered.filter(e => e.status === 'Pending' || e.status === 'Scheduled').length;
+    if(kActive) kActive.textContent = active;
+    if(kPending) kPending.textContent = pending;
+    if(foot) foot.textContent = 'Showing ' + filtered.length + ' of ' + events.length + ' events' + (tf !== 'all' ? ' (' + tf + ')' : '');
+    // Table
+    if(!filtered.length){
+      tabl.style.display = 'none';
+      empt.style.display = 'block';
+      return;
+    }
+    tabl.style.display = 'table';
+    empt.style.display = 'none';
+    const fmtAmt = v => (v == null || !+v) ? '—' : ('$' + Math.round(+v).toLocaleString('en-US'));
+    const typeColor = t => t === 'Credit' ? '#4338CA' : (t === 'Debit' ? '#B45309' : '#6B7280');
+    const statusPill = s => {
+      const map = {
+        'Active':    { bg:'#DCFCE7', fg:'#166534' },
+        'Scheduled': { bg:'#DBEAFE', fg:'#1E40AF' },
+        'Pending':   { bg:'#FEF3C7', fg:'#92400E' },
+        'Inactive':  { bg:'#F3F4F6', fg:'#4B5563' }
+      };
+      const c = map[s] || map['Active'];
+      return '<span style="display:inline-block; padding:2px 8px; border-radius:10px; background:' + c.bg + '; color:' + c.fg + '; font-size:10px; font-weight:600;">' + s + '</span>';
+    };
+    tbody.innerHTML = filtered.map(e => (
+      '<tr class="le-row" style="border-top:0.5px solid var(--n-100);">' +
+        '<td style="padding:11px 14px; color:var(--n-900); font-weight:600;">' + _leEsc(e.name) + (e.meta ? '<div style="font-size:10px; color:var(--n-500); font-weight:400; margin-top:1px;">' + _leEsc(e.meta) + '</div>' : '') + '</td>' +
+        '<td style="padding:11px 14px; color:' + typeColor(e.type) + '; font-weight:600;">' + _leEsc(e.type) + '</td>' +
+        '<td style="padding:11px 14px; color:var(--n-700);">' + _leEsc(e.category) + '</td>' +
+        '<td style="padding:11px 14px; color:var(--n-600); font-size:11px;">' + _leEsc(e.tranche || '—') + '</td>' +
+        '<td style="padding:11px 14px; text-align:right; color:var(--n-900); font-variant-numeric:tabular-nums;">' + fmtAmt(e.amount) + '</td>' +
+        '<td style="padding:11px 14px;">' + statusPill(e.status) + '</td>' +
+        '<td style="padding:11px 14px; color:var(--n-600); font-family:ui-monospace,monospace; font-size:11px;">' + _leEsc(e.date || '—') + '</td>' +
+        '<td style="padding:11px 14px; text-align:center;">' +
+          '<button type="button" onclick="window.__leEditEvent && window.__leEditEvent(\'' + e.key + '\')" ' +
+                  'style="background:none; border:none; color:var(--n-500); cursor:pointer; padding:4px;" title="Edit this event"><i class="ti ti-pencil" style="font-size:14px;"></i></button>' +
+        '</td>' +
+      '</tr>'
+    )).join('');
+  };
+
+  window.__leEditEvent = function(key){
+    // If a form schema exists for this key, open the centralized entry form
+    // (preserves the "everything in Lifecycle Events" principle).
+    if(EVENT_FORMS && EVENT_FORMS[key]){
+      window.__leOpenEventForm(key);
+      return;
+    }
+    // Fallback for anything not yet form-enabled
+    const entry = LE_EVENT_CATALOG.find(x => x.key === key);
+    if(entry && typeof entry.jumpTo === 'function') entry.jumpTo();
+  };
+
+  window.__leOpenAddPicker = function(){
+    const p = document.getElementById('le-add-picker');
+    if(!p) return;
+    if(p.style.display === 'block'){ p.style.display = 'none'; return; }
+    const groups = [
+      { label:'Core', items: LE_EVENT_CATALOG.filter(x => x.tier === 'core') },
+      { label:'Tier 1 — Lifecycle', items: LE_EVENT_CATALOG.filter(x => x.tier === 'tier1') },
+      { label:'Tier 2 — Disposal · Restructuring · Timing', items: LE_EVENT_CATALOG.filter(x => x.tier === 'tier2') }
+    ];
+    p.innerHTML = groups.map(g => (
+      '<div style="font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:var(--n-500); padding:6px 8px 4px;">' + g.label + '</div>' +
+      g.items.map(x => (
+        '<div class="le-pick-item" data-le-pick="' + x.key + '">' +
+          '<span class="le-pick-icon"><i class="ti ' + (x.icon || 'ti-plus') + '" style="font-size:14px;"></i></span>' +
+          '<div style="flex:1;"><div class="le-pick-name">' + _leEsc(x.name) + '</div>' +
+            '<div class="le-pick-hint">' + _leEsc(x.hint || '') + '</div></div>' +
+        '</div>'
+      )).join('')
+    )).join('');
+    p.style.display = 'block';
+    p.querySelectorAll('[data-le-pick]').forEach(el => {
+      el.onclick = () => {
+        const key = el.dataset.lePick;
+        p.style.display = 'none';
+        // Prefer the inline centralized form; fall back to legacy jumpTo only
+        // if no form schema exists (e.g. amortisation profile edge cases).
+        if(EVENT_FORMS && EVENT_FORMS[key]){
+          window.__leOpenEventForm(key);
+        } else {
+          const entry = LE_EVENT_CATALOG.find(x => x.key === key);
+          if(entry && typeof entry.jumpTo === 'function') entry.jumpTo();
+        }
+      };
+    });
+  };
+
+  // Close the Add picker when clicking outside it
+  document.addEventListener('click', function(ev){
+    const p = document.getElementById('le-add-picker');
+    if(!p || p.style.display !== 'block') return;
+    if(p.contains(ev.target)) return;
+    if(ev.target.closest('button') && /Add Business Event/i.test(ev.target.textContent || '')) return;
+    p.style.display = 'none';
+  });
+
   function _benchPeerSet(){
     const structFilter = ($('bench-filter-structure') || {}).value || '';
     const ccyFilter    = ($('bench-filter-currency')  || {}).value || '';
@@ -39306,7 +41307,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       <img src="FIS_logo.webp" alt="FIS"/>
       <div class="v4-login-brand-text">
         <span class="name">Loan Module</span>
-        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4 · Build 2026.08.06.9</span>
+        <span class="sub" id="v4-login-brand-sub">Private Capital Suite · V4</span>
       </div>
     </div>
     <div>
@@ -39594,7 +41595,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   /* On narrow screens the sidebar collapses — fall back to the viewport edge. */
   @media (max-width: 640px) { #v4-build-stamp { left: 8px; bottom: 8px; font-size: 10px; } }
 </style>
-<div id="v4-build-stamp" title="Click to copy build identifier">V4 · 2026.07.31</div>
+<div id="v4-build-stamp" title="Click to copy build identifier">V4</div>
 <script>
   (function () {
     function stampFooter() {
