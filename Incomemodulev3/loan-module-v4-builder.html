@@ -252,10 +252,23 @@
       ac.abort(reason);
     }, budget);
 
+    // ─── Live-request registry (V4 fix, 2026-08) ────────────────────
+    // Chrome caps HTTP/2 at ~6 concurrent streams per origin. A heavy write
+    // (e.g. a 3000-row cashflow insert) saturates that pool, which makes the
+    // 20s health-ping fail, which trips _tryReconnect(), which builds a NEW
+    // Supabase client that then can't get a slot for its probe either — a
+    // permanent deadlock ("Multiple GoTrueClient instances" + probe timeout).
+    // Registering every controller lets the reconnect path abort in-flight
+    // requests FIRST, freeing slots so the probe can actually run.
+    const reg = (window.__liveFetches = window.__liveFetches || new Set());
+    reg.add(ac);
+    const unregister = () => { try { reg.delete(ac); } catch(_){} };
+
     const options = Object.assign({}, init, { signal: ac.signal });
     return originalFetch(input, options).then(function(res){
       clearTimeout(warnTimer);
       clearTimeout(killTimer);
+      unregister();
       if(warned){
         const dt = Math.round(performance.now() - started);
         console.warn('[fetch-watchdog] recovered after ' + dt + 'ms:', url);
@@ -270,6 +283,7 @@
     }, function(err){
       clearTimeout(warnTimer);
       clearTimeout(killTimer);
+      unregister();
       // Bubble a clearer error for our own aborts so caller code can
       // report "server slow" instead of a bare AbortError.
       if(err && err.name === 'AbortError' && !upstream){
@@ -293,8 +307,24 @@
   window.__fetchWatchdog = {
     get calls(){ return calls; },
     get queued(){ return (window.__watchdogQueue || []).length; },
+    get live(){ return (window.__liveFetches || new Set()).size; },
     budget: DEFAULT_TIMEOUT_MS,
-    uploadBudget: UPLOAD_TIMEOUT_MS
+    uploadBudget: UPLOAD_TIMEOUT_MS,
+    // Abort every in-flight guarded request. Called by the SB reconnect path
+    // to free Chrome's 6-slot connection pool before it probes a new client.
+    // Returns how many were killed so the caller can log/report.
+    abortAll: function(reason){
+      const reg = window.__liveFetches;
+      if(!reg || !reg.size) return 0;
+      const n = reg.size;
+      const err = new Error(reason || 'aborted to free the connection pool');
+      err.name = 'AbortError';
+      // Copy first — abort() mutates the set via the unregister handlers.
+      Array.from(reg).forEach(ac => { try { ac.abort(err); } catch(_){} });
+      reg.clear();
+      console.warn('[fetch-watchdog] abortAll → released ' + n + ' connection slot(s) · reason: ' + (reason || 'n/a'));
+      return n;
+    }
   };
 })();
 </script>
@@ -1790,9 +1820,18 @@
   <button class="v4-sb-item" onclick="window.openCashManagementModal && window.openCashManagementModal()">
     <i class="ti ti-cash-banknote" aria-hidden="true"></i>Cash management
   </button>
-  <!-- GL account setup — client-specific chart of accounts. Maps the engine's
-       default account codes to whatever the client's Investran/ERP uses. -->
-  <button class="v4-sb-item" onclick="window.openGLSetupModal && window.openGLSetupModal()">
+  <!-- General Ledger Mapping — business event × framework DR/CR matrix.
+       Clients rename/renumber the predefined GL entries to match their own
+       chart of accounts, per accounting framework. Full page, not a modal. -->
+  <button class="v4-sb-item" data-v4-tab="glconfig" onclick="v4NavClick(this)">
+    <i class="ti ti-table-options" aria-hidden="true"></i>General ledger mapping
+  </button>
+  <!-- GL account setup — HIDDEN. Superseded by "General ledger mapping"
+       above, which configures accounts per business event × framework
+       (the axis clients actually think in). The modal + its SB adapters
+       are retained so the per-account remap still runs on the DIU push;
+       only the nav entry is hidden. Restore by removing style=display:none. -->
+  <button class="v4-sb-item" style="display:none;" onclick="window.openGLSetupModal && window.openGLSetupModal()">
     <i class="ti ti-book" aria-hidden="true"></i>GL account setup
   </button>
   <!-- Peer benchmarks — cross-portfolio distributions (yield, WAL, breach
@@ -2360,6 +2399,11 @@
       <button class="tab-btn" data-tab="lifecycle" role="tab" aria-selected="false" style="display:none;">
         <span class="tab-icon"><span class="material-icons-outlined">list_alt</span></span>
         <span class="tab-text"><span class="tab-label">Lifecycle Events</span></span>
+      </button>
+      <!-- GL Configuration — sidebar-only nav, same hidden-router pattern. -->
+      <button class="tab-btn" data-tab="glconfig" role="tab" aria-selected="false" style="display:none;">
+        <span class="tab-icon"><span class="material-icons-outlined">account_tree</span></span>
+        <span class="tab-text"><span class="tab-label">General Ledger Mapping</span></span>
       </button>
       <button class="tab-btn" data-tab="stage-1" role="tab" aria-selected="false">
         <span class="tab-icon"><span class="material-icons-outlined">timeline</span></span>
@@ -3263,6 +3307,190 @@
   </div>
 </section>
 
+<!-- ═══════════════════════════════════════════════════════════════
+     GL Configuration — business event × framework DR/CR matrix.
+     Rows = business events (Drawdown, Interest Accrual, …).
+     Columns = accounting frameworks (IFRS, US GAAP, ASPE, AASB, +custom).
+     Each cell holds an editable Debit + Credit account code/name pair.
+     Data comes from gl_business_events / gl_frameworks / gl_event_mappings.
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="glconfig" class="stage-card stage-tab-content p-5">
+  <div class="builder-hero" style="display:flex; align-items:flex-start; gap:14px; padding:14px 16px; margin-bottom:14px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:12px;">
+    <div style="flex-shrink:0; width:36px; height:36px; border-radius:10px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+      <i class="ti ti-table-options" aria-hidden="true" style="font-size:20px;"></i>
+    </div>
+    <div style="flex:1; min-width:0;">
+      <div style="font-size:10.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">GL configuration</div>
+      <h2 style="font-size:18px; font-weight:700; color:var(--n-900); letter-spacing:-0.3px; margin:2px 0 0;">General Ledger Mapping</h2>
+      <p style="font-size:12px; color:var(--n-500); margin:4px 0 0; line-height:1.55;">Change the predefined GL accounts the engine posts for each business event so they match your own chart of accounts. Set a separate debit / credit pair per accounting framework.</p>
+    </div>
+    <div style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:96px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Frameworks</div>
+      <div id="glc-kpi-frameworks" style="font-size:20px; font-weight:700; color:var(--n-900); font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+    <div style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:106px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Custom mappings</div>
+      <div id="glc-kpi-custom" style="font-size:20px; font-weight:700; color:var(--indigo-700,#4338CA); font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+  </div>
+
+  <div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; position:relative;">
+    <!-- Toolbar -->
+    <div style="padding:12px 16px; border-bottom:0.5px solid var(--n-200); display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div style="position:relative; flex:1; min-width:220px; max-width:340px;">
+        <i class="ti ti-search" style="position:absolute; left:9px; top:50%; transform:translateY(-50%); font-size:13px; color:var(--n-400);"></i>
+        <input id="glc-filter" type="text" placeholder="Filter by event or GL account..." oninput="window.__glcRender && window.__glcRender()"
+               style="width:100%; padding:6px 10px 6px 28px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; background:var(--n-0);"/>
+      </div>
+      <label style="display:inline-flex; align-items:center; gap:5px; font-size:10.5px; color:var(--n-600);">
+        <input type="checkbox" id="glc-only-custom" onchange="window.__glcRender && window.__glcRender()" style="accent-color:#4F46E5;"/>
+        Customised only
+      </label>
+      <div style="flex:1;"></div>
+      <button onclick="window.__glcExportCsv && window.__glcExportCsv()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Download the full matrix as CSV">
+        <i class="ti ti-download" style="font-size:12px;"></i>Export
+      </button>
+      <button onclick="window.__glcOpenAddFramework && window.__glcOpenAddFramework()" class="mat-btn primary !py-1.5 !px-3"
+              style="font-size:12px; background:var(--indigo-600,#4F46E5); color:white; border-color:var(--indigo-600,#4F46E5);">
+        <i class="ti ti-plus" style="font-size:14px;"></i> Add Framework
+      </button>
+      <!-- Add-framework popover -->
+      <div id="glc-add-fw-panel" style="display:none; position:absolute; right:16px; top:56px; width:300px; background:var(--n-0); border:0.5px solid var(--n-300); border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,0.15); z-index:20; padding:12px;">
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-500); margin-bottom:8px;">New framework column</div>
+        <label style="display:block; font-size:10px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; color:var(--n-600); margin-bottom:3px;">Code</label>
+        <input id="glc-new-fw-code" type="text" placeholder="e.g. FRS102" maxlength="20"
+               style="width:100%; padding:5px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:8px; text-transform:uppercase;"/>
+        <label style="display:block; font-size:10px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; color:var(--n-600); margin-bottom:3px;">Display label</label>
+        <input id="glc-new-fw-label" type="text" placeholder="e.g. FRS 102 (UK GAAP)"
+               style="width:100%; padding:5px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:10px;"/>
+        <div style="font-size:10px; color:var(--n-500); line-height:1.4; margin-bottom:10px;">The new column is seeded from the IFRS defaults so no cell starts blank. Edit any cell afterwards.</div>
+        <div style="display:flex; gap:6px; justify-content:flex-end;">
+          <button onclick="document.getElementById('glc-add-fw-panel').style.display='none'" class="mat-btn outline !py-1 !px-2" style="font-size:11px;">Cancel</button>
+          <button onclick="window.__glcAddFramework && window.__glcAddFramework()" class="mat-btn primary !py-1 !px-3" style="font-size:11px; background:var(--indigo-600,#4F46E5); color:white; border-color:var(--indigo-600,#4F46E5);">Add column</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Matrix -->
+    <div id="glc-body" style="overflow:auto; max-height:calc(100vh - 330px); min-height:300px;">
+      <div id="glc-empty" class="v4-empty" style="padding:36px 20px; display:none;">
+        <div class="v4-empty-icon"><i class="ti ti-table-options" aria-hidden="true"></i></div>
+        <div class="v4-empty-title">No GL configuration loaded</div>
+        <div class="v4-empty-body">Connect to the database to load the business-event mapping matrix.</div>
+      </div>
+      <table id="glc-table" style="border-collapse:collapse; font-size:12px; display:none;">
+        <thead id="glc-thead" style="position:sticky; top:0; z-index:2;"></thead>
+        <tbody id="glc-tbody"></tbody>
+      </table>
+    </div>
+
+    <div style="padding:10px 16px; border-top:0.5px solid var(--n-200); display:flex; justify-content:space-between; gap:8px; align-items:center;">
+      <div id="glc-footer-summary" style="font-size:10.5px; color:var(--n-500);">—</div>
+      <div style="font-size:10.5px; color:var(--n-500); display:flex; align-items:center; gap:6px;">
+        <span style="width:7px; height:7px; border-radius:50%; background:var(--indigo-600,#4F46E5); display:inline-block;"></span>
+        Customised by client
+      </div>
+    </div>
+  </div>
+</section>
+<style>
+  /* ── GL Configuration matrix ───────────────────────────────────── */
+  #glconfig #glc-table th, #glconfig #glc-table td { white-space: nowrap; }
+  #glconfig .glc-fw-head {
+    text-align: center;
+    padding: 8px 12px 6px;
+    font-size: 11px; font-weight: 700;
+    color: var(--n-800);
+    background: var(--n-50, #FAFAFA);
+    border-bottom: 0.5px solid var(--n-200);
+    border-left: 0.5px solid var(--n-200);
+    letter-spacing: 0.3px;
+  }
+  #glconfig .glc-sub-head {
+    padding: 6px 12px 7px;
+    font-size: 9.5px; font-weight: 600;
+    color: var(--n-500);
+    text-transform: uppercase; letter-spacing: 0.4px;
+    background: var(--n-50, #FAFAFA);
+    border-bottom: 1px solid var(--n-300);
+    text-align: left;
+  }
+  #glconfig .glc-sub-head.dr { border-left: 0.5px solid var(--n-200); }
+  /* Sticky first column so the event name stays visible while scrolling right */
+  #glconfig .glc-event-cell,
+  #glconfig .glc-event-head {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--n-0);
+    border-right: 1px solid var(--n-200);
+    min-width: 190px;
+  }
+  #glconfig .glc-event-head { background: var(--n-50, #FAFAFA); }
+  #glconfig tbody tr:nth-child(even) .glc-event-cell { background: #FCFCFD; }
+  #glconfig tbody tr:nth-child(even) td { background: #FCFCFD; }
+  #glconfig tbody tr:hover td { background: #F5F7FF; }
+  #glconfig .glc-event-cell {
+    padding: 10px 14px;
+    font-weight: 600; color: var(--n-900);
+  }
+  #glconfig .glc-event-trigger {
+    font-size: 10px; font-weight: 400; color: var(--n-500);
+    margin-top: 2px; white-space: normal; max-width: 210px; line-height: 1.35;
+  }
+  #glconfig .glc-cell {
+    padding: 6px 8px;
+    border-bottom: 0.5px solid var(--n-100);
+    vertical-align: middle;
+  }
+  #glconfig .glc-cell.dr { border-left: 0.5px solid var(--n-200); }
+  #glconfig .glc-acct {
+    display: flex; flex-direction: column; gap: 1px;
+    min-width: 96px;
+  }
+  #glconfig .glc-acct input {
+    border: 0.5px solid transparent;
+    background: transparent;
+    border-radius: 4px;
+    padding: 2px 5px;
+    font-size: 11.5px;
+    color: var(--n-900);
+    width: 100%;
+    font-family: inherit;
+  }
+  #glconfig .glc-acct input.code {
+    font-family: ui-monospace, monospace;
+    font-weight: 600;
+  }
+  #glconfig .glc-acct input.name {
+    font-size: 10px; color: var(--n-500);
+  }
+  #glconfig .glc-acct input:hover { border-color: var(--n-200); background: var(--n-0); }
+  #glconfig .glc-acct input:focus {
+    outline: none;
+    border-color: var(--indigo-500, #6366F1);
+    background: var(--n-0);
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.12);
+  }
+  #glconfig .glc-acct input.dirty { border-color: #F59E0B; background: #FFFBEB; }
+  /* Blue dot marking a client-customised row */
+  #glconfig .glc-custom-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--indigo-600, #4F46E5);
+    display: inline-block; margin-right: 7px;
+    flex-shrink: 0;
+  }
+  #glconfig .glc-reset-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--n-400); padding: 2px 4px; font-size: 12px;
+    border-radius: 4px;
+  }
+  #glconfig .glc-reset-btn:hover { color: #B45309; background: #FEF3C7; }
+  #glconfig .glc-fw-del {
+    background: none; border: none; cursor: pointer;
+    color: var(--n-400); font-size: 11px; padding: 0 2px; margin-left: 4px;
+  }
+  #glconfig .glc-fw-del:hover { color: #DC2626; }
+</style>
+
 <!-- ===== STAGE 1: Cashflow Generation (v2 — replaces PortF Inbound) ===== -->
 <section id="stage-1" class="stage-card stage-tab-content p-5">
   <div class="step-indicator">
@@ -3442,39 +3670,6 @@
         <span class="material-icons-outlined" style="font-size:12px;">circle</span>
         <span id="diu-mode-chip-text">DIU · Simulator</span>
       </button>
-      <div class="flex items-center gap-1 border border-gray-300 rounded px-2 py-1 bg-white" title="Date this JE batch is posted to the GL. Leave blank for AUTO mode (glDate = effectiveDate per row). Set a date to override every row to that close date.">
-        <span class="material-icons-outlined text-[14px] text-gray-500">event</span>
-        <label for="opt-gl-date" class="text-[10px] font-semibold uppercase tracking-wider text-gray-600">GL Posting Date</label>
-        <input id="opt-gl-date" type="date" class="border-0 px-1 py-0 text-[12px] bg-white" placeholder="auto" />
-        <button id="btn-gl-date-auto" class="text-[10px] text-indigo-700 hover:underline" title="Clear override — glDate auto-matches effectiveDate per row">auto</button>
-        <span id="gl-date-mode" class="chip green text-[10px]" style="font-size:9.5px">AUTO</span>
-      </div>
-      <!-- Up-until (accounting end) date — engine only produces JE rows with
-           effectiveDate ≤ this date. Blank = "run through the whole horizon".
-           Wired in the engine at runAccountingImpl() (see filter around line
-           17762 area). Persists per deal via B.deal.acctUpUntil. -->
-      <div class="flex items-center gap-1 border border-gray-300 rounded px-2 py-1 bg-white" title="Only generate GL bookings up to and including this effective date. Leave blank to run through the whole horizon.">
-        <span class="material-icons-outlined text-[14px] text-gray-500">event_note</span>
-        <label for="opt-acct-up-until" class="text-[10px] font-semibold uppercase tracking-wider text-gray-600">Up until date</label>
-        <input id="opt-acct-up-until" type="date" class="border-0 px-1 py-0 text-[12px] bg-white" placeholder="whole horizon"
-               onchange="try{if(window.B&&window.B.deal){window.B.deal.acctUpUntil=this.value||null;} }catch(_){}"/>
-        <button id="btn-acct-up-until-clear" class="text-[10px] text-indigo-700 hover:underline"
-                onclick="const el=document.getElementById('opt-acct-up-until'); if(el){el.value=''; el.dispatchEvent(new Event('change'));}"
-                title="Clear — engine runs to the deal's maturity">clear</button>
-      </div>
-      <!-- Post-back status — user picks the status the JE batch is delivered
-           to PCS/Investran with. Three states (Draft / Approved / Posted)
-           mirror the internal approval-pill states. Read by handlePostJeClick. -->
-      <div class="flex items-center gap-1 border border-gray-300 rounded px-2 py-1 bg-white" title="Status the JE batch is delivered to PCS / Investran with.">
-        <span class="material-icons-outlined text-[14px] text-gray-500">outbound</span>
-        <label for="opt-postback-status" class="text-[10px] font-semibold uppercase tracking-wider text-gray-600">Post-back status</label>
-        <select id="opt-postback-status" class="border-0 px-1 py-0 text-[12px] bg-white" style="min-width:110px;"
-                onchange="try{ if(window.B&&window.B.deal){ window.B.deal.postbackStatus=this.value; } window.PCS_POSTBACK_STATUS=this.value; }catch(_){}">
-          <option value="draft">Draft</option>
-          <option value="approved">Approved</option>
-          <option value="posted" selected>Posted</option>
-        </select>
-      </div>
       <span id="acct-status" class="chip gray self-center">Awaiting Stage 1</span>
       <!-- Participation scale badge — green when JEs are at participation
            (i.e. accounting-correct for the lender's share), amber warning
@@ -3495,6 +3690,74 @@
        tranches this JE run spans. Multi-tranche only — hidden for 1-tranche
        deals to keep the header clean. -->
   <div id="acct-tranches-strip" style="display:none; margin-bottom:10px;"></div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       GL posting controls — consolidated panel (Run&JE tab only).
+       Groups the three settings that govern how JEs are dated and how
+       they're delivered back to PCS: GL posting date, Up-until date, and
+       Post-back status. Previously scattered across the hero toolbar.
+       ═══════════════════════════════════════════════════════════════ -->
+  <div id="gl-posting-controls" data-substab="run"
+       style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; padding:12px 14px; margin-bottom:14px;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+      <span style="width:22px; height:22px; border-radius:6px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+        <i class="ti ti-settings-cog" style="font-size:13px;"></i>
+      </span>
+      <div style="font-size:12.5px; font-weight:600; color:var(--n-900); letter-spacing:-0.1px;">GL posting controls</div>
+      <span style="font-size:10.5px; color:var(--n-500);">How journal entries are dated and delivered to PCS</span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px;">
+
+      <!-- GL posting date -->
+      <div style="border:0.5px solid var(--n-200); border-radius:8px; padding:9px 11px; background:var(--n-50,#FAFAFA);">
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px;">
+          <i class="ti ti-calendar-event" style="font-size:13px; color:var(--n-500);"></i>
+          <label for="opt-gl-date" style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-600);">GL posting date</label>
+          <span id="gl-date-mode" class="chip green" style="font-size:9px; margin-left:auto;">AUTO</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <input id="opt-gl-date" type="date" class="b-input" style="flex:1; padding:5px 8px; font-size:12px;" placeholder="auto"/>
+          <button id="btn-gl-date-auto" style="font-size:10.5px; color:var(--indigo-700,#4338CA); background:none; border:none; cursor:pointer; padding:2px 4px; text-decoration:underline;"
+                  title="Clear override — glDate auto-matches each row's effective date">auto</button>
+        </div>
+        <div style="font-size:10px; color:var(--n-500); margin-top:5px; line-height:1.4;">Blank = each row posts on its own effective date. Set a date to force every row to that close date.</div>
+      </div>
+
+      <!-- Up-until (accounting end) date -->
+      <div style="border:0.5px solid var(--n-200); border-radius:8px; padding:9px 11px; background:var(--n-50,#FAFAFA);">
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px;">
+          <i class="ti ti-calendar-stats" style="font-size:13px; color:var(--n-500);"></i>
+          <label for="opt-acct-up-until" style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-600);">Generate up until</label>
+          <span id="up-until-mode" class="chip green" style="font-size:9px; margin-left:auto;">FULL TERM</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <input id="opt-acct-up-until" type="date" class="b-input" style="flex:1; padding:5px 8px; font-size:12px;" placeholder="whole horizon"
+                 onchange="try{if(window.B&&window.B.deal){window.B.deal.acctUpUntil=this.value||null;} var m=document.getElementById('up-until-mode'); if(m){ m.className='chip '+(this.value?'amber':'green'); m.textContent=this.value?'CUT OFF':'FULL TERM'; } }catch(_){}"/>
+          <button id="btn-acct-up-until-clear" style="font-size:10.5px; color:var(--indigo-700,#4338CA); background:none; border:none; cursor:pointer; padding:2px 4px; text-decoration:underline;"
+                  onclick="const el=document.getElementById('opt-acct-up-until'); if(el){el.value=''; el.dispatchEvent(new Event('change'));}"
+                  title="Clear — engine runs to the deal's maturity">clear</button>
+        </div>
+        <div style="font-size:10px; color:var(--n-500); margin-top:5px; line-height:1.4;">Only book GL entries up to this effective date. Blank runs the full term to maturity.</div>
+      </div>
+
+      <!-- Post-back status -->
+      <div style="border:0.5px solid var(--n-200); border-radius:8px; padding:9px 11px; background:var(--n-50,#FAFAFA);">
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px;">
+          <i class="ti ti-send" style="font-size:13px; color:var(--n-500);"></i>
+          <label for="opt-postback-status" style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-600);">Post-back status</label>
+          <span id="postback-status-chip" class="chip blue" style="font-size:9px; margin-left:auto;">POSTED</span>
+        </div>
+        <select id="opt-postback-status" class="b-input" style="width:100%; padding:5px 8px; font-size:12px;"
+                onchange="try{ if(window.B&&window.B.deal){ window.B.deal.postbackStatus=this.value; } window.PCS_POSTBACK_STATUS=this.value; var c=document.getElementById('postback-status-chip'); if(c){ c.textContent=this.value.toUpperCase(); c.className='chip '+(this.value==='draft'?'gray':this.value==='approved'?'amber':'blue'); } }catch(_){}">
+          <option value="draft">Draft — unposted, for review</option>
+          <option value="approved">Approved — signed off, not yet posted</option>
+          <option value="posted" selected>Posted — final, booked in the GL</option>
+        </select>
+        <div style="font-size:10px; color:var(--n-500); margin-top:5px; line-height:1.4;">State the JE batch arrives with in PCS / Investran.</div>
+      </div>
+
+    </div>
+  </div>
 
   <!-- ═══ Approval workflow strip (#231) — Draft → Approved → Posted ═══
        Auto-shown once a run has been persisted. Maker-checker enforced by SB:
@@ -4496,10 +4759,10 @@
     </div>
   </div>
 
-  <!-- ─────────── IFRS Capabilities Demonstrator — HIDDEN (per user request:
-       remove from Run&JE and Treatment overrides tabs). Kept in the DOM so
-       the render functions that write to #capability-grid don't NPE. -->
-  <div class="mb-4 acct-capabilities-panel" style="display:none;">
+  <!-- ─────────── IFRS Capabilities Demonstrator ───────────
+       data-substab="evidence" → only rendered on the Evidence pack tab.
+       Removed from Run&JE and Treatment overrides per user request. -->
+  <div class="mb-4 acct-capabilities-panel" data-substab="evidence">
     <div class="flex items-center gap-2 mb-2">
       <span class="material-icons-outlined text-[18px]" style="color:var(--brand-600)">checklist</span>
       <h3 data-fw-capability-header class="text-[13px] font-bold">IFRS-Aligned Accounting Capabilities</h3>
@@ -4508,8 +4771,9 @@
     <div id="capability-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2"></div>
   </div>
 
-  <!-- ─────────── Initial Recognition · EIR · Fair Value (3 detail cards) ─────────── -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+  <!-- ─────────── Initial Recognition · EIR · Fair Value (3 detail cards) ───────────
+       data-substab="evidence" → Evidence pack tab only (removed from Run&JE). -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4" data-substab="evidence">
     <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
       <div data-fw-recog-label class="text-[10px] font-semibold uppercase tracking-wider text-blue-700 mb-1">Initial Recognition (IFRS 9 §5.1)</div>
       <div id="ifrs-classification" class="font-semibold text-[14px]">—</div>
@@ -4527,11 +4791,9 @@
     </div>
   </div>
 
-  <!-- ─────────── Change Handling & Audit — HIDDEN (per user request:
-       remove from Run&JE and Treatment overrides tabs). Always kept hidden;
-       existing render code (renderChangeHandlingPanel) still writes here but
-       it's never seen by users. -->
-  <div id="change-handling-panel" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 hidden" style="display:none !important;">
+  <!-- ─────────── Change Handling & Audit (5 cards) ───────────
+       data-substab="evidence" → Evidence pack tab only. -->
+  <div id="change-handling-panel" data-substab="evidence" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 hidden">
     <div class="flex items-center gap-2 mb-3">
       <span class="material-icons-outlined text-[18px]" style="color:var(--brand-600)">history_edu</span>
       <h3 class="text-[13px] font-bold">Accounting — Change Handling &amp; Audit</h3>
@@ -4698,7 +4960,7 @@
        via renderInlineJETable() whenever accounting is run.
        ═══════════════════════════════════════════════════════════════ -->
   <div id="acct-inline-je-section" data-substab="run" class="hidden" style="margin-bottom:14px;">
-    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
       <span style="width:24px; height:24px; border-radius:6px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
         <i class="ti ti-book-2" style="font-size:14px;"></i>
       </span>
@@ -4706,29 +4968,88 @@
       <span id="inline-je-count-chip" class="chip blue" style="font-size:10.5px; font-variant-numeric:tabular-nums;">0 rows</span>
       <span id="inline-je-balance-chip" class="chip green" style="font-size:10.5px;">balanced</span>
       <span style="flex:1;"></span>
-      <div style="position:relative; min-width:220px; max-width:320px;">
+      <div style="position:relative; min-width:200px; max-width:280px;">
         <i class="ti ti-search" style="position:absolute; left:9px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--n-400);"></i>
-        <input id="inline-je-filter" type="text" placeholder="Filter by tx type / account / comment..." oninput="window.__renderInlineJETable && window.__renderInlineJETable()"
+        <input id="inline-je-filter" type="text" placeholder="Filter entries..." oninput="window.__renderInlineJETable && window.__renderInlineJETable()"
                style="width:100%; padding:5px 10px 5px 26px; border:0.5px solid var(--n-300); border-radius:6px; font-size:11.5px; background:var(--n-0);"/>
       </div>
       <label style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; color:var(--n-600);">
-        <i class="ti ti-layers-subtract" style="font-size:12px;"></i>Group by:
-        <select id="inline-je-groupby" class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white" onchange="window.__renderInlineJETable && window.__renderInlineJETable()">
-          <option value="je">Journal entry (#)</option>
-          <option value="tx">Transaction type</option>
-          <option value="account">Account</option>
-          <option value="flat">Flat rows</option>
+        View:
+        <select id="inline-je-groupby" class="b-input" style="padding:4px 8px; font-size:11px;" onchange="window.__renderInlineJETable && window.__renderInlineJETable()">
+          <option value="je">Journal entries</option>
+          <option value="register">Register (flat)</option>
         </select>
       </label>
       <button onclick="window.__inlineJECopyTsv && window.__inlineJECopyTsv()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Copy visible JE rows as TSV">
         <i class="ti ti-copy" style="font-size:12px;"></i>Copy
       </button>
-      <button onclick="window.openJEDetailModal && window.openJEDetailModal()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Open the full-screen JE detail modal">
-        <i class="ti ti-external-link" style="font-size:12px;"></i>Expand
-      </button>
     </div>
-    <div id="acct-inline-je-host" style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:8px; max-height:520px; overflow:auto;"></div>
+    <div id="acct-inline-je-host" style="max-height:640px; overflow:auto;"></div>
   </div>
+  <style>
+    /* ── Accountant's journal-entry styling ──────────────────────────
+       Mirrors a classic manual JE: date · account (indented for credits)
+       · debit column · credit column · fund · description, with a ruled
+       total line beneath each entry. */
+    #acct-inline-je-host .je-entry {
+      background: var(--n-0);
+      border: 0.5px solid var(--n-200);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    #acct-inline-je-host .je-entry-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 14px;
+      background: var(--n-50, #FAFAFA);
+      border-bottom: 0.5px solid var(--n-200);
+      font-size: 11.5px;
+    }
+    #acct-inline-je-host .je-ref {
+      font-weight: 700; color: var(--n-900); letter-spacing: -0.1px;
+    }
+    #acct-inline-je-host .je-memo {
+      color: var(--n-600); font-size: 11px;
+    }
+    #acct-inline-je-host table.je-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+    }
+    #acct-inline-je-host table.je-table th {
+      text-align: left;
+      padding: 8px 14px 7px;
+      font-size: 10px; font-weight: 600;
+      color: var(--n-500);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--n-300);
+      white-space: nowrap;
+    }
+    #acct-inline-je-host table.je-table th.num { text-align: right; }
+    #acct-inline-je-host table.je-table td {
+      padding: 9px 14px;
+      border-bottom: 0.5px solid var(--n-100);
+      color: var(--n-800);
+      vertical-align: top;
+    }
+    #acct-inline-je-host table.je-table td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    /* Credit lines indent their account name — standard JE convention */
+    #acct-inline-je-host table.je-table td.acct-credit { padding-left: 38px; }
+    #acct-inline-je-host table.je-table tr.je-total td {
+      border-top: 1px solid var(--n-400);
+      border-bottom: none;
+      padding-top: 8px; padding-bottom: 10px;
+      font-weight: 700; color: var(--n-900);
+    }
+    #acct-inline-je-host table.je-table tr:hover td { background: #FCFCFD; }
+    #acct-inline-je-host .je-unbalanced {
+      background: #FEF2F2; color: #991B1B;
+      padding: 6px 14px; font-size: 11px; font-weight: 600;
+      border-top: 0.5px solid #FCA5A5;
+    }
+  </style>
 
   <!-- Daily schedule view — rebuilt on every Run Accounting / treatment change.
        Reflects every override (PIK, mod events, ECL stage, fees, etc.) -->
@@ -4762,7 +5083,10 @@
     <div id="acct-fees-table"></div>
   </details>
 
-  <details id="acct-journal-section" class="hidden">
+  <!-- Legacy journal table + coverage chip — superseded by the inline
+       #acct-inline-je-section panel above. data-substab="evidence" keeps it
+       available on the Evidence pack tab (audit trace) but off Run&JE. -->
+  <details id="acct-journal-section" data-substab="evidence" class="hidden">
     <summary class="text-[12px] mb-2">View generated journal entries (mapped to Investran chart)</summary>
     <div id="acct-journal-coverage" class="mb-2"></div>
     <div class="scrolled" id="acct-journal-table"></div>
@@ -6432,6 +6756,9 @@
   /* Hide the two legacy transtype editors on Accounting → Treatment. Users
      enter these events centrally on Lifecycle Events. */
   .le-legacy-transtypes { display: none !important; }
+  /* The Stage 2 sub-tab router (switchStage2Sub) only toggles inline display
+     on [data-substab] elements. Panels that carry data-substab="evidence"
+     must therefore not be blanket-hidden here — the router owns them. */
 
   /* Force always-visible scrollbars on the Cashflow table container — macOS
      hides them by default ("when scrolling"), so users didn't realise the
@@ -7740,6 +8067,13 @@ window.SB = (function(){
   // idle handler) were each creating a new client. Now if one init is
   // in-flight, subsequent callers await the same promise.
   let _initInFlight = null;
+  // Heavy-write guard (V4 fix, 2026-08). Bulk inserts (a 3000-row cashflow
+  // schedule, a 450-row JE batch) legitimately hog Chrome's 6-stream HTTP/2
+  // budget for several seconds. Without this, the 20s health ping fires
+  // mid-write, times out, and trips the reconnect machinery — which rebuilds
+  // the Supabase client and leaves the session permanently broken. Any code
+  // doing a bulk write wraps it in SB.withHeavyWrite() to pause health checks.
+  let _heavyWriteDepth = 0;
 
   function updateStatusChip(){
     const chip = document.getElementById('sb-status-chip');
@@ -7794,22 +8128,35 @@ window.SB = (function(){
     }
     // Wire click-to-reconnect once. The chip may render before init finishes,
     // so we set style + onclick every call (cheap, idempotent).
-    chip.style.cursor = 'pointer';
-    chip.onclick = async () => {
-      chip.title = 'Reconnecting…';
-      chip.innerHTML = '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px;">sync</span> reconnecting…';
-      try {
-        const ok = await init();
+    // V4 fix: route through _tryReconnect (which frees Chrome's connection
+    // pool and retries the EXISTING client first) instead of calling init()
+    // directly. Calling init() blindly spawns another GoTrueClient and makes
+    // pool exhaustion worse — that was the old "click reconnect, nothing
+    // happens, now permanently broken" path.
+    const _wireReconnect = (el) => {
+      if(!el) return;
+      el.style.cursor = 'pointer';
+      el.onclick = async () => {
         if(typeof toast === 'function'){
-          toast(ok ? 'Reconnected to DB' : 'Reconnect failed — check network + settings',
-                4000, { kind: ok ? 'success' : 'error', id: 'sb:reconnect' });
+          toast('Reconnecting to database…', 3000, { kind:'info', id:'sb:reconnect' });
         }
-      } catch(err){
-        console.error('[SB] manual reconnect failed:', err);
-        if(typeof toast === 'function') toast('Reconnect failed: ' + (err.message || err), 6000, { kind:'error', id:'sb:reconnect' });
-      }
-      updateStatusChip();
+        try {
+          _reconnectAttempts = 0;
+          _authKicked = false;
+          const ok = await _tryReconnect('manual reconnect from status chip');
+          if(typeof toast === 'function'){
+            toast(ok ? 'Reconnected to DB' : 'Reconnect failed — check your network, then reload the page',
+                  ok ? 3500 : 7000, { kind: ok ? 'success' : 'error', id: 'sb:reconnect' });
+          }
+        } catch(err){
+          console.error('[SB] manual reconnect failed:', err);
+          if(typeof toast === 'function') toast('Reconnect failed: ' + (err.message || err), 6000, { kind:'error', id:'sb:reconnect' });
+        }
+        updateStatusChip();
+      };
     };
+    _wireReconnect(chip);
+    _wireReconnect(v4chip);
   }
 
   // ─── DB health-check + auto-reconnect ──────────────────────────────
@@ -7839,6 +8186,15 @@ window.SB = (function(){
     // Skip when the tab is hidden — Chrome throttles bg timers heavily and
     // firing a ping in a bg tab wastes a connection slot.
     if(document.hidden) return;
+    // Skip while a heavy write is in flight. A 3000-row cashflow insert
+    // legitimately occupies the connection pool for several seconds; pinging
+    // through that produces a FALSE "connection lost" that trips the
+    // reconnect machinery and rebuilds the client for no reason. This guard
+    // is the difference between a slow save and a broken session.
+    if(_heavyWriteDepth > 0){
+      console.log('[SB] health ping skipped — heavy write in progress (' + _heavyWriteDepth + ')');
+      return;
+    }
     const ok = await _dbHealthPing();
     if(ok){
       _healthFailStreak = 0;
@@ -8020,10 +8376,35 @@ window.SB = (function(){
         // state where the "Not connected" error surfaces at every sign-in
         // attempt with no way to recover except closing the tab. Now we fail
         // fast so the user can see a clear error and retry / re-open.
-        const probe = _client.from('preset_catalog').select('preset_key').limit(1);
-        const probeTimeout = new Promise((_, rj) => setTimeout(() => rj(new Error('probe timeout · Chrome connection pool may be exhausted — close and reopen the tab')), 6000));
-        const { error } = await Promise.race([probe, probeTimeout]);
-        if(error) throw error;
+        // Two-shot probe. Attempt 1 uses a generous 12s budget (the old 6s
+        // was too tight while the pool drains after a heavy write). If it
+        // still times out, we abort every in-flight guarded request to free
+        // Chrome's 6 connection slots and try once more. Only then do we
+        // surface a hard failure — this is what turns the old permanent
+        // "can't reconnect" deadlock into a self-healing retry.
+        const runProbe = async (budgetMs) => {
+          const probe = _client.from('preset_catalog').select('preset_key').limit(1);
+          const probeTimeout = new Promise((_, rj) => setTimeout(
+            () => rj(new Error('probe timeout after ' + budgetMs + 'ms')), budgetMs));
+          return Promise.race([probe, probeTimeout]);
+        };
+        let probeRes;
+        try {
+          probeRes = await runProbe(12000);
+        } catch(probeErr){
+          console.warn('[SB] probe attempt 1 failed (' + probeErr.message + ') — freeing connection pool and retrying');
+          if(window.__fetchWatchdog && typeof window.__fetchWatchdog.abortAll === 'function'){
+            window.__fetchWatchdog.abortAll('SB init probe retry');
+          }
+          await new Promise(r => setTimeout(r, 400));
+          try {
+            probeRes = await runProbe(12000);
+            console.log('[SB] probe attempt 2 succeeded after pool flush');
+          } catch(probeErr2){
+            throw new Error('probe timeout after pool flush · the database is unreachable. Check your network, then use Settings → Reconnect.');
+          }
+        }
+        if(probeRes && probeRes.error) throw probeRes.error;
       } else if(typeSpec.transport === 'fetch'){
         // Custom REST — create a thin wrapper that mimics the supabase-js API
         // surface used by the rest of this module. Customers point to their own
@@ -8367,9 +8748,45 @@ window.SB = (function(){
     // Clear any stale dedup entries — they're holding refs to stalled promises.
     if(typeof _inFlight !== 'undefined' && _inFlight && _inFlight.clear) _inFlight.clear();
     try {
-      // Rebuild the supabase client from scratch. This creates a fresh HTTP
-      // client with fresh internal state, sidestepping any orphaned promises
-      // or stalled connection references in the old client.
+      // ─── STEP 1 · Free the connection pool ──────────────────────────
+      // Root cause of the "can't reconnect" deadlock: a heavy write (3000+
+      // row cashflow insert) saturates Chrome's 6-stream-per-origin cap.
+      // The health ping then fails, we rebuild the client, and the NEW
+      // client's probe can't get a slot either — because the OLD client's
+      // requests are still holding all six. Aborting them first is what
+      // makes recovery possible at all.
+      if(window.__fetchWatchdog && typeof window.__fetchWatchdog.abortAll === 'function'){
+        window.__fetchWatchdog.abortAll('SB reconnect · ' + reason);
+      }
+      // Give Chrome a tick to actually release the sockets.
+      await new Promise(r => setTimeout(r, 250));
+
+      // ─── STEP 2 · Try the EXISTING client first ─────────────────────
+      // With slots freed, the current client is very often perfectly fine.
+      // Rebuilding creates another GoTrueClient (the "Multiple GoTrueClient
+      // instances" warning) and makes things worse, so only do it if a
+      // plain ping on the existing client still fails.
+      if(_client){
+        const aliveNow = await _dbHealthPing();
+        if(aliveNow){
+          console.log('[SB] reconnect resolved by freeing the pool — existing client is healthy (no rebuild)');
+          _connected = true;
+          _reconnectAttempts = 0;
+          _dbTimeoutState.count = 0;
+          _dbTimeoutState.tripped = false;
+          _dbTimeoutState.firstAt = 0;
+          _healthFailStreak = 0;
+          updateStatusChip();
+          if(typeof toast === 'function'){
+            toast('DB connection restored', 3000, { kind:'success', id:'sb:reconnected' });
+          }
+          return true;
+        }
+      }
+
+      // ─── STEP 3 · Rebuild the client (last resort) ──────────────────
+      // Only reached when the existing client is genuinely broken.
+      console.warn('[SB] existing client still unhealthy after pool flush — rebuilding');
       const ok = await init();
       if(ok){
         // Verify the session still works with a lightweight ping.
@@ -9331,6 +9748,144 @@ window.SB = (function(){
   async function deleteGLMapping(id){
     if(!_client || !_connected) return { ok:false, reason:'not connected' };
     const { error } = await _client.from('gl_account_mappings').delete().eq('id', id);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // GL Configuration — business event × framework DR/CR matrix (2026-08)
+  // ═══════════════════════════════════════════════════════════════════
+  // Three tables:
+  //   gl_business_events  — the row axis (Drawdown, Interest Accrual, …)
+  //   gl_frameworks       — the column axis (IFRS, US GAAP, ASPE, AASB, +)
+  //   gl_event_mappings   — the cell: DR/CR account code + name
+  //
+  // Rows with team_id IS NULL are the workspace defaults seeded from the
+  // engine. A client edit writes a team-scoped row with is_custom = true;
+  // resolution prefers the team row and falls back to the global default.
+  async function fetchGLConfiguration(){
+    if(!_client || !_connected || _authKicked){
+      return { events: [], frameworks: [], mappings: [] };
+    }
+    try {
+      // Sequential, not Promise.all — three tiny reads, but firing them
+      // concurrently costs three of Chrome's six connection slots for no
+      // real gain and contributes to the pool pressure we fixed earlier.
+      const evRes = await _withDbTimeout('fetchGLConfiguration.events',
+        _client.from('gl_business_events').select('*').eq('is_active', true).order('sort_order'), 8000);
+      if(evRes.error) throw evRes.error;
+      const fwRes = await _withDbTimeout('fetchGLConfiguration.frameworks',
+        _client.from('gl_frameworks').select('*').eq('is_active', true).order('sort_order'), 8000);
+      if(fwRes.error) throw fwRes.error;
+      const mpRes = await _withDbTimeout('fetchGLConfiguration.mappings',
+        _client.from('gl_event_mappings').select('*'), 10000);
+      if(mpRes.error) throw mpRes.error;
+      return {
+        events:     evRes.data || [],
+        frameworks: fwRes.data || [],
+        mappings:   mpRes.data || []
+      };
+    } catch(err){
+      console.error('[SB] fetchGLConfiguration:', err && err.message ? err.message : err);
+      return { events: [], frameworks: [], mappings: [], error: err && err.message };
+    }
+  }
+
+  // Upsert one cell. Always writes a team-scoped row so the workspace
+  // defaults stay pristine and "Reset to default" can simply delete.
+  async function upsertGLEventMapping(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!row || !row.event_key || !row.framework_code){
+      return { ok:false, reason:'event_key + framework_code required' };
+    }
+    const uid = (_currentUser && _currentUser.id) || null;
+    const payload = {
+      event_key:       row.event_key,
+      framework_code:  row.framework_code,
+      dr_account_code: row.dr_account_code || null,
+      dr_account_name: row.dr_account_name || null,
+      cr_account_code: row.cr_account_code || null,
+      cr_account_name: row.cr_account_name || null,
+      notes:           row.notes || null,
+      is_custom:       true,
+      team_id:         row.team_id || null,
+      updated_by:      uid,
+      updated_at:      new Date().toISOString()
+    };
+    if(!row.id) payload.created_by = uid;
+    const { data, error } = await _client
+      .from('gl_event_mappings')
+      .upsert(payload, { onConflict: 'event_key,framework_code,team_id' })
+      .select()
+      .single();
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, row: data };
+  }
+
+  // Reset a cell back to the workspace default by removing the override.
+  async function resetGLEventMapping(eventKey, frameworkCode, teamId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    let q = _client.from('gl_event_mappings').delete()
+      .eq('event_key', eventKey)
+      .eq('framework_code', frameworkCode)
+      .eq('is_custom', true);
+    q = teamId ? q.eq('team_id', teamId) : q.is('team_id', null);
+    const { error } = await q;
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  // Add a client-defined framework column. Seeds it with a copy of the
+  // IFRS defaults so the new column isn't blank on first render.
+  async function addGLFramework(code, label, teamId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const clean = String(code || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
+    if(!clean) return { ok:false, reason:'a framework code is required' };
+    const uid = (_currentUser && _currentUser.id) || null;
+    const { data, error } = await _client.from('gl_frameworks').upsert({
+      code: clean,
+      label: (label || clean).trim(),
+      sort_order: 500,
+      is_builtin: false,
+      is_active: true,
+      team_id: teamId || null,
+      created_by: uid
+    }, { onConflict: 'code,team_id' }).select().single();
+    if(error) return { ok:false, reason: error.message };
+    // Seed the new column from IFRS so every cell has a sensible starting point.
+    try {
+      const base = await _client.from('gl_event_mappings')
+        .select('event_key,dr_account_code,dr_account_name,cr_account_code,cr_account_name')
+        .eq('framework_code', 'IFRS').is('team_id', null);
+      if(base.data && base.data.length){
+        const seed = base.data.map(m => ({
+          event_key: m.event_key,
+          framework_code: clean,
+          dr_account_code: m.dr_account_code,
+          dr_account_name: m.dr_account_name,
+          cr_account_code: m.cr_account_code,
+          cr_account_name: m.cr_account_name,
+          is_custom: false,
+          team_id: teamId || null,
+          created_by: uid
+        }));
+        await _client.from('gl_event_mappings').upsert(seed, { onConflict: 'event_key,framework_code,team_id' });
+      }
+    } catch(seedErr){
+      console.warn('[SB] addGLFramework seed failed (column still created):', seedErr && seedErr.message);
+    }
+    return { ok:true, row: data };
+  }
+
+  async function deleteGLFramework(id){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    // Look up the code so we can clean up its mapping rows too.
+    const { data: fw } = await _client.from('gl_frameworks').select('code,is_builtin').eq('id', id).single();
+    if(fw && fw.is_builtin) return { ok:false, reason:'built-in frameworks cannot be deleted' };
+    if(fw && fw.code){
+      await _client.from('gl_event_mappings').delete().eq('framework_code', fw.code);
+    }
+    const { error } = await _client.from('gl_frameworks').delete().eq('id', id);
     if(error) return { ok:false, reason: error.message };
     return { ok:true };
   }
@@ -11913,6 +12468,34 @@ window.SB = (function(){
 
   return {
     init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals, syncBreachLog,
+    // ─── Connection resilience helpers (V4 fix, 2026-08) ───────────────
+    // withHeavyWrite(fn) pauses the background health ping for the duration
+    // of a bulk insert so a legitimately-busy connection pool isn't mistaken
+    // for a dropped connection. Re-entrant (depth-counted) and always
+    // decrements, even if fn throws.
+    withHeavyWrite: async function(label, fn){
+      if(typeof label === 'function'){ fn = label; label = 'bulk write'; }
+      _heavyWriteDepth++;
+      console.log('[SB] heavy-write START · ' + label + ' (depth ' + _heavyWriteDepth + ')');
+      try {
+        return await fn();
+      } finally {
+        _heavyWriteDepth = Math.max(0, _heavyWriteDepth - 1);
+        console.log('[SB] heavy-write END · ' + label + ' (depth ' + _heavyWriteDepth + ')');
+        // Reset the fail streak — any ping failures recorded while a bulk
+        // write held the pool were false positives.
+        _healthFailStreak = 0;
+      }
+    },
+    // Manual "Reconnect now" — for the Settings modal / status chip. Frees the
+    // pool, retries the existing client, only rebuilds if genuinely broken.
+    reconnectNow: async function(){
+      _reconnectAttempts = 0;
+      _authKicked = false;
+      return _tryReconnect('manual reconnect requested by user');
+    },
+    get isConnected(){ return _connected; },
+    get heavyWriteDepth(){ return _heavyWriteDepth; },
     // Deal access — direct user assignments (per-deal)
     listDealAssignments, assignUserToDeal, removeDealAssignment,
     // User + team helpers
@@ -11933,6 +12516,9 @@ window.SB = (function(){
     fetchJournalEntriesForDeal, fetchJournalEntriesForDeals,
     // GL account mapping
     fetchGLSourceAccounts, fetchGLMappings, upsertGLMapping, deleteGLMapping,
+    // GL Configuration — business event × framework DR/CR matrix
+    fetchGLConfiguration, upsertGLEventMapping, resetGLEventMapping,
+    addGLFramework, deleteGLFramework,
     // Commitment lifecycle events
     fetchCommitmentEvents, upsertCommitmentEvent, deleteCommitmentEvent,
     // Multi-fund (Tier 1 #2 Phase 1)
@@ -13850,6 +14436,12 @@ function downloadDIUFilled(){
   // Apply client GL account remapping (same as pushToWorkday). Overwrites the
   // in-memory journals so downstream sanitisers, batch grouping and CSV/XLSX
   // rendering all use the mapped codes. Pass-through when no mappings exist.
+  // Two-stage substitution: (1) GL Configuration event-level overrides for
+  // this deal's framework, then (2) the per-account chart-of-accounts remap.
+  if(window.__applyGLEventConfig){
+    const evMapped = window.__applyGLEventConfig(M.acctJournals, inst.accountingFramework || inst.framework);
+    if(evMapped !== M.acctJournals) M.acctJournals = evMapped;
+  }
   if(window.__applyGLMappings){
     const remapped = window.__applyGLMappings(M.acctJournals);
     if(remapped !== M.acctJournals){
@@ -17050,17 +17642,20 @@ window.renderParticipationBanner = renderParticipationBanner;
 window.repaintStage2FromState = function(){
   const journalsLen = (M && Array.isArray(M.acctJournals)) ? M.acctJournals.length : 0;
   if(journalsLen > 0){
-    // Restore the green "Ready · N JE rows" chip + the click affordance
+    // Restore the plain green status chip (no click-to-modal affordance —
+    // the JE table renders inline on the page now).
     const chip = document.getElementById('acct-status');
     if(chip){
       chip.className = 'chip green self-center';
-      chip.innerHTML = 'Ready · ' + journalsLen + ' JE rows ' +
-        '<span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px; margin-left:2px;">visibility</span>';
-      if(typeof makeAcctStatusClickable === 'function') makeAcctStatusClickable();
+      chip.textContent = 'Accounting complete';
+      chip.style.cursor = '';
+      chip.onclick = null;
     }
     // Reveal the KPI + journal sections in case they were hidden
     document.getElementById('acct-kpis')?.classList.remove('hidden');
     document.getElementById('acct-journal-section')?.classList.remove('hidden');
+    // Repaint the inline JE table too
+    try { window.__renderInlineJETable && window.__renderInlineJETable(); } catch(_){}
     // Enable the Run Accounting button (it's safe to re-run; idempotent)
     const runBtn = document.getElementById('btn-acct-run');
     if(runBtn) runBtn.disabled = false;
@@ -17926,8 +18521,9 @@ function runAccountingImpl(){
     { label:'Receivables (113000)',    value: fmtMoney(Math.abs(recvBalance), ccy),
                                         sub: `DR ${fmtMoney(recvBookedDR, ccy)} − CR ${fmtMoney(recvClearedCR, ccy)}` },
     { label:'ECL Allowance (145000)',  value: fmtMoney(sum.closingECLAllowance || 0, ccy),
-                                        sub: 'Stage ' + (inst.ifrs?.ecLStage || 1) + ' lifetime' },
-    { label:'JE Rows Generated',       value: M.acctJournals.length.toLocaleString() }
+                                        sub: 'Stage ' + (inst.ifrs?.ecLStage || 1) + ' lifetime' }
+    // "JE Rows Generated" KPI removed — the inline Journal entries panel
+    // below already shows the row count in its header chip.
   ].map(k =>
     `<div class="kpi"><div class="label">${k.label}</div><div class="value text-[14px]">${k.value}</div>${k.sub ? `<div class="sub text-[10px] text-gray-500">${k.sub}</div>` : ''}</div>`
   ).join('');
@@ -17977,11 +18573,13 @@ function runAccountingImpl(){
   $('btn-diu-filled').disabled = false;
   const _btnPostJe = document.getElementById('btn-post-je-investran');
   if(_btnPostJe) _btnPostJe.disabled = false;
-  // Mark the status chip as Ready AND make it clickable — the user can drill
-  // into the generated JE rows by clicking the chip. See makeAcctStatusClickable().
+  // Status chip — plain "Complete" now that the JE table is rendered inline
+  // on the page. The old "Ready · N JE rows 👁" click-to-open-modal chip was
+  // removed per user request (JEs are no longer hidden behind an icon).
   $('acct-status').className = 'chip green self-center';
-  $('acct-status').innerHTML = `Ready · ${M.acctJournals.length} JE rows <span class="material-icons-outlined" style="font-size:13px; vertical-align:-2px; margin-left:2px;">visibility</span>`;
-  if(typeof makeAcctStatusClickable === 'function') makeAcctStatusClickable();
+  $('acct-status').textContent = 'Accounting complete';
+  $('acct-status').style.cursor = '';
+  $('acct-status').onclick = null;
   $('workday-out-status').className = 'chip blue self-center';
   $('workday-out-status').textContent = 'Ready to push';
   toast('Accounting run complete — ' + M.acctJournals.length + ' journal rows generated');
@@ -17994,53 +18592,85 @@ function runAccountingImpl(){
   // detected as a no-op and skip the re-run. Real user edits will still show
   // a hash delta and cascade through.
   try { if(typeof _treatmentStateHash === 'function') M._lastTreatmentHash = _treatmentStateHash(); } catch(_){}
-  // V3 — persist the run to Supabase. Best-effort; failure doesn't block UX.
+  // ─── V3/V4 — persist the run to Supabase ────────────────────────────
+  // Best-effort; failure doesn't block UX.
+  //
+  // V4 fix (2026-08): this whole block used to fire saveAccountingRun,
+  // saveSchedule, syncBreachLog and saveTreatmentOverride CONCURRENTLY.
+  // On a big deal that's ~450 JE rows + ~3100 schedule rows racing for
+  // Chrome's 6 HTTP/2 streams. The pool saturated, the 20s health ping
+  // timed out, the reconnect machinery fired, rebuilt the Supabase client
+  // (→ "Multiple GoTrueClient instances"), and the new client's probe
+  // couldn't get a slot either — a permanent "can't reconnect" deadlock.
+  //
+  // Two changes fix it: (1) wrap in SB.withHeavyWrite so the health ping
+  // pauses for the duration, and (2) run the writes SEQUENTIALLY so we
+  // never occupy more than one or two connection slots at a time.
   if(typeof window.SB !== 'undefined' && window.SB.connected){
     const glPostingDate = (document.getElementById('opt-gl-date') || {}).value || null;
-    window.SB.saveAccountingRun(inst, M.acctJournals, M.summary, {
-      glPostingDate,
-      glPostingMode: glPostingDate ? 'OVERRIDE' : 'AUTO',
-      participationPct: (inst.participationPct != null ? inst.participationPct : 100)
-    }).then(res => {
-      if(res && res.ok){
-        toast('Run persisted to Supabase · ' + res.runId, 4000);
-        console.log('[V3] saved accounting run to Supabase:', res);
-        // Track current run for approval workflow
-        M._currentRunUuid = res.runUuid;
-        M._currentRunId   = res.runId;
-        if(typeof window.refreshApprovalUI === 'function') window.refreshApprovalUI();
-        // V3 — also persist the daily cashflow schedule for ad-hoc SQL.
-        if(Array.isArray(M.schedule) && M.schedule.length && res.runUuid && res.dealId){
-          window.SB.saveSchedule(res.runUuid, res.dealId, M.schedule).then(schRes => {
-            if(schRes && schRes.ok){
-              toast('Cashflow schedule persisted · ' + schRes.rows + ' days', 4000);
-              console.log('[V3] saved cashflow schedule to Supabase:', schRes);
-            } else if(schRes && schRes.reason){
-              console.log('[V3] saveSchedule skipped/failed:', schRes.reason);
-            }
-          });
-        }
-        // Phase B — sync covenant breach log if engine produced enriched covenants
-        if(res.dealId && M.schedule && Array.isArray(M.schedule.covenants) && M.schedule.covenants.length){
-          window.SB.syncBreachLog(res.dealId, M.schedule.covenants, inst.principalSchedule)
-            .then(blRes => {
-              if(blRes && blRes.ok && blRes.stats){
-                const s = blRes.stats;
-                if(s.inserted || s.cured){
-                  toast('Breach log · ' + s.inserted + ' active · ' + s.cured + ' cured', 4000);
-                }
-                console.log('[V3] synced covenant breach log:', s);
-              } else if(blRes && blRes.reason){
-                console.log('[V3] syncBreachLog skipped/failed:', blRes.reason);
-              }
-            });
-        }
-      } else if(res && res.reason){
-        console.log('[V3] saveAccountingRun skipped/failed:', res.reason);
+    const _persist = async () => {
+      let res = null;
+      try {
+        res = await window.SB.saveAccountingRun(inst, M.acctJournals, M.summary, {
+          glPostingDate,
+          glPostingMode: glPostingDate ? 'OVERRIDE' : 'AUTO',
+          participationPct: (inst.participationPct != null ? inst.participationPct : 100)
+        });
+      } catch(err){
+        console.warn('[V3] saveAccountingRun threw:', err && err.message);
+        return;
       }
-    });
-    // Also persist current treatment overrides (best-effort).
-    if(inst.ifrs) window.SB.saveTreatmentOverride(inst, inst.ifrs).catch(() => {});
+      if(!(res && res.ok)){
+        if(res && res.reason) console.log('[V3] saveAccountingRun skipped/failed:', res.reason);
+        return;
+      }
+      toast('Run persisted to Supabase · ' + res.runId, 4000);
+      console.log('[V3] saved accounting run to Supabase:', res);
+      // Track current run for approval workflow
+      M._currentRunUuid = res.runUuid;
+      M._currentRunId   = res.runId;
+      if(typeof window.refreshApprovalUI === 'function') window.refreshApprovalUI();
+
+      // Persist the daily cashflow schedule — sequential, not racing.
+      if(Array.isArray(M.schedule) && M.schedule.length && res.runUuid && res.dealId){
+        try {
+          const schRes = await window.SB.saveSchedule(res.runUuid, res.dealId, M.schedule);
+          if(schRes && schRes.ok){
+            toast('Cashflow schedule persisted · ' + schRes.rows + ' days', 4000);
+            console.log('[V3] saved cashflow schedule to Supabase:', schRes);
+          } else if(schRes && schRes.reason){
+            console.log('[V3] saveSchedule skipped/failed:', schRes.reason);
+          }
+        } catch(err){ console.warn('[V3] saveSchedule threw:', err && err.message); }
+      }
+
+      // Phase B — sync covenant breach log if engine produced enriched covenants
+      if(res.dealId && M.schedule && Array.isArray(M.schedule.covenants) && M.schedule.covenants.length){
+        try {
+          const blRes = await window.SB.syncBreachLog(res.dealId, M.schedule.covenants, inst.principalSchedule);
+          if(blRes && blRes.ok && blRes.stats){
+            const s = blRes.stats;
+            if(s.inserted || s.cured){
+              toast('Breach log · ' + s.inserted + ' active · ' + s.cured + ' cured', 4000);
+            }
+            console.log('[V3] synced covenant breach log:', s);
+          } else if(blRes && blRes.reason){
+            console.log('[V3] syncBreachLog skipped/failed:', blRes.reason);
+          }
+        } catch(err){ console.warn('[V3] syncBreachLog threw:', err && err.message); }
+      }
+
+      // Treatment overrides last — smallest write, safe to tail the queue.
+      if(inst.ifrs){
+        try { await window.SB.saveTreatmentOverride(inst, inst.ifrs); } catch(_){}
+      }
+    };
+    // Pause the health ping for the whole sequence.
+    if(typeof window.SB.withHeavyWrite === 'function'){
+      window.SB.withHeavyWrite('accounting run persist', _persist);
+    } else {
+      _persist();
+    }
   }
 }
 
@@ -18219,100 +18849,130 @@ window.__renderInlineJETable = function(){
     ((r.transactionType || '') + ' ' + (r.account || '') + ' ' + (r.glAccountName || '') + ' ' + (r.transactionComments || '')).toLowerCase().indexOf(q) !== -1
   ) : rowsAll;
   if(chipCount) chipCount.textContent = rows.length.toLocaleString() + ' of ' + rowsAll.length.toLocaleString() + ' rows';
-  const fmtAmt = a => (a == null || isNaN(a)) ? '—' :
-    Number(a).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 });
+  // Money formatter with currency symbol — matches how an accountant reads a JE
+  const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+  const ccySym = (function(c){
+    return ({ USD:'$', AUD:'$', CAD:'$', GBP:'£', EUR:'€', JPY:'¥', NZD:'$' })[c] || '$';
+  })((inst && inst.currency) || (window.B && window.B.deal && window.B.deal.currency) || 'USD');
+  const fmtAmt = a => (a == null || isNaN(a) || Math.abs(+a) < 0.005) ? '' :
+    ccySym + Number(a).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  // Pretty date — M/D/YYYY like the accountant's reference format
+  const fmtJeDate = d => {
+    if(!d) return '—';
+    const parts = String(d).split('-');
+    if(parts.length === 3) return (+parts[1]) + '/' + (+parts[2]) + '/' + parts[0];
+    return d;
+  };
+  // Fund / entity label — falls back to the legal entity or deal name
+  const fundLabel = (r) =>
+    r.fund || r.entity || r.legalEntity ||
+    (inst && (inst.legalEntity || inst.entity)) ||
+    (window.B && window.B.deal && (window.B.deal.le || window.B.deal.name)) || '—';
+  // Account display — "141000 · Loan Receivable" reads best for accountants
+  const acctLabel = (r) => {
+    const name = r.glAccountName || r.accountName || '';
+    const code = r.account || '';
+    if(name && code) return name + ' <span style="color:var(--n-400); font-family:ui-monospace,monospace; font-size:10.5px;">' + code + '</span>';
+    return name || code || '—';
+  };
   // Total DR/CR balance check
   let totDr = 0, totCr = 0;
   rows.forEach(r => { if(r.isDebit) totDr += (+r.amountLE || 0); else totCr += (+r.amountLE || 0); });
   const balanced = Math.abs(totDr - totCr) < 0.005;
   if(chipBal){
     chipBal.className = 'chip ' + (balanced ? 'green' : 'red');
-    chipBal.textContent = balanced ? ('balanced · DR/CR ' + fmtAmt(totDr)) : ('UNBALANCED · Δ ' + fmtAmt(totDr - totCr));
+    chipBal.textContent = balanced
+      ? ('balanced · ' + ccySym + Number(totDr).toLocaleString('en-US', { maximumFractionDigits:0 }))
+      : ('UNBALANCED · Δ ' + fmtAmt(totDr - totCr));
   }
-  // Flat rows path — render as one table
-  if(groupBy === 'flat'){
-    host.innerHTML = '<table style="width:100%; font-size:11px; border-collapse:collapse;">' +
-      '<thead style="position:sticky; top:0; background:var(--n-50); z-index:1;">' +
-        '<tr>' +
-          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">JE#</th>' +
-          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Effective</th>' +
-          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">GL date</th>' +
-          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Transaction type</th>' +
-          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Account</th>' +
-          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">DR/CR</th>' +
-          '<th style="text-align:right; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Amount</th>' +
-          '<th style="text-align:left; padding:7px 10px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; border-bottom:0.5px solid var(--n-200);">Comment</th>' +
+
+  const TH = '<thead><tr>' +
+    '<th style="width:96px;">Date</th>' +
+    '<th>Account</th>' +
+    '<th class="num" style="width:130px;">Debit</th>' +
+    '<th class="num" style="width:130px;">Credit</th>' +
+    '<th style="width:130px;">Fund</th>' +
+    '<th style="width:30%;">Description</th>' +
+  '</tr></thead>';
+
+  // ── Register view — one continuous ruled table, all rows ──
+  if(groupBy === 'register'){
+    host.innerHTML =
+      '<div class="je-entry">' +
+        '<table class="je-table">' + TH +
+        '<tbody>' + rows.map(r => (
+          '<tr>' +
+            '<td>' + fmtJeDate(r.effectiveDate) + '</td>' +
+            '<td class="' + (r.isDebit ? '' : 'acct-credit') + '">' + acctLabel(r) + '</td>' +
+            '<td class="num">' + (r.isDebit ? fmtAmt(r.amountLE) : '') + '</td>' +
+            '<td class="num">' + (!r.isDebit ? fmtAmt(r.amountLE) : '') + '</td>' +
+            '<td style="color:var(--n-600);">' + fundLabel(r) + '</td>' +
+            '<td style="color:var(--n-600);">' + (r.transactionComments || r.transactionType || '') + '</td>' +
+          '</tr>'
+        )).join('') +
+        '<tr class="je-total">' +
+          '<td></td><td>Total</td>' +
+          '<td class="num">' + fmtAmt(totDr) + '</td>' +
+          '<td class="num">' + fmtAmt(totCr) + '</td>' +
+          '<td></td><td></td>' +
         '</tr>' +
-      '</thead>' +
-      '<tbody>' + rows.map(r => (
-        '<tr style="border-top:0.5px solid var(--n-100);' + (r.isDebit ? '' : ' background:#FDFDFF;') + '">' +
-          '<td style="padding:6px 10px; color:var(--n-700); font-variant-numeric:tabular-nums;">' + (r.jeIndex != null ? r.jeIndex : '—') + '</td>' +
-          '<td style="padding:6px 10px; color:var(--n-700);">' + (r.effectiveDate || '—') + '</td>' +
-          '<td style="padding:6px 10px; color:var(--n-600);">' + (r.glDate || '—') + '</td>' +
-          '<td style="padding:6px 10px; color:var(--n-800); font-weight:500;">' + (r.transactionType || '—') + '</td>' +
-          '<td style="padding:6px 10px; color:var(--n-800); font-family:ui-monospace,monospace; font-size:11px;">' + (r.account || '—') + '</td>' +
-          '<td style="padding:6px 10px; color:' + (r.isDebit ? '#1E40AF' : '#9A3412') + '; font-weight:600;">' + (r.isDebit ? 'DR' : 'CR') + '</td>' +
-          '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtAmt(r.amountLE) + '</td>' +
-          '<td style="padding:6px 10px; color:var(--n-500); font-size:10.5px;">' + (r.transactionComments || '') + '</td>' +
-        '</tr>'
-      )).join('') + '</tbody></table>';
+        '</tbody></table>' +
+        (balanced ? '' : '<div class="je-unbalanced">Total debits do not equal total credits — Δ ' + fmtAmt(totDr - totCr) + '</div>') +
+      '</div>';
     return;
   }
-  // Grouped paths — bucket rows by je / tx / account
+
+  // ── Journal-entry view — one ruled card per balanced entry ──
+  // Group by jeIndex; within each entry, debits print first (standard
+  // convention), then credits indented beneath.
   const groups = new Map();
   rows.forEach(r => {
-    let k;
-    if(groupBy === 'je') k = r.jeIndex != null ? ('JE #' + r.jeIndex) : 'JE —';
-    else if(groupBy === 'tx') k = r.transactionType || '—';
-    else k = (r.account || '—') + (r.glAccountName ? ' · ' + r.glAccountName : '');
+    const k = (r.jeIndex != null ? r.jeIndex : 0);
     if(!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   });
   const parts = [];
-  groups.forEach((grpRows, groupKey) => {
+  [...groups.entries()].sort((a, b) => a[0] - b[0]).forEach(([jeIdx, grpRowsRaw]) => {
+    // Debits first, then credits — the way a JE is written on paper
+    const grpRows = grpRowsRaw.slice().sort((a, b) => (a.isDebit === b.isDebit) ? 0 : (a.isDebit ? -1 : 1));
     const dr = grpRows.filter(r => r.isDebit).reduce((s, r) => s + (+r.amountLE || 0), 0);
     const cr = grpRows.filter(r => !r.isDebit).reduce((s, r) => s + (+r.amountLE || 0), 0);
     const bal = Math.abs(dr - cr) < 0.005;
-    const first = grpRows[0];
-    const balancePill = bal
-      ? '<span style="padding:1px 7px; border-radius:9px; background:#DCFCE7; color:#166534; font-size:9.5px; font-weight:600;">balanced</span>'
-      : '<span style="padding:1px 7px; border-radius:9px; background:#FEE2E2; color:#991B1B; font-size:9.5px; font-weight:600;">Δ ' + fmtAmt(dr - cr) + '</span>';
+    const first = grpRows[0] || {};
+    const txTypes = [...new Set(grpRows.map(r => r.transactionType).filter(Boolean))].join(' · ');
     parts.push(
-      '<details open style="border-top:0.5px solid var(--n-200);">' +
-        '<summary style="background:var(--n-50,#FAFAFA); padding:7px 12px; cursor:pointer; display:flex; align-items:center; gap:10px; font-size:11.5px;">' +
-          '<span style="font-weight:600; color:var(--n-900);">' + groupKey + '</span>' +
-          (groupBy === 'je' && first.effectiveDate ? '<span style="color:var(--n-500); font-size:10.5px;">' + first.effectiveDate + '</span>' : '') +
-          '<span style="color:var(--n-500); font-size:10.5px;">' + grpRows.length + ' row' + (grpRows.length === 1 ? '' : 's') + '</span>' +
-          '<span style="margin-left:auto; display:flex; gap:8px; align-items:center; font-variant-numeric:tabular-nums;">' +
-            '<span style="font-size:10.5px; color:var(--n-700);">DR ' + fmtAmt(dr) + ' · CR ' + fmtAmt(cr) + '</span>' +
-            balancePill +
+      '<div class="je-entry">' +
+        '<div class="je-entry-head">' +
+          '<span class="je-ref">JE ' + String(jeIdx).padStart(4, '0') + '</span>' +
+          '<span class="je-memo">' + (txTypes || '—') + '</span>' +
+          '<span style="margin-left:auto; display:flex; align-items:center; gap:8px;">' +
+            (first.glDate && first.glDate !== first.effectiveDate
+              ? '<span style="font-size:10.5px; color:var(--n-500);">GL ' + fmtJeDate(first.glDate) + '</span>' : '') +
+            (bal
+              ? '<span style="padding:1px 8px; border-radius:9px; background:#DCFCE7; color:#166534; font-size:9.5px; font-weight:700; letter-spacing:0.2px;">BALANCED</span>'
+              : '<span style="padding:1px 8px; border-radius:9px; background:#FEE2E2; color:#991B1B; font-size:9.5px; font-weight:700; letter-spacing:0.2px;">Δ ' + fmtAmt(dr - cr) + '</span>') +
           '</span>' +
-        '</summary>' +
-        '<div style="overflow-x:auto;">' +
-          '<table style="width:100%; font-size:11px; border-collapse:collapse;">' +
-            '<thead><tr style="background:var(--n-50,#FAFAFA);">' +
-              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Effective</th>' +
-              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">GL date</th>' +
-              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Transaction type</th>' +
-              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Account</th>' +
-              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">DR/CR</th>' +
-              '<th style="padding:6px 10px; text-align:right; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Amount</th>' +
-              '<th style="padding:6px 10px; text-align:left; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Comment</th>' +
-            '</tr></thead>' +
-            '<tbody>' + grpRows.map(r => (
-              '<tr style="border-top:0.5px solid var(--n-100);' + (r.isDebit ? '' : ' background:#FDFDFF;') + '">' +
-                '<td style="padding:6px 10px; color:var(--n-700);">' + (r.effectiveDate || '—') + '</td>' +
-                '<td style="padding:6px 10px; color:var(--n-600);">' + (r.glDate || '—') + '</td>' +
-                '<td style="padding:6px 10px; color:var(--n-800);">' + (r.transactionType || '—') + '</td>' +
-                '<td style="padding:6px 10px; color:var(--n-800); font-family:ui-monospace,monospace; font-size:11px;">' + (r.account || '—') + '</td>' +
-                '<td style="padding:6px 10px; color:' + (r.isDebit ? '#1E40AF' : '#9A3412') + '; font-weight:600;">' + (r.isDebit ? 'DR' : 'CR') + '</td>' +
-                '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;">' + fmtAmt(r.amountLE) + '</td>' +
-                '<td style="padding:6px 10px; color:var(--n-500); font-size:10.5px;">' + (r.transactionComments || '') + '</td>' +
-              '</tr>'
-            )).join('') + '</tbody>' +
-          '</table>' +
         '</div>' +
-      '</details>'
+        '<table class="je-table">' + TH +
+        '<tbody>' + grpRows.map(r => (
+          '<tr>' +
+            '<td>' + fmtJeDate(r.effectiveDate) + '</td>' +
+            '<td class="' + (r.isDebit ? '' : 'acct-credit') + '">' + acctLabel(r) + '</td>' +
+            '<td class="num">' + (r.isDebit ? fmtAmt(r.amountLE) : '') + '</td>' +
+            '<td class="num">' + (!r.isDebit ? fmtAmt(r.amountLE) : '') + '</td>' +
+            '<td style="color:var(--n-600);">' + fundLabel(r) + '</td>' +
+            '<td style="color:var(--n-600);">' + (r.transactionComments || r.transactionType || '') + '</td>' +
+          '</tr>'
+        )).join('') +
+        '<tr class="je-total">' +
+          '<td></td><td>Total</td>' +
+          '<td class="num">' + fmtAmt(dr) + '</td>' +
+          '<td class="num">' + fmtAmt(cr) + '</td>' +
+          '<td></td><td></td>' +
+        '</tr>' +
+        '</tbody></table>' +
+        (bal ? '' : '<div class="je-unbalanced">Debits ≠ credits for this entry — Δ ' + fmtAmt(dr - cr) + '</div>') +
+      '</div>'
     );
   });
   host.innerHTML = parts.join('');
@@ -18325,14 +18985,23 @@ window.__inlineJECopyTsv = function(){
   const filtered = q ? rows.filter(r =>
     ((r.transactionType || '') + ' ' + (r.account || '') + ' ' + (r.glAccountName || '') + ' ' + (r.transactionComments || '')).toLowerCase().indexOf(q) !== -1
   ) : rows;
-  const hdr = ['JE#','Effective','GL date','Transaction type','Account','DR/CR','Amount','Comment'].join('\t');
+  // Mirror the on-screen accountant layout: Date · Account · Debit · Credit
+  // · Fund · Description. Separate debit/credit columns paste straight into
+  // an Excel journal template.
+  const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+  const fundOf = r => r.fund || r.entity || r.legalEntity ||
+    (inst && (inst.legalEntity || inst.entity)) ||
+    (window.B && window.B.deal && (window.B.deal.le || window.B.deal.name)) || '';
+  const hdr = ['JE#','Date','Account code','Account name','Debit','Credit','Fund','Description'].join('\t');
   const body = filtered.map(r => [
     r.jeIndex != null ? r.jeIndex : '',
-    r.effectiveDate || '', r.glDate || '',
-    r.transactionType || '', r.account || '',
-    r.isDebit ? 'DR' : 'CR',
-    Number(r.amountLE || 0).toFixed(2),
-    (r.transactionComments || '').replace(/[\t\n]/g, ' ')
+    r.effectiveDate || '',
+    r.account || '',
+    r.glAccountName || '',
+    r.isDebit  ? Number(r.amountLE || 0).toFixed(2) : '',
+    !r.isDebit ? Number(r.amountLE || 0).toFixed(2) : '',
+    String(fundOf(r)).replace(/[\t\n]/g, ' '),
+    (r.transactionComments || r.transactionType || '').replace(/[\t\n]/g, ' ')
   ].join('\t')).join('\n');
   const tsv = hdr + '\n' + body;
   navigator.clipboard.writeText(tsv).then(() => {
@@ -25937,6 +26606,104 @@ window.__refreshGLMappings = async function(){
 // Prime on boot (fire-and-forget, no await needed)
 setTimeout(() => { if(window.SB && window.SB.connected) window.__refreshGLMappings(); }, 2000);
 
+// ─── GL Configuration overrides (2026-08) ────────────────────────────
+// The GL Configuration screen lets clients redefine the DR/CR accounts per
+// BUSINESS EVENT per FRAMEWORK. That's a different axis from the per-account
+// remap above: this one is keyed "event_key|FRAMEWORK" → { dr, cr }.
+// Applied first (event-level intent), then the per-account map runs on top
+// so an existing chart-of-accounts remap still wins for edge cases.
+window.PCS_GL_EVENT_MAP = window.PCS_GL_EVENT_MAP || {};
+
+// Maps engine transactionType strings onto business-event keys. Kept as
+// ordered regex pairs so the FIRST match wins — more specific patterns are
+// listed before their generic counterparts.
+const _GL_EVENT_PATTERNS = [
+  [/Interest Cash Receipt/i,                    'interest_receipt'],
+  [/Interest Receivable Clear/i,                'interest_receipt'],
+  [/Interest Receivable|Daily Accrued Interest/i, 'interest_accrual'],
+  [/PIK|Capitalised Coupon/i,                   'pik_capitalisation'],
+  [/EIR Fee Accretion/i,                        'eir_accretion'],
+  [/Loan Drawdown/i,                            'drawdown'],
+  [/Mandatory Prepayment/i,                     'mandatory_prepay'],
+  [/Loan Prepayment/i,                          'prepayment'],
+  [/Loan Repayment/i,                           'paydown'],
+  [/Commitment Fee/i,                           'commitment_fee'],
+  [/Arrangement Fee|Origination Fee/i,          'origination_fee'],
+  [/Exit Fee/i,                                 'exit_fee'],
+  [/Utilisation Fee/i,                          'utilisation_fee'],
+  [/Agency Fee/i,                               'agency_fee'],
+  [/Impairment Expense|ECL|Loan Loss Allowance/i, 'ecl_impairment'],
+  [/Write[- ]?Off/i,                            'write_off'],
+  [/Recovery/i,                                 'recovery'],
+  [/Loan Sale/i,                                'loan_sale'],
+  [/Participation/i,                            'participation'],
+  [/Debt.?for.?Equity|D4E/i,                    'debt_equity_swap'],
+  [/Capitalised (origination )?[Cc]ost/i,       'capitalised_cost'],
+  [/Default Interest|Default Fee/i,             'default_interest'],
+  [/Forbearance/i,                              'forbearance'],
+  [/Modification|Restructur/i,                  'loan_restructuring'],
+  [/Commitment/i,                               'commitment']
+];
+window.__glEventKeyForTransType = function(transType){
+  const s = String(transType || '');
+  for(const [re, key] of _GL_EVENT_PATTERNS){ if(re.test(s)) return key; }
+  return null;
+};
+
+window.__refreshGLEventMap = async function(){
+  if(!(window.SB && window.SB.fetchGLConfiguration)) return {};
+  try {
+    const cfg = await window.SB.fetchGLConfiguration();
+    const map = {};
+    (cfg.mappings || []).forEach(m => {
+      // Team overrides land after globals in the array, so a later write to
+      // the same key naturally wins — which is the precedence we want.
+      const k = m.event_key + '|' + m.framework_code;
+      const prev = map[k];
+      if(prev && prev.isCustom && !m.is_custom) return;   // don't let a global clobber a custom
+      map[k] = {
+        drCode: m.dr_account_code, drName: m.dr_account_name,
+        crCode: m.cr_account_code, crName: m.cr_account_name,
+        isCustom: !!m.is_custom
+      };
+    });
+    window.PCS_GL_EVENT_MAP = map;
+    const nCustom = Object.values(map).filter(v => v.isCustom).length;
+    console.log('[GL] loaded ' + Object.keys(map).length + ' event mappings (' + nCustom + ' customised)');
+    return map;
+  } catch(err){ console.warn('[GL] event-map refresh failed:', err); return window.PCS_GL_EVENT_MAP; }
+};
+setTimeout(() => { if(window.SB && window.SB.connected) window.__refreshGLEventMap(); }, 2400);
+
+// Substitute event-configured accounts into a JE array. Only CUSTOM rows are
+// applied — untouched defaults already match what the engine emitted, so
+// rewriting them would be a no-op that just adds noise to the diff.
+window.__applyGLEventConfig = function(journals, framework){
+  if(!Array.isArray(journals) || !journals.length) return journals;
+  const map = window.PCS_GL_EVENT_MAP || {};
+  if(!Object.keys(map).length) return journals;
+  const fw = String(framework || 'IFRS').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  let applied = 0;
+  const out = journals.map(j => {
+    const evKey = window.__glEventKeyForTransType(j.transactionType);
+    if(!evKey) return j;
+    const cfg = map[evKey + '|' + fw];
+    if(!cfg || !cfg.isCustom) return j;
+    const code = j.isDebit ? cfg.drCode : cfg.crCode;
+    const name = j.isDebit ? cfg.drName : cfg.crName;
+    if(!code) return j;
+    applied++;
+    return Object.assign({}, j, {
+      account: code,
+      glAccountName: name || j.glAccountName,
+      _glEventKey: evKey,
+      _glConfigApplied: true
+    });
+  });
+  if(applied) console.log('[GL] event config applied to ' + applied + ' JE rows · framework=' + fw);
+  return out;
+};
+
 // Apply mapping to a journal-entry array. Returns a NEW array (originals untouched)
 // with `account` / `glAccountName` substituted where a mapping exists. Emits a
 // console line with mapped vs pass-through counts for debuggability.
@@ -25970,9 +26737,17 @@ function pushToWorkdayImpl(){
   if(!M.acctJournals || !M.acctJournals.length){ toast('Run accounting first — no journals to push'); return; }
   const inst = currentInstrument();
   if(!inst){ toast('No active instrument'); return; }
-  // Apply client GL account remapping BEFORE building the batch. Fully opt-in
-  // — if no mappings are configured, this is a no-op and codes pass through.
-  const journalsForBatch = window.__applyGLMappings ? window.__applyGLMappings(M.acctJournals) : M.acctJournals;
+  // Apply GL substitutions BEFORE building the batch. Both stages are fully
+  // opt-in — with nothing configured this is a no-op and codes pass through.
+  //   1. GL Configuration — per business event × framework (the matrix screen)
+  //   2. GL account setup — per source account code (chart-of-accounts remap)
+  let journalsForBatch = M.acctJournals;
+  if(window.__applyGLEventConfig){
+    journalsForBatch = window.__applyGLEventConfig(journalsForBatch, inst.accountingFramework || inst.framework);
+  }
+  if(window.__applyGLMappings){
+    journalsForBatch = window.__applyGLMappings(journalsForBatch);
+  }
   // Build the DIU batch envelope (matches Investran DIU /api/DataImport/v1/batches)
   const period = `${inst.settlementDate}-to-${inst.maturityDate}`;
   const rowsHash = djb2(JSON.stringify(journalsForBatch.map(j => `${j.effectiveDate}|${j.transactionType}|${j.amountLE}|${j.account}`)));
@@ -28232,7 +29007,7 @@ document.addEventListener('DOMContentLoaded', window._applyAdvancedStagesVisibil
 try { window._applyAdvancedStagesVisibility(); } catch(_){}
 
 (function(){
-  const TAB_IDS = ['builder','lifecycle','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
+  const TAB_IDS = ['builder','lifecycle','glconfig','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
 
   function switchTab(tabId){
     if(!TAB_IDS.includes(tabId)) tabId = 'stage-1';
@@ -28255,6 +29030,11 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     // currentInstrument().principalSchedule, so we re-render on every visit.
     if(tabId === 'lifecycle' && typeof window.__leRender === 'function'){
       try { window.__leRender(); } catch(_){}
+    }
+    // GL Configuration — server-backed matrix. Lazy-loads on first visit,
+    // then re-renders from cache (pass true to __glcLoad to force refetch).
+    if(tabId === 'glconfig' && typeof window.__glcLoad === 'function'){
+      try { window.__glcLoad(); } catch(_){}
     }
     // When Stage 2 is shown, re-paint its status chip + JE journal from M
     // state so the user always sees their JEs (they were observed to "vanish"
@@ -35974,6 +36754,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(tab === 'lifecycle'){
       setTimeout(() => { window.__leRender && window.__leRender(); }, 30);
     }
+    if(tab === 'glconfig'){
+      setTimeout(() => { window.__glcLoad && window.__glcLoad(); }, 30);
+    }
   };
 
   function v4SyncActive(){
@@ -39318,6 +40101,349 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   window.closeBenchmarksModal = function(){
     const el = $('bench-modal'); if(el) el.style.display = 'none';
   };
+
+  // ═══════════════════════════════════════════════════════════════════
+  // GL Configuration — business event × framework DR/CR matrix
+  // ═══════════════════════════════════════════════════════════════════
+  // State cache so the table can re-render on filter without re-fetching.
+  const _glcState = { events: [], frameworks: [], mappings: [], loaded: false, teamId: null };
+
+  function _glcEsc(s){ return String(s == null ? '' : s).replace(/[<>&"']/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+  // Resolve the effective mapping for (event, framework): a team-scoped
+  // override wins over the workspace default.
+  function _glcResolve(eventKey, fwCode){
+    const rows = _glcState.mappings.filter(m => m.event_key === eventKey && m.framework_code === fwCode);
+    if(!rows.length) return null;
+    const teamRow = rows.find(m => m.team_id && m.team_id === _glcState.teamId);
+    return teamRow || rows.find(m => !m.team_id) || rows[0];
+  }
+
+  window.__glcLoad = async function(force){
+    if(_glcState.loaded && !force){ window.__glcRender(); return; }
+    const body = document.getElementById('glc-body');
+    const table = document.getElementById('glc-table');
+    const empty = document.getElementById('glc-empty');
+    if(!body) return;
+    if(table) table.style.display = 'none';
+    if(empty){
+      empty.style.display = 'block';
+      const t = empty.querySelector('.v4-empty-title');
+      const b = empty.querySelector('.v4-empty-body');
+      if(t) t.textContent = 'Loading GL configuration…';
+      if(b) b.textContent = 'Fetching business events, frameworks and account mappings.';
+    }
+    if(!window.SB || !window.SB.connected){
+      if(empty){
+        const t = empty.querySelector('.v4-empty-title');
+        const b = empty.querySelector('.v4-empty-body');
+        if(t) t.textContent = 'Not connected to the database';
+        if(b) b.textContent = 'GL configuration is stored server-side. Reconnect using the DB chip in the top bar, then reopen this page.';
+      }
+      return;
+    }
+    try {
+      // Remember the active team so team-scoped overrides resolve correctly.
+      _glcState.teamId = (window.B && window.B.deal && window.B.deal.teamId) || null;
+      const res = await window.SB.fetchGLConfiguration();
+      _glcState.events     = res.events || [];
+      _glcState.frameworks = res.frameworks || [];
+      _glcState.mappings   = res.mappings || [];
+      _glcState.loaded     = true;
+      window.__glcRender();
+    } catch(err){
+      console.error('[GLC] load failed:', err);
+      if(empty){
+        const t = empty.querySelector('.v4-empty-title');
+        const b = empty.querySelector('.v4-empty-body');
+        if(t) t.textContent = 'Could not load GL configuration';
+        if(b) b.textContent = (err && err.message) || 'Unknown error — see the console for details.';
+      }
+    }
+  };
+
+  window.__glcRender = function(){
+    const table  = document.getElementById('glc-table');
+    const thead  = document.getElementById('glc-thead');
+    const tbody  = document.getElementById('glc-tbody');
+    const empty  = document.getElementById('glc-empty');
+    const foot   = document.getElementById('glc-footer-summary');
+    const kFw    = document.getElementById('glc-kpi-frameworks');
+    const kCust  = document.getElementById('glc-kpi-custom');
+    if(!table || !thead || !tbody) return;
+
+    const fws = _glcState.frameworks.slice().sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
+    const q = ((document.getElementById('glc-filter') || {}).value || '').toLowerCase();
+    const onlyCustom = !!(document.getElementById('glc-only-custom') || {}).checked;
+
+    // Row is customised if ANY of its cells carry is_custom
+    const isRowCustom = (ev) => fws.some(f => {
+      const m = _glcResolve(ev.event_key, f.code);
+      return m && m.is_custom;
+    });
+    // Filter matches the event label/trigger OR any account code/name in the row
+    const rowMatches = (ev) => {
+      if(!q) return true;
+      if((ev.event_label + ' ' + (ev.system_trigger || '') + ' ' + (ev.category || '')).toLowerCase().indexOf(q) !== -1) return true;
+      return fws.some(f => {
+        const m = _glcResolve(ev.event_key, f.code);
+        if(!m) return false;
+        return ((m.dr_account_code||'') + ' ' + (m.dr_account_name||'') + ' ' +
+                (m.cr_account_code||'') + ' ' + (m.cr_account_name||'')).toLowerCase().indexOf(q) !== -1;
+      });
+    };
+
+    const events = _glcState.events
+      .filter(rowMatches)
+      .filter(ev => !onlyCustom || isRowCustom(ev));
+
+    const customCount = _glcState.mappings.filter(m => m.is_custom).length;
+    if(kFw)   kFw.textContent = fws.length;
+    if(kCust) kCust.textContent = customCount;
+    if(foot)  foot.textContent = 'Showing ' + events.length + ' of ' + _glcState.events.length + ' business events';
+
+    if(!events.length){
+      table.style.display = 'none';
+      if(empty){
+        empty.style.display = 'block';
+        const t = empty.querySelector('.v4-empty-title');
+        const b = empty.querySelector('.v4-empty-body');
+        if(t) t.textContent = _glcState.events.length ? 'No events match your filter' : 'No business events configured';
+        if(b) b.textContent = _glcState.events.length ? 'Clear the search box or untick "Customised only".' : 'The reference table is empty — contact your administrator.';
+      }
+      return;
+    }
+    table.style.display = 'table';
+    if(empty) empty.style.display = 'none';
+
+    // ── Header: two rows. Row 1 = framework name spanning 2 cols.
+    //            Row 2 = Debit (DR) / Credit (CR) sub-headers.
+    thead.innerHTML =
+      '<tr>' +
+        '<th class="glc-event-head glc-sub-head" rowspan="2" style="vertical-align:bottom;">Business event</th>' +
+        fws.map(f => (
+          '<th class="glc-fw-head" colspan="2">' + _glcEsc(f.label) +
+            (f.is_builtin ? '' :
+              '<button class="glc-fw-del" title="Remove this framework column" ' +
+                'onclick="window.__glcDeleteFramework && window.__glcDeleteFramework(\'' + f.id + '\',\'' + _glcEsc(f.label) + '\')">' +
+                '<i class="ti ti-x"></i></button>') +
+          '</th>'
+        )).join('') +
+        '<th class="glc-sub-head" rowspan="2" style="vertical-align:bottom; text-align:center; border-left:0.5px solid var(--n-200);">Reset</th>' +
+      '</tr>' +
+      '<tr>' +
+        fws.map(() =>
+          '<th class="glc-sub-head dr">Debit (DR)</th>' +
+          '<th class="glc-sub-head">Credit (CR)</th>'
+        ).join('') +
+      '</tr>';
+
+    // ── Body: one row per business event
+    const cell = (ev, f, side) => {
+      const m = _glcResolve(ev.event_key, f.code) || {};
+      const code = side === 'dr' ? (m.dr_account_code || '') : (m.cr_account_code || '');
+      const name = side === 'dr' ? (m.dr_account_name || '') : (m.cr_account_name || '');
+      const attrs = 'data-glc-ev="' + _glcEsc(ev.event_key) + '" data-glc-fw="' + _glcEsc(f.code) + '" data-glc-side="' + side + '"';
+      return '<td class="glc-cell ' + (side === 'dr' ? 'dr' : '') + '">' +
+        '<div class="glc-acct">' +
+          '<input class="code" type="text" ' + attrs + ' data-glc-field="code" value="' + _glcEsc(code) + '" placeholder="code" spellcheck="false"/>' +
+          '<input class="name" type="text" ' + attrs + ' data-glc-field="name" value="' + _glcEsc(name) + '" placeholder="account name" spellcheck="false"/>' +
+        '</div>' +
+      '</td>';
+    };
+
+    tbody.innerHTML = events.map(ev => {
+      const custom = isRowCustom(ev);
+      return '<tr>' +
+        '<td class="glc-event-cell">' +
+          '<div style="display:flex; align-items:flex-start;">' +
+            (custom ? '<span class="glc-custom-dot" title="Customised by client" style="margin-top:5px;"></span>'
+                    : '<span style="width:7px; margin-right:7px; flex-shrink:0;"></span>') +
+            '<div>' +
+              _glcEsc(ev.event_label) +
+              (ev.system_trigger ? '<div class="glc-event-trigger">' + _glcEsc(ev.system_trigger) + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+        '</td>' +
+        fws.map(f => cell(ev, f, 'dr') + cell(ev, f, 'cr')).join('') +
+        '<td class="glc-cell" style="text-align:center; border-left:0.5px solid var(--n-200);">' +
+          (custom
+            ? '<button class="glc-reset-btn" title="Reset this event back to the system defaults" ' +
+                'onclick="window.__glcResetEvent && window.__glcResetEvent(\'' + _glcEsc(ev.event_key) + '\',\'' + _glcEsc(ev.event_label) + '\')">' +
+                '<i class="ti ti-rotate-2"></i></button>'
+            : '<span style="color:var(--n-300); font-size:11px;">—</span>') +
+        '</td>' +
+      '</tr>';
+    }).join('');
+
+    // Wire inline editing — mark dirty on input, persist on blur.
+    tbody.querySelectorAll('input[data-glc-ev]').forEach(inp => {
+      inp.addEventListener('input', function(){ this.classList.add('dirty'); });
+      inp.addEventListener('keydown', function(e){ if(e.key === 'Enter') this.blur(); });
+      inp.addEventListener('blur', async function(){
+        if(!this.classList.contains('dirty')) return;
+        await window.__glcSaveCell(this);
+      });
+    });
+  };
+
+  // Persist a single edited cell. Reads BOTH inputs of the pair (code+name)
+  // and both sides (DR+CR) so the upserted row is always complete.
+  window.__glcSaveCell = async function(inp){
+    const ev = inp.getAttribute('data-glc-ev');
+    const fw = inp.getAttribute('data-glc-fw');
+    if(!ev || !fw) return;
+    const tbody = document.getElementById('glc-tbody');
+    const pick = (side, field) => {
+      const el = tbody.querySelector('input[data-glc-ev="' + ev + '"][data-glc-fw="' + fw + '"][data-glc-side="' + side + '"][data-glc-field="' + field + '"]');
+      return el ? el.value.trim() : '';
+    };
+    const payload = {
+      event_key: ev,
+      framework_code: fw,
+      dr_account_code: pick('dr', 'code'),
+      dr_account_name: pick('dr', 'name'),
+      cr_account_code: pick('cr', 'code'),
+      cr_account_name: pick('cr', 'name'),
+      team_id: _glcState.teamId || null
+    };
+    try {
+      const res = await window.SB.upsertGLEventMapping(payload);
+      if(res && res.ok){
+        // Update the local cache so the custom dot + KPI reflect immediately
+        // without a full refetch.
+        const idx = _glcState.mappings.findIndex(m =>
+          m.event_key === ev && m.framework_code === fw &&
+          ((m.team_id || null) === (payload.team_id || null)));
+        if(idx >= 0) _glcState.mappings[idx] = res.row;
+        else _glcState.mappings.push(res.row);
+        // Clear dirty on all four inputs of this cell pair
+        tbody.querySelectorAll('input[data-glc-ev="' + ev + '"][data-glc-fw="' + fw + '"]')
+             .forEach(el => el.classList.remove('dirty'));
+        window.__glcRender();
+        if(typeof toast === 'function') toast('GL mapping saved', 2000, { kind:'success', id:'glc:save' });
+        // Downstream: refresh the runtime map used by the DIU push.
+        try { if(typeof window.__refreshGLMappings === 'function') window.__refreshGLMappings(); } catch(_){}
+      } else {
+        if(typeof toast === 'function') toast('Save failed: ' + ((res && res.reason) || 'unknown'), 5000, { kind:'error' });
+      }
+    } catch(err){
+      console.error('[GLC] save failed:', err);
+      if(typeof toast === 'function') toast('Save failed: ' + (err.message || err), 5000, { kind:'error' });
+    }
+  };
+
+  window.__glcResetEvent = async function(eventKey, label){
+    if(!confirm('Reset "' + label + '" back to the system default GL accounts across every framework?')) return;
+    const fws = _glcState.frameworks;
+    let n = 0;
+    for(const f of fws){
+      try {
+        const res = await window.SB.resetGLEventMapping(eventKey, f.code, _glcState.teamId || null);
+        if(res && res.ok) n++;
+      } catch(_){}
+    }
+    if(typeof toast === 'function') toast('Reset ' + label + ' across ' + n + ' framework(s)', 3000, { kind:'success' });
+    window.__glcLoad(true);
+  };
+
+  window.__glcOpenAddFramework = function(){
+    const p = document.getElementById('glc-add-fw-panel');
+    if(!p) return;
+    p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+    if(p.style.display === 'block'){
+      const c = document.getElementById('glc-new-fw-code');
+      if(c){ c.value = ''; setTimeout(() => c.focus(), 50); }
+      const l = document.getElementById('glc-new-fw-label');
+      if(l) l.value = '';
+    }
+  };
+
+  window.__glcAddFramework = async function(){
+    const codeEl  = document.getElementById('glc-new-fw-code');
+    const labelEl = document.getElementById('glc-new-fw-label');
+    const code  = (codeEl  && codeEl.value  || '').trim();
+    const label = (labelEl && labelEl.value || '').trim() || code;
+    if(!code){
+      if(typeof toast === 'function') toast('Enter a framework code', 3000, { kind:'info' });
+      return;
+    }
+    try {
+      const res = await window.SB.addGLFramework(code, label, _glcState.teamId || null);
+      if(res && res.ok){
+        document.getElementById('glc-add-fw-panel').style.display = 'none';
+        if(typeof toast === 'function') toast('Added framework "' + label + '" — seeded from IFRS defaults', 3500, { kind:'success' });
+        window.__glcLoad(true);
+      } else {
+        if(typeof toast === 'function') toast('Could not add framework: ' + ((res && res.reason) || 'unknown'), 5000, { kind:'error' });
+      }
+    } catch(err){
+      console.error('[GLC] addFramework failed:', err);
+      if(typeof toast === 'function') toast('Could not add framework: ' + (err.message || err), 5000, { kind:'error' });
+    }
+  };
+
+  window.__glcDeleteFramework = async function(id, label){
+    if(!confirm('Remove the "' + label + '" framework column and all its GL mappings?\n\nThis cannot be undone.')) return;
+    try {
+      const res = await window.SB.deleteGLFramework(id);
+      if(res && res.ok){
+        if(typeof toast === 'function') toast('Removed framework "' + label + '"', 3000, { kind:'success' });
+        window.__glcLoad(true);
+      } else {
+        if(typeof toast === 'function') toast('Could not remove: ' + ((res && res.reason) || 'unknown'), 5000, { kind:'error' });
+      }
+    } catch(err){
+      console.error('[GLC] deleteFramework failed:', err);
+    }
+  };
+
+  window.__glcExportCsv = function(){
+    const fws = _glcState.frameworks.slice().sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
+    if(!_glcState.events.length){
+      if(typeof toast === 'function') toast('Nothing to export yet', 2500, { kind:'info' });
+      return;
+    }
+    const hdr = ['Business event', 'Category', 'System trigger'];
+    fws.forEach(f => {
+      hdr.push(f.label + ' DR code', f.label + ' DR name', f.label + ' CR code', f.label + ' CR name');
+    });
+    hdr.push('Customised');
+    const esc = v => {
+      const s = String(v == null ? '' : v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [hdr.map(esc).join(',')];
+    _glcState.events.forEach(ev => {
+      const row = [ev.event_label, ev.category || '', ev.system_trigger || ''];
+      let anyCustom = false;
+      fws.forEach(f => {
+        const m = _glcResolve(ev.event_key, f.code) || {};
+        if(m.is_custom) anyCustom = true;
+        row.push(m.dr_account_code || '', m.dr_account_name || '', m.cr_account_code || '', m.cr_account_name || '');
+      });
+      row.push(anyCustom ? 'yes' : '');
+      lines.push(row.map(esc).join(','));
+    });
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gl-configuration-' + new Date().toISOString().slice(0,10) + '.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    if(typeof toast === 'function') toast('Exported GL configuration', 2500, { kind:'success' });
+  };
+
+  // Close the add-framework popover on outside click
+  document.addEventListener('click', function(ev){
+    const p = document.getElementById('glc-add-fw-panel');
+    if(!p || p.style.display !== 'block') return;
+    if(p.contains(ev.target)) return;
+    if(ev.target.closest && ev.target.closest('button') &&
+       /Add Framework/i.test(ev.target.closest('button').textContent || '')) return;
+    p.style.display = 'none';
+  });
 
   // ─── Lifecycle Events modal — one place to see + add every event ─────
   // Local escape (this IIFE doesn't inherit the Loan Builder's escapeHtml).
