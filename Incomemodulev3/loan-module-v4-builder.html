@@ -1820,6 +1820,12 @@
   <button class="v4-sb-item" onclick="window.openCashManagementModal && window.openCashManagementModal()">
     <i class="ti ti-cash-banknote" aria-hidden="true"></i>Cash management
   </button>
+  <!-- PCS Sync — reference data pulled from Investran (GL accounts, legal
+       entities, transaction types…). Must be loaded before a DIU job can be
+       generated, otherwise lookups won't resolve. -->
+  <button class="v4-sb-item" data-v4-tab="pcssync" onclick="v4NavClick(this)">
+    <i class="ti ti-refresh-dot" aria-hidden="true"></i>PCS Sync
+  </button>
   <!-- General Ledger Mapping — business event × framework DR/CR matrix.
        Clients rename/renumber the predefined GL entries to match their own
        chart of accounts, per accounting framework. Full page, not a modal. -->
@@ -2404,6 +2410,11 @@
       <button class="tab-btn" data-tab="glconfig" role="tab" aria-selected="false" style="display:none;">
         <span class="tab-icon"><span class="material-icons-outlined">account_tree</span></span>
         <span class="tab-text"><span class="tab-label">General Ledger Mapping</span></span>
+      </button>
+      <!-- PCS Sync — Investran reference data cache. -->
+      <button class="tab-btn" data-tab="pcssync" role="tab" aria-selected="false" style="display:none;">
+        <span class="tab-icon"><span class="material-icons-outlined">sync</span></span>
+        <span class="tab-text"><span class="tab-label">PCS Sync</span></span>
       </button>
       <button class="tab-btn" data-tab="stage-1" role="tab" aria-selected="false">
         <span class="tab-icon"><span class="material-icons-outlined">timeline</span></span>
@@ -3306,6 +3317,122 @@
     </div>
   </div>
 </section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PCS Sync — Investran reference data cache.
+     Shows what master data has been pulled from Investran and how fresh it
+     is. Loading this BEFORE generating a DIU job is what makes the import
+     succeed — DIU rejects rows whose lookups don't resolve.
+     Data lands in pcs_ref_datasets / pcs_ref_rows via SB.replaceRefRows.
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="pcssync" class="stage-card stage-tab-content p-5">
+  <div class="builder-hero" style="display:flex; align-items:flex-start; gap:14px; padding:14px 16px; margin-bottom:14px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:12px;">
+    <div style="flex-shrink:0; width:36px; height:36px; border-radius:10px; background:var(--fis-green-50,#ECFDF5); color:var(--fis-green,#22C55E); display:inline-flex; align-items:center; justify-content:center;">
+      <i class="ti ti-refresh-dot" aria-hidden="true" style="font-size:20px;"></i>
+    </div>
+    <div style="flex:1; min-width:0;">
+      <div style="font-size:10.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">Investran integration</div>
+      <h2 style="font-size:18px; font-weight:700; color:var(--n-900); letter-spacing:-0.3px; margin:2px 0 0;">PCS Sync</h2>
+      <p style="font-size:12px; color:var(--n-500); margin:4px 0 0; line-height:1.55;">Reference data pulled from Investran. Every DIU lookup — GL account, legal entity, transaction type — is validated against this. Load it before generating an import job.</p>
+    </div>
+    <div style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:92px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Datasets</div>
+      <div id="pcs-kpi-loaded" style="font-size:20px; font-weight:700; color:var(--n-900); font-variant-numeric:tabular-nums; margin-top:2px;">0 / 0</div>
+    </div>
+    <div style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:92px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Total rows</div>
+      <div id="pcs-kpi-rows" style="font-size:20px; font-weight:700; color:var(--indigo-700,#4338CA); font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+  </div>
+
+  <!-- Readiness banner — tells the user plainly whether they can post yet -->
+  <div id="pcs-readiness" style="display:none; margin-bottom:14px;"></div>
+
+  <div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px;">
+    <div style="padding:12px 16px; border-bottom:0.5px solid var(--n-200); display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div style="position:relative; flex:1; min-width:200px; max-width:300px;">
+        <i class="ti ti-search" style="position:absolute; left:9px; top:50%; transform:translateY(-50%); font-size:13px; color:var(--n-400);"></i>
+        <input id="pcs-filter" type="text" placeholder="Filter datasets..." oninput="window.__pcsRender && window.__pcsRender()"
+               style="width:100%; padding:6px 10px 6px 28px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; background:var(--n-0);"/>
+      </div>
+      <div style="flex:1;"></div>
+      <span id="pcs-conn-chip" class="chip gray" style="font-size:10.5px;">Checking proxy…</span>
+      <button onclick="window.__pcsTestConnection && window.__pcsTestConnection()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Check the DIU proxy and Report Wizard endpoints">
+        <i class="ti ti-plug-connected" style="font-size:12px;"></i>Test connection
+      </button>
+      <button onclick="window.__pcsSyncAll && window.__pcsSyncAll()" class="mat-btn primary !py-1.5 !px-3"
+              style="font-size:12px; background:var(--indigo-600,#4F46E5); color:white; border-color:var(--indigo-600,#4F46E5);">
+        <i class="ti ti-refresh" style="font-size:14px;"></i> Sync with Investran
+      </button>
+    </div>
+
+    <div id="pcs-body" style="overflow:auto; max-height:calc(100vh - 360px); min-height:280px;">
+      <div id="pcs-empty" class="v4-empty" style="padding:36px 20px; display:none;">
+        <div class="v4-empty-icon"><i class="ti ti-refresh-dot" aria-hidden="true"></i></div>
+        <div class="v4-empty-title">No datasets registered</div>
+        <div class="v4-empty-body">Connect to the database to load the reference-data registry.</div>
+      </div>
+      <table id="pcs-table" style="width:100%; font-size:12px; border-collapse:collapse; display:none;">
+        <thead style="position:sticky; top:0; background:var(--n-50); z-index:1;">
+          <tr style="border-bottom:0.5px solid var(--n-200);">
+            <th style="text-align:left;   padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Dataset</th>
+            <th style="text-align:left;   padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Source</th>
+            <th style="text-align:right;  padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Rows</th>
+            <th style="text-align:left;   padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Last synced</th>
+            <th style="text-align:left;   padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Status</th>
+            <th style="text-align:center; padding:10px 14px; font-size:10px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="pcs-tbody"></tbody>
+      </table>
+    </div>
+
+    <div style="padding:10px 16px; border-top:0.5px solid var(--n-200); display:flex; justify-content:space-between; gap:8px; align-items:center;">
+      <div id="pcs-footer" style="font-size:10.5px; color:var(--n-500);">—</div>
+      <div style="display:flex; align-items:center; gap:12px; font-size:10.5px; color:var(--n-500);">
+        <span><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#16A34A; margin-right:5px;"></span>Current</span>
+        <span><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#D97706; margin-right:5px;"></span>Stale</span>
+        <span><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--n-300); margin-right:5px;"></span>Not loaded</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row browser — opens when a dataset is clicked -->
+  <div id="pcs-browser" style="display:none; margin-top:14px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px;">
+    <div style="padding:12px 16px; border-bottom:0.5px solid var(--n-200); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <div id="pcs-browser-title" style="font-size:13px; font-weight:700; color:var(--n-900);">—</div>
+      <span id="pcs-browser-count" class="chip blue" style="font-size:10px;">0 rows</span>
+      <div style="flex:1;"></div>
+      <div style="position:relative; min-width:200px; max-width:280px;">
+        <i class="ti ti-search" style="position:absolute; left:9px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--n-400);"></i>
+        <input id="pcs-browser-search" type="text" placeholder="Search values..."
+               style="width:100%; padding:5px 10px 5px 26px; border:0.5px solid var(--n-300); border-radius:6px; font-size:11.5px; background:var(--n-0);"/>
+      </div>
+      <button onclick="document.getElementById('pcs-browser').style.display='none'" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;">Close</button>
+    </div>
+    <div id="pcs-browser-body" style="overflow:auto; max-height:420px;"></div>
+  </div>
+</section>
+<style>
+  #pcssync tbody tr:hover td { background: #F5F7FF; }
+  #pcssync .pcs-dot {
+    display:inline-block; width:8px; height:8px; border-radius:50%;
+    margin-right:8px; flex-shrink:0;
+  }
+  #pcssync .pcs-cat {
+    font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px;
+    padding:1px 6px; border-radius:8px; margin-left:8px;
+  }
+  #pcssync .pcs-cat.required    { background:#FEE2E2; color:#991B1B; }
+  #pcssync .pcs-cat.attribution { background:#DBEAFE; color:#1E40AF; }
+  #pcssync .pcs-cat.optional    { background:var(--n-100); color:var(--n-600); }
+  #pcssync .pcs-row-desc {
+    font-size:10px; color:var(--n-500); margin-top:2px; line-height:1.35;
+    max-width:420px; font-weight:400;
+  }
+  @keyframes pcs-spin { to { transform: rotate(360deg); } }
+  #pcssync .pcs-spinning { animation: pcs-spin 0.9s linear infinite; display:inline-block; }
+</style>
 
 <!-- ═══════════════════════════════════════════════════════════════
      GL Configuration — business event × framework DR/CR matrix.
@@ -9877,6 +10004,123 @@ window.SB = (function(){
     return { ok:true, row: data };
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // PCS Sync — cached Investran reference data (2026-08)
+  // ═══════════════════════════════════════════════════════════════════
+  // pcs_ref_datasets holds sync status per dataset; pcs_ref_rows holds the
+  // values as JSONB. Generic on purpose — the RW report shapes aren't
+  // finalised, so we store the payload whole and denormalise only
+  // id/name/code/active for filtering.
+  async function fetchRefDatasets(){
+    if(!_client || !_connected || _authKicked) return [];
+    const { data, error } = await _withDbTimeout(
+      'fetchRefDatasets',
+      _client.from('pcs_ref_datasets').select('*').order('sort_order'),
+      8000
+    );
+    if(error){ console.error('[PCS-Sync] fetchRefDatasets:', error); return []; }
+    return data || [];
+  }
+
+  async function fetchRefRows(datasetKey, opts){
+    if(!_client || !_connected || _authKicked) return [];
+    const o = opts || {};
+    let q = _client.from('pcs_ref_rows').select('*').eq('dataset_key', datasetKey);
+    if(o.search){
+      // Match either the display name or the code
+      const s = '%' + o.search.replace(/[%_]/g, '') + '%';
+      q = q.or('name.ilike.' + s + ',code.ilike.' + s);
+    }
+    q = q.order('name').limit(o.limit || 500);
+    const { data, error } = await _withDbTimeout('fetchRefRows', q, 10000);
+    if(error){ console.error('[PCS-Sync] fetchRefRows:', error); return []; }
+    return data || [];
+  }
+
+  // Replace a dataset's rows wholesale and stamp the sync status. Chunked
+  // and wrapped in withHeavyWrite so a large reference load doesn't trip the
+  // health-ping reconnect machinery (see the connection-pool fix).
+  async function replaceRefRows(datasetKey, rows, meta){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!datasetKey) return { ok:false, reason:'datasetKey required' };
+    const uid = (_currentUser && _currentUser.id) || null;
+    const m = meta || {};
+    // Inline heavy-write guard — pauses the background health ping for the
+    // duration so a large reference load isn't mistaken for a dead
+    // connection. Mirrors SB.withHeavyWrite, which we can't call from
+    // inside the module (it's a property of the returned object).
+    _heavyWriteDepth++;
+    const _endHeavy = () => {
+      _heavyWriteDepth = Math.max(0, _heavyWriteDepth - 1);
+      _healthFailStreak = 0;
+    };
+    return (async () => {
+      try {
+        // Mark running so the UI can show a spinner even across a reload
+        await _client.from('pcs_ref_datasets')
+          .update({ last_status: 'running', last_error: null, updated_at: new Date().toISOString() })
+          .eq('dataset_key', datasetKey);
+
+        await _client.from('pcs_ref_rows').delete().eq('dataset_key', datasetKey);
+
+        const now = new Date().toISOString();
+        const mapped = (rows || []).map(r => ({
+          dataset_key: datasetKey,
+          external_id: r.external_id != null ? String(r.external_id)
+                     : (r.Id != null ? String(r.Id) : (r.id != null ? String(r.id) : null)),
+          name:        r.name || r.Name || null,
+          code:        r.code || r.Code || null,
+          is_active:   r.is_active != null ? r.is_active
+                     : (r.IsActive != null ? r.IsActive : null),
+          payload:     r.payload || r,
+          synced_at:   now
+        }));
+
+        const batch = 500;
+        let inserted = 0;
+        for(let i = 0; i < mapped.length; i += batch){
+          const slice = mapped.slice(i, i + batch);
+          const { error } = await _client.from('pcs_ref_rows').insert(slice);
+          if(error) throw error;
+          inserted += slice.length;
+        }
+
+        await _client.from('pcs_ref_datasets').update({
+          row_count:      inserted,
+          last_synced_at: now,
+          last_sync_by:   uid,
+          last_status:    'ok',
+          last_error:     null,
+          source_type:    m.sourceType || undefined,
+          source_ref:     m.sourceRef  || undefined,
+          updated_at:     now
+        }).eq('dataset_key', datasetKey);
+
+        return { ok:true, rows: inserted };
+      } catch(err){
+        const msg = (err && err.message) ? err.message : String(err);
+        try {
+          await _client.from('pcs_ref_datasets').update({
+            last_status: 'error', last_error: msg.slice(0, 500),
+            updated_at: new Date().toISOString()
+          }).eq('dataset_key', datasetKey);
+        } catch(_){}
+        return { ok:false, reason: msg };
+      } finally {
+        _endHeavy();
+      }
+    })();
+  }
+
+  async function updateRefDataset(datasetKey, patch){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('pcs_ref_datasets')
+      .update(Object.assign({ updated_at: new Date().toISOString() }, patch || {}))
+      .eq('dataset_key', datasetKey);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
   async function deleteGLFramework(id){
     if(!_client || !_connected) return { ok:false, reason:'not connected' };
     // Look up the code so we can clean up its mapping rows too.
@@ -12519,6 +12763,8 @@ window.SB = (function(){
     // GL Configuration — business event × framework DR/CR matrix
     fetchGLConfiguration, upsertGLEventMapping, resetGLEventMapping,
     addGLFramework, deleteGLFramework,
+    // PCS Sync — cached Investran reference data
+    fetchRefDatasets, fetchRefRows, replaceRefRows, updateRefDataset,
     // Commitment lifecycle events
     fetchCommitmentEvents, upsertCommitmentEvent, deleteCommitmentEvent,
     // Multi-fund (Tier 1 #2 Phase 1)
@@ -14254,25 +14500,72 @@ function renderChangeHandlingPanel(inst){
 }
 
 // ----- DIU Template downloads -----------------------------------------
-const DIU_HEADERS = [
-  'effectiveDate','glDate','transactionType','account','glAccountName','glTransType',
-  'amountLE','isDebit','fx','amountLocal','originalAmount','allocationRule',
-  'legalEntity','leid','deal','issuer','Security','incomeSecurity',
-  'batchId','batchType','batchComments','transactionComments','jeIndex','txIndex','leDomain'
+// ═══════════════════════════════════════════════════════════════════════
+// DIU column contract — verified against the live Investran metadata API:
+//   GET /api/DataImport/v1/data-import-job/metadata?entityName=Transaction
+//
+// The workbook headers must match Investran's DISPLAY NAMES exactly (e.g.
+// "Amount (LE)", not "amountLE") — the importer maps columns by these
+// labels. Field paths nest as
+//   journalEntries.journalEntry.transactions.transaction.<Field>
+// which mirrors our batch → jeIndex → txIndex model, so no row
+// restructuring is needed, only header naming.
+//
+// Ordered array so it doubles as the column order in the sheet. `source` is
+// the field on our JE row objects; `key` is Investran's MappingKey, kept
+// for traceability against the metadata dump (server/meta-fields.txt).
+// ═══════════════════════════════════════════════════════════════════════
+const DIU_FIELD_MAP = [
+  // ── Batch-level (repeated on every row; DIU groups them) ──
+  { investran: 'Batch Index',            source: 'batchId',             key: 42877074 },
+  { investran: 'Batch Type',             source: 'batchType',           key: 53665956 },
+  { investran: 'Batch Status',           source: 'batchStatus',         key: 415971   },
+  { investran: 'Batch Comments',         source: 'batchComments',       key: 8438318  },
+  // ── Journal-entry level ──
+  { investran: 'JE Index',               source: 'jeIndex',             key: 5398427  },
+  { investran: 'JE Type',                source: 'glTransType',         key: 41520392 },
+  // ── Transaction (line) level ──
+  { investran: 'Transaction Index',      source: 'txIndex',             key: 6145542  },
+  { investran: 'Transaction Type',       source: 'transactionType',     key: 58514221 },
+  { investran: 'Effective Date',         source: 'effectiveDate',       key: 43301856 },
+  { investran: 'GL Date',                source: 'glDate',              key: 1261907  },
+  { investran: 'Account',                source: 'account',             key: 4127489  },
+  { investran: 'Is Debit',               source: 'isDebit',             key: 4541146  },
+  { investran: 'Amount (LE)',            source: 'amountLE',            key: 62617862 },
+  { investran: 'Amount (Local)',         source: 'amountLocal',         key: 32085614 },
+  { investran: 'FX Rate',                source: 'fx',                  key: 43591717 },
+  { investran: 'Transaction Currency',   source: 'currency',            key: 59687869 },
+  { investran: 'Legal Entity',           source: 'legalEntity',         key: 30608065 },
+  { investran: 'Legal Entity Id',        source: 'leid',                key: 65281639 },
+  { investran: 'Legal Entity Domain',    source: 'leDomain',            key: 24836961 },
+  { investran: 'Deal',                   source: 'deal',                key: 50365283 },
+  { investran: 'Issuer',                 source: 'deal',                key: 8159193  },
+  { investran: 'Position',               source: 'position',            key: 28303748 },
+  { investran: 'Security',               source: 'position',            key: 37967795 },
+  { investran: 'Income Security',        source: 'incomeSecurity',      key: 26363605 },
+  { investran: 'Allocation Rule',        source: 'allocationRule',      key: 12063795 },
+  { investran: 'Transaction Comments',   source: 'transactionComments', key: 34583944 },
+  { investran: 'Transaction GL Reference', source: 'glReference',       key: 22151667 }
 ];
-// Header → source-field mapping. Some output columns are derived (issuer = deal)
-// or renamed (Security ← position) without changing the engine's data model.
-const DIU_HEADER_FIELD = {
-  issuer:   'deal',
-  Security: 'position'
-};
+const DIU_HEADERS = DIU_FIELD_MAP.map(f => f.investran);
+// Header → source-field lookup, derived from the map above so the two can
+// never drift apart.
+const DIU_HEADER_FIELD = DIU_FIELD_MAP.reduce((acc, f) => {
+  acc[f.investran] = f.source; return acc;
+}, {});
 function getDIUValue(row, header){
   const src = DIU_HEADER_FIELD[header] || header;
   return row[src];
 }
 // Numeric fields that represent money — rounded to 2 dp on CSV export.
 // (jeIndex / txIndex / leid stay as-is; fx is ratio with 4–6 dp tolerated.)
-const CSV_MONEY_FIELDS = new Set(['amountLE','amountLocal','originalAmount']);
+// Both the internal camelCase names AND the Investran display names are
+// listed, because sanitiseRow is called with either header set depending on
+// the export path (CSV uses internal names, DIU workbook uses display names).
+const CSV_MONEY_FIELDS = new Set([
+  'amountLE','amountLocal','originalAmount',
+  'Amount (LE)','Amount (Local)'
+]);
 // CSV downloads must work in legacy Excel + downstream ETL tools that assume ASCII.
 // Replace common typographic Unicode with portable ASCII so that en-dashes / section
 // symbols / middle-dots don't corrupt to garbage when read in cp1252 contexts.
@@ -14489,8 +14782,23 @@ function downloadDIUFilled(){
   }
   // Stamp every journal row with its per-glDate batchId before sanitising.
   // We mutate a shallow copy of each row so M.acctJournals isn't disturbed.
+  //
+  // Also stamp the fields the DIU column map expects but the engine doesn't
+  // emit directly:
+  //   batchStatus — from the Post-back status picker on the Accounting tab,
+  //                 mapped to Investran's Batch Status vocabulary.
+  //   currency    — Transaction Currency, from the deal.
+  //   glReference — a stable per-JE reference so a re-post can be traced.
+  const _postback = (document.getElementById('opt-postback-status') || {}).value
+                 || (window.B && window.B.deal && window.B.deal.postbackStatus)
+                 || 'posted';
+  const _batchStatus = ({ draft: 'Draft', approved: 'Approved', posted: 'Posted' })[_postback] || 'Posted';
+  const _ccy = inst.currency || (window.B && window.B.deal && window.B.deal.currency) || 'USD';
   const stampedJournals = M.acctJournals.map(j => Object.assign({}, j, {
-    batchId: glDateToBatchId.get(j.glDate || j.effectiveDate || dateStamp)
+    batchId:     glDateToBatchId.get(j.glDate || j.effectiveDate || dateStamp),
+    batchStatus: j.batchStatus || _batchStatus,
+    currency:    j.currency || _ccy,
+    glReference: j.glReference || (inst.id + '-JE' + (j.jeIndex != null ? j.jeIndex : ''))
   }));
   const glRows  = stampedJournals.map(j => sanitiseRow(j, DIU_HEADERS, /*useFieldMap=*/true));
   console.log('[DIU] step: built glRows =', glRows.length);
@@ -28696,9 +29004,29 @@ document.addEventListener('DOMContentLoaded', ()=>{
       const data = await res.json().catch(() => ({}));
       const host = url.replace(/^https?:\/\//, '').split('/')[0];
       if(data.investranConfigured){
-        paint('DIU · Live · ' + host, '#10B981', 'Connected to ' + (data.investranBase || 'Investran'));
+        // Bearer-mode tenants use a FIS-issued JWT that expires (typically
+        // 30 days). Warn on the chip before it lapses, and go red once it
+        // has — otherwise the first failed post is the only signal.
+        const tip = [
+          'Connected to ' + (data.investranBase || 'Investran'),
+          data.authMode ? 'Auth: ' + data.authMode : '',
+          (data.tenant && data.tenant.database) ? 'Database: ' + data.tenant.database : '',
+          (data.tenant && data.tenant.server)   ? 'Server: ' + data.tenant.server : '',
+          data.tokenExpiresAt ? 'Token expires: ' + data.tokenExpiresAt : ''
+        ].filter(Boolean).join('\n');
+        if(data.tokenExpired){
+          paint('DIU · Token expired', '#DC2626',
+                tip + '\n\n⛔ The Investran token has expired — posts will fail with 401. Request a fresh token from your FIS administrator and update INVESTRAN_BEARER_TOKEN on the proxy.');
+        } else if(typeof data.tokenDaysLeft === 'number' && data.tokenDaysLeft <= 7){
+          paint('DIU · Token expires in ' + data.tokenDaysLeft + 'd', '#D97706',
+                tip + '\n\n⚠ Line up a replacement token before it lapses.');
+        } else {
+          const dbSuffix = (data.tenant && data.tenant.database) ? ' · ' + data.tenant.database : '';
+          paint('DIU · Live · ' + host + dbSuffix, '#10B981', tip);
+        }
       } else {
-        paint('DIU · Creds missing', '#D97706', 'Proxy is up but INVESTRAN_CLIENT_ID/SECRET are blank in .env — commit will fail');
+        paint('DIU · Creds missing', '#D97706',
+              'Proxy is up but no Investran credential is configured.\n\nSet INVESTRAN_BEARER_TOKEN (FIS-issued JWT) or INVESTRAN_CLIENT_ID + INVESTRAN_CLIENT_SECRET in server/.env, then restart the proxy.');
       }
     } catch(err) {
       paint('DIU · Not reachable', '#DC2626', (err && err.name === 'AbortError') ? 'Ping timed out after 5s' : (err && err.message ? err.message : 'Unknown error'));
@@ -29007,7 +29335,7 @@ document.addEventListener('DOMContentLoaded', window._applyAdvancedStagesVisibil
 try { window._applyAdvancedStagesVisibility(); } catch(_){}
 
 (function(){
-  const TAB_IDS = ['builder','lifecycle','glconfig','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
+  const TAB_IDS = ['builder','lifecycle','glconfig','pcssync','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
 
   function switchTab(tabId){
     if(!TAB_IDS.includes(tabId)) tabId = 'stage-1';
@@ -29035,6 +29363,10 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     // then re-renders from cache (pass true to __glcLoad to force refetch).
     if(tabId === 'glconfig' && typeof window.__glcLoad === 'function'){
       try { window.__glcLoad(); } catch(_){}
+    }
+    // PCS Sync — lazy-load the dataset registry, then re-render from cache.
+    if(tabId === 'pcssync' && typeof window.__pcsLoad === 'function'){
+      try { window.__pcsLoad(); } catch(_){}
     }
     // When Stage 2 is shown, re-paint its status chip + JE journal from M
     // state so the user always sees their JEs (they were observed to "vanish"
@@ -36757,6 +37089,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(tab === 'glconfig'){
       setTimeout(() => { window.__glcLoad && window.__glcLoad(); }, 30);
     }
+    if(tab === 'pcssync'){
+      setTimeout(() => { window.__pcsLoad && window.__pcsLoad(); }, 30);
+    }
   };
 
   function v4SyncActive(){
@@ -40100,6 +40435,358 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   };
   window.closeBenchmarksModal = function(){
     const el = $('bench-modal'); if(el) el.style.display = 'none';
+  };
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PCS Sync — Investran reference data
+  // ═══════════════════════════════════════════════════════════════════
+  const _pcsState = { datasets: [], loaded: false, syncing: {} };
+
+  function _pcsEsc(s){ return String(s == null ? '' : s).replace(/[<>&"']/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+  function _pcsProxyUrl(){
+    try {
+      const cfg = JSON.parse(localStorage.getItem('diu-config') || '{}');
+      if(cfg.proxyUrl) return String(cfg.proxyUrl).replace(/\/$/, '');
+    } catch(_){}
+    const el = document.getElementById('diucfg-proxy-url');
+    if(el && el.value) return String(el.value).replace(/\/$/, '');
+    return null;
+  }
+
+  // Freshness: compare last_synced_at against the dataset's stale_after_hours.
+  function _pcsFreshness(ds){
+    if(!ds.last_synced_at || ds.last_status === 'never') return 'never';
+    if(ds.last_status === 'error')   return 'error';
+    if(ds.last_status === 'running') return 'running';
+    const ageH = (Date.now() - new Date(ds.last_synced_at).getTime()) / 3600000;
+    return ageH > (ds.stale_after_hours || 168) ? 'stale' : 'ok';
+  }
+
+  function _pcsRelTime(iso){
+    if(!iso) return 'never';
+    const ms = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(ms / 60000);
+    if(m < 1)  return 'just now';
+    if(m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if(h < 24) return h + 'h ago';
+    const d = Math.floor(h / 24);
+    return d + 'd ago';
+  }
+
+  window.__pcsLoad = async function(force){
+    if(_pcsState.loaded && !force){ window.__pcsRender(); return; }
+    const empty = document.getElementById('pcs-empty');
+    const table = document.getElementById('pcs-table');
+    if(table) table.style.display = 'none';
+    if(empty){
+      empty.style.display = 'block';
+      const t = empty.querySelector('.v4-empty-title');
+      if(t) t.textContent = 'Loading…';
+    }
+    if(!window.SB || !window.SB.connected){
+      if(empty){
+        const t = empty.querySelector('.v4-empty-title');
+        const b = empty.querySelector('.v4-empty-body');
+        if(t) t.textContent = 'Not connected to the database';
+        if(b) b.textContent = 'Reference data is cached server-side. Reconnect using the DB chip in the top bar.';
+      }
+      return;
+    }
+    try {
+      _pcsState.datasets = await window.SB.fetchRefDatasets();
+      _pcsState.loaded = true;
+      window.__pcsRender();
+      window.__pcsTestConnection();
+    } catch(err){
+      console.error('[PCS-Sync] load failed:', err);
+    }
+  };
+
+  window.__pcsRender = function(){
+    const tbody = document.getElementById('pcs-tbody');
+    const table = document.getElementById('pcs-table');
+    const empty = document.getElementById('pcs-empty');
+    const foot  = document.getElementById('pcs-footer');
+    const kLoad = document.getElementById('pcs-kpi-loaded');
+    const kRows = document.getElementById('pcs-kpi-rows');
+    const ready = document.getElementById('pcs-readiness');
+    if(!tbody || !table) return;
+
+    const q = ((document.getElementById('pcs-filter') || {}).value || '').toLowerCase();
+    const all = _pcsState.datasets || [];
+    const list = all.filter(d => !q ||
+      (d.label + ' ' + (d.description || '') + ' ' + d.dataset_key).toLowerCase().indexOf(q) !== -1);
+
+    const loadedCount = all.filter(d => _pcsFreshness(d) === 'ok').length;
+    const totalRows   = all.reduce((s, d) => s + (d.row_count || 0), 0);
+    if(kLoad) kLoad.textContent = loadedCount + ' / ' + all.length;
+    if(kRows) kRows.textContent = totalRows.toLocaleString();
+    if(foot)  foot.textContent  = 'Showing ' + list.length + ' of ' + all.length + ' datasets';
+
+    // Readiness banner — can we generate a DIU job yet?
+    if(ready){
+      const required = all.filter(d => d.category === 'required');
+      const missing  = required.filter(d => _pcsFreshness(d) !== 'ok');
+      if(!all.length){
+        ready.style.display = 'none';
+      } else if(missing.length === 0){
+        ready.style.display = 'block';
+        ready.innerHTML =
+          '<div style="background:#F0FDF4; border:0.5px solid #86EFAC; border-left:3px solid #16A34A; border-radius:8px; padding:10px 14px; display:flex; align-items:center; gap:10px;">' +
+            '<i class="ti ti-circle-check" style="font-size:18px; color:#16A34A;"></i>' +
+            '<div style="font-size:12px; color:#14532D;"><b>Reference data ready.</b> All required datasets are loaded and current — DIU lookups will resolve.</div>' +
+          '</div>';
+      } else {
+        ready.style.display = 'block';
+        ready.innerHTML =
+          '<div style="background:#FFFBEB; border:0.5px solid #FCD34D; border-left:3px solid #F59E0B; border-radius:8px; padding:10px 14px; display:flex; align-items:flex-start; gap:10px;">' +
+            '<i class="ti ti-alert-triangle" style="font-size:18px; color:#B45309; margin-top:1px;"></i>' +
+            '<div style="font-size:12px; color:#78350F;">' +
+              '<b>' + missing.length + ' required dataset' + (missing.length === 1 ? '' : 's') + ' not loaded.</b> ' +
+              'DIU will reject rows whose lookups can\'t be resolved. Missing: ' +
+              missing.map(d => _pcsEsc(d.label)).join(', ') + '.' +
+            '</div>' +
+          '</div>';
+      }
+    }
+
+    if(!list.length){
+      table.style.display = 'none';
+      if(empty){
+        empty.style.display = 'block';
+        const t = empty.querySelector('.v4-empty-title');
+        const b = empty.querySelector('.v4-empty-body');
+        if(t) t.textContent = all.length ? 'No datasets match your filter' : 'No datasets registered';
+        if(b) b.textContent = all.length ? 'Clear the search box.' : 'The registry seeds on first migration — contact your administrator.';
+      }
+      return;
+    }
+    table.style.display = 'table';
+    if(empty) empty.style.display = 'none';
+
+    const dotColour = { ok:'#16A34A', stale:'#D97706', error:'#DC2626', running:'#4F46E5', never:'var(--n-300)' };
+    const statusText = {
+      ok: 'Current', stale: 'Stale', error: 'Failed',
+      running: 'Syncing…', never: 'Not loaded'
+    };
+
+    tbody.innerHTML = list.map(d => {
+      const f = _pcsFreshness(d);
+      const busy = _pcsState.syncing[d.dataset_key];
+      const src = d.source_type === 'diu_api' ? 'DIU API'
+                : d.rw_field_id ? ('RW · FieldID ' + d.rw_field_id)
+                : (d.source_ref || '—');
+      return '<tr style="border-top:0.5px solid var(--n-100);">' +
+        '<td style="padding:11px 14px;">' +
+          '<div style="display:flex; align-items:flex-start;">' +
+            '<span class="pcs-dot" style="background:' + (busy ? dotColour.running : dotColour[f]) + '; margin-top:5px;"></span>' +
+            '<div>' +
+              '<span style="font-weight:600; color:var(--n-900);">' + _pcsEsc(d.label) + '</span>' +
+              '<span class="pcs-cat ' + _pcsEsc(d.category || 'optional') + '">' + _pcsEsc(d.category || 'optional') + '</span>' +
+              (d.description ? '<div class="pcs-row-desc">' + _pcsEsc(d.description) + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+        '</td>' +
+        '<td style="padding:11px 14px; color:var(--n-600); font-size:11px;">' + _pcsEsc(src) + '</td>' +
+        '<td style="padding:11px 14px; text-align:right; font-variant-numeric:tabular-nums; color:var(--n-900); font-weight:' + (d.row_count ? '600' : '400') + ';">' +
+          (d.row_count ? d.row_count.toLocaleString() : '—') + '</td>' +
+        '<td style="padding:11px 14px; color:var(--n-600); font-size:11px;">' + _pcsRelTime(d.last_synced_at) + '</td>' +
+        '<td style="padding:11px 14px; font-size:11px; color:' + (busy ? dotColour.running : dotColour[f]) + '; font-weight:600;">' +
+          (busy ? '<i class="ti ti-loader-2 pcs-spinning" style="font-size:12px; vertical-align:-2px;"></i> Syncing…' : statusText[f]) +
+          (f === 'error' && d.last_error ? '<div style="font-size:10px; font-weight:400; color:#B91C1C; margin-top:2px; max-width:260px;">' + _pcsEsc(d.last_error.slice(0,120)) + '</div>' : '') +
+        '</td>' +
+        '<td style="padding:11px 14px; text-align:center; white-space:nowrap;">' +
+          '<button onclick="window.__pcsSyncOne && window.__pcsSyncOne(\'' + _pcsEsc(d.dataset_key) + '\')" ' +
+                  'class="mat-btn outline !py-0.5 !px-2" style="font-size:10.5px;" ' + (busy ? 'disabled' : '') + '>' +
+            '<i class="ti ti-refresh" style="font-size:11px;"></i>Sync</button> ' +
+          (d.row_count ?
+            '<button onclick="window.__pcsBrowse && window.__pcsBrowse(\'' + _pcsEsc(d.dataset_key) + '\',\'' + _pcsEsc(d.label) + '\')" ' +
+                    'class="mat-btn outline !py-0.5 !px-2" style="font-size:10.5px;">' +
+              '<i class="ti ti-list" style="font-size:11px;"></i>View</button>' : '') +
+        '</td>' +
+      '</tr>';
+    }).join('');
+  };
+
+  // Check the proxy + which Investran modules answer.
+  window.__pcsTestConnection = async function(){
+    const chip = document.getElementById('pcs-conn-chip');
+    if(!chip) return;
+    const proxy = _pcsProxyUrl();
+    if(!proxy){
+      chip.className = 'chip amber';
+      chip.textContent = 'No DIU proxy configured';
+      chip.title = 'Set the DIU Proxy URL in Settings — PCS Sync uses it to reach Investran.';
+      return;
+    }
+    chip.className = 'chip gray';
+    chip.textContent = 'Checking…';
+    try {
+      const res = await fetch(proxy + '/healthz');
+      const h = await res.json();
+      if(h && h.investranConfigured){
+        chip.className = 'chip green';
+        chip.textContent = 'Investran · ' + (h.tenant && h.tenant.database ? h.tenant.database : 'connected');
+        chip.title = 'DIU root: ' + (h.diuRoot || '—') + '\nRW root: ' + (h.rwRoot || '—') +
+                     '\nToken expires in ' + (h.tokenDaysLeft != null ? h.tokenDaysLeft + ' days' : 'unknown');
+      } else {
+        chip.className = 'chip amber';
+        chip.textContent = 'Proxy up · Investran not configured';
+      }
+    } catch(err){
+      chip.className = 'chip red';
+      chip.textContent = 'Proxy unreachable';
+      chip.title = String(err.message || err);
+    }
+  };
+
+  // Sync one dataset. Prefers the RW lookup endpoint (fast, no report
+  // needed); falls back to a configured RW report id when one is set.
+  window.__pcsSyncOne = async function(datasetKey){
+    const ds = (_pcsState.datasets || []).find(d => d.dataset_key === datasetKey);
+    if(!ds) return;
+    const proxy = _pcsProxyUrl();
+    if(!proxy){
+      if(typeof toast === 'function') toast('Set the DIU Proxy URL in Settings first', 4000, { kind:'info' });
+      return;
+    }
+    _pcsState.syncing[datasetKey] = true;
+    window.__pcsRender();
+    try {
+      let rows = [];
+      let sourceRef = ds.source_ref;
+
+      if(ds.source_type === 'diu_api'){
+        // DIU domains — the only dataset that doesn't come from RW
+        const r = await fetch(proxy + '/api/diu/domains?import=true');
+        const j = await r.json();
+        if(!j.ok) throw new Error((j.error && (j.error.message || JSON.stringify(j.error))) || 'domain fetch failed');
+        const list = Array.isArray(j.domains) ? j.domains : (j.domains && j.domains.value) || [];
+        rows = list.map(d => ({ external_id: d.Id != null ? d.Id : d.id, name: d.Name || d.name, payload: d }));
+        sourceRef = '/domain?import=true';
+      } else if(ds.rw_field_id){
+        // RW lookup — direct values, no report execution required
+        const r = await fetch(proxy + '/api/rw/lookups/' + ds.rw_field_id);
+        const j = await r.json();
+        if(!j.ok) throw new Error((j.error && (j.error.message || JSON.stringify(j.error))) || 'lookup fetch failed');
+        rows = (j.rows || []).map(v => ({
+          external_id: v.id != null ? v.id : v.Id,
+          name:        v.name || v.Name,
+          code:        v.code || v.Code || null,
+          is_active:   v.isActive != null ? v.isActive : (v.IsActive != null ? v.IsActive : null),
+          payload:     v
+        }));
+        sourceRef = 'RW lookup ' + ds.rw_field_id;
+      } else if(ds.source_ref && /^\d+$/.test(String(ds.source_ref))){
+        // A saved RW report id has been configured for this dataset
+        const r = await fetch(proxy + '/api/rw/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reportId: +ds.source_ref })
+        });
+        const j = await r.json();
+        if(!j.ok) throw new Error(j.error ? JSON.stringify(j.error).slice(0,200) : 'report run failed');
+        rows = _pcsRowsFromReport(j.result);
+        sourceRef = 'RW report ' + ds.source_ref;
+      } else {
+        throw new Error('No source configured. Set a Report Wizard report id on this dataset, or it needs a lookup FieldID.');
+      }
+
+      const saved = await window.SB.replaceRefRows(datasetKey, rows, { sourceRef });
+      if(!saved.ok) throw new Error(saved.reason || 'save failed');
+      if(typeof toast === 'function') toast(ds.label + ' — ' + saved.rows + ' rows synced', 3000, { kind:'success' });
+    } catch(err){
+      console.error('[PCS-Sync] ' + datasetKey + ':', err);
+      try {
+        await window.SB.updateRefDataset(datasetKey, {
+          last_status: 'error', last_error: String(err.message || err).slice(0, 500)
+        });
+      } catch(_){}
+      if(typeof toast === 'function') toast(ds.label + ' sync failed: ' + (err.message || err), 6000, { kind:'error' });
+    } finally {
+      delete _pcsState.syncing[datasetKey];
+      await window.__pcsLoad(true);
+    }
+  };
+
+  // Normalise an RW execution result ({columns,data} grid) into our row shape.
+  function _pcsRowsFromReport(result){
+    if(!result) return [];
+    const cols = result.columns || result.Columns || [];
+    const data = result.data || result.Data || [];
+    if(!Array.isArray(cols) || !Array.isArray(data)) return [];
+    const names = cols.map(c => (typeof c === 'string' ? c : (c.columnName || c.ColumnName || '')));
+    const idx = n => names.findIndex(x => String(x).toLowerCase().replace(/\s+/g,'') === n);
+    const iId   = idx('id') >= 0 ? idx('id') : names.findIndex(x => /id$/i.test(x));
+    const iName = idx('name') >= 0 ? idx('name') : names.findIndex(x => /name/i.test(x));
+    const iCode = names.findIndex(x => /code/i.test(x));
+    const iAct  = names.findIndex(x => /active/i.test(x));
+    return data.map(row => {
+      const obj = {};
+      names.forEach((n, i) => { obj[n] = row[i]; });
+      const cell = i => (i >= 0 ? row[i] : null);
+      const unwrap = v => (v && typeof v === 'object' && 'value' in v) ? v.value : v;
+      return {
+        external_id: unwrap(cell(iId)),
+        name:        unwrap(cell(iName)),
+        code:        unwrap(cell(iCode)),
+        is_active:   unwrap(cell(iAct)),
+        payload:     obj
+      };
+    });
+  }
+
+  window.__pcsSyncAll = async function(){
+    const list = (_pcsState.datasets || []).filter(d => d.category === 'required' || d.category === 'attribution');
+    if(!list.length) return;
+    if(!confirm('Sync ' + list.length + ' datasets from Investran?\n\nThis runs them one at a time and may take a minute.')) return;
+    for(const d of list){
+      await window.__pcsSyncOne(d.dataset_key);
+    }
+    if(typeof toast === 'function') toast('Sync complete', 3000, { kind:'success' });
+  };
+
+  window.__pcsBrowse = async function(datasetKey, label){
+    const box   = document.getElementById('pcs-browser');
+    const title = document.getElementById('pcs-browser-title');
+    const count = document.getElementById('pcs-browser-count');
+    const body  = document.getElementById('pcs-browser-body');
+    const search= document.getElementById('pcs-browser-search');
+    if(!box) return;
+    box.style.display = 'block';
+    if(title) title.textContent = label;
+    if(body)  body.innerHTML = '<div style="padding:24px; text-align:center; color:var(--n-500); font-size:12px;">Loading…</div>';
+    box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+
+    const paint = async () => {
+      const rows = await window.SB.fetchRefRows(datasetKey, {
+        search: (search && search.value) || '', limit: 500
+      });
+      if(count) count.textContent = rows.length + (rows.length === 500 ? '+ rows' : ' rows');
+      if(!rows.length){
+        body.innerHTML = '<div style="padding:24px; text-align:center; color:var(--n-500); font-size:12px;">No values.</div>';
+        return;
+      }
+      body.innerHTML =
+        '<table style="width:100%; font-size:11.5px; border-collapse:collapse;">' +
+          '<thead style="position:sticky; top:0; background:var(--n-50);"><tr>' +
+            '<th style="text-align:left; padding:7px 14px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Id</th>' +
+            '<th style="text-align:left; padding:7px 14px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Name</th>' +
+            '<th style="text-align:left; padding:7px 14px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Code</th>' +
+            '<th style="text-align:left; padding:7px 14px; font-size:9.5px; font-weight:600; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px;">Active</th>' +
+          '</tr></thead><tbody>' +
+          rows.map(r => '<tr style="border-top:0.5px solid var(--n-100);">' +
+            '<td style="padding:6px 14px; font-family:ui-monospace,monospace; color:var(--n-600);">' + _pcsEsc(r.external_id) + '</td>' +
+            '<td style="padding:6px 14px; color:var(--n-900);">' + _pcsEsc(r.name) + '</td>' +
+            '<td style="padding:6px 14px; font-family:ui-monospace,monospace; color:var(--n-700);">' + _pcsEsc(r.code || '') + '</td>' +
+            '<td style="padding:6px 14px; color:var(--n-600);">' + (r.is_active == null ? '—' : (r.is_active ? 'Yes' : 'No')) + '</td>' +
+          '</tr>').join('') +
+        '</tbody></table>';
+    };
+    if(search){ search.oninput = () => { clearTimeout(search._t); search._t = setTimeout(paint, 250); }; }
+    await paint();
   };
 
   // ═══════════════════════════════════════════════════════════════════

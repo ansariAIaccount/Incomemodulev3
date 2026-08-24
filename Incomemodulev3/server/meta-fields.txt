@@ -1,0 +1,220 @@
+DIU field map · entity: Transaction
+========================================================================
+
+[Parameters]  3 fields
+  Closing Date                          Parameter     key=62860828
+      journalEntries.journalEntry.transactions.transaction.Closing Date
+  EndDate                               Parameter     key=29978395
+      journalEntries.journalEntry.transactions.transaction.EndDate
+  StartDate                             Parameter     key=27662061
+      journalEntries.journalEntry.transactions.transaction.StartDate
+
+[Transaction - UDF Alternate Mapping]  6 fields
+  UDF Contact ID                        Default       key=62909576
+      journalEntries.journalEntry.transactions.transaction.udfs.udf.contactId
+  UDF Date                              Default       key=28278606
+      journalEntries.journalEntry.transactions.transaction.udfs.udf.effectiveDate
+  UDF ID                                Default       key=29551050
+      journalEntries.journalEntry.transactions.transaction.udfs.udf.id
+  UDF Lookup ID                         Default       key=37235973
+      journalEntries.journalEntry.transactions.transaction.udfs.udf.lookupId
+  UDF Name                              Default       key=27142559
+      journalEntries.journalEntry.transactions.transaction.udfs.udf.name
+  UDF Value                             Default       key=51464209
+      journalEntries.journalEntry.transactions.transaction.udfs.udf.value
+
+[Transaction - UDFs]  16 fields
+  Bank Account                          Udf           key=59663690
+      journalEntries.journalEntry.transactions.transaction.Bank Account
+  Due Date                              Udf           key=35461419
+      journalEntries.journalEntry.transactions.transaction.Due Date
+  Import Batch ID                       Udf           key=23556206
+      journalEntries.journalEntry.transactions.transaction.Import Batch ID
+  Intercompany                          Udf           key=25851286
+      journalEntries.journalEntry.transactions.transaction.Intercompany
+  Invoice                               Udf           key=39693505
+      journalEntries.journalEntry.transactions.transaction.Invoice
+  Issue Date                            Udf           key=40013339
+      journalEntries.journalEntry.transactions.transaction.Issue Date
+  Reference Link                        Udf           key=11423173
+      journalEntries.journalEntry.transactions.transaction.Reference Link
+  Shares                                Udf           key=43768715
+      journalEntries.journalEntry.transactions.transaction.Shares
+  Source Investor                       Udf           key=58032840
+      journalEntries.journalEntry.transactions.transaction.Source Investor
+  Source LE                             Udf           key=62118920
+      journalEntries.journalEntry.transactions.transaction.Source LE
+  Transaction Document                  Udf           key=44717464
+      journalEntries.journalEntry.transactions.transaction.Transaction Document
+  User Defined Date                     Udf           key=26561830
+      journalEntries.journalEntry.transactions.transaction.User Defined Date
+  User Defined ID                       Udf           key=20224138
+      journalEntries.journalEntry.transactions.transaction.User Defined ID
+  User Defined Numeric                  Udf           key=20504189
+      journalEntries.journalEntry.transactions.transaction.User Defined Numeric
+  User Lookup1                          Udf           key=6588895
+      journalEntries.journalEntry.transactions.transaction.User Lookup1
+  User Lookup2                          Udf           key=21369126
+      journalEntries.journalEntry.transactions.transaction.User Lookup2
+
+[Transactions]  80 fields
+  Account                               Default       key=4127489
+      journalEntries.journalEntry.transactions.transaction.account.name
+  Account Id                            Default       key=23249901
+      journalEntries.journalEntry.transactions.transaction.account.id
+  Allocation Rule                       Default       key=12063795
+      journalEntries.journalEntry.transactions.transaction.allocationRule.name
+  Allocation Rule Id                    Default       key=597819
+      journalEntries.journalEntry.transactions.transaction.allocationRule.id
+  Amount (LE)                           Default       key=62617862
+      journalEntries.journalEntry.transactions.transaction.legalEntityAmount
+  Amount (Local)                        Default       key=32085614
+      journalEntries.journalEntry.transactions.transaction.localAmount
+  Batch Comments                        Default       key=8438318
+      comments
+  Batch Index                           Default       key=42877074
+      index
+  Batch Reference                       Default       key=19175878
+      reference
+  Batch Status                          Default       key=415971
+      status
+  Batch Type                            Default       key=53665956
+      type.name
+  Batch Type Id                         Default       key=35679061
+      type.id
+  Deal                                  Default       key=50365283
+      journalEntries.journalEntry.transactions.transaction.deal.name
+  Deal Domain                           Default       key=57630510
+      journalEntries.journalEntry.transactions.transaction.deal.domain.name
+  Deal Domain Id                        Default       key=23572145
+      journalEntries.journalEntry.transactions.transaction.deal.domain.id
+  Deal Id                               Default       key=14881956
+      journalEntries.journalEntry.transactions.transaction.deal.id
+  Effective Date                        Default       key=43301856
+      journalEntries.journalEntry.transactions.transaction.effectiveDate
+  Expiration Date                       Default       key=26493463
+      journalEntries.journalEntry.transactions.transaction.expirationDate
+  FX Rate                               Default       key=43591717
+      journalEntries.journalEntry.transactions.transaction.fxRate
+  GL Date                               Default       key=1261907
+      glDate
+  Income Security                       Default       key=26363605
+      journalEntries.journalEntry.transactions.transaction.incomeSecurity.name
+  Income Security Id                    Default       key=16649048
+      journalEntries.journalEntry.transactions.transaction.incomeSecurity.id
+  Investor                              Default       key=31563664
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.investor.name
+  Investor Account Id                   Default       key=52463572
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.id
+  Investor Amount (LE)                  Default       key=4211054
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.legalEntityAmount
+  Investor Amount (Local)               Default       key=41383692
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.localAmount
+  Investor Domain                       Default       key=54782435
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.investor.domain.name
+  Investor Domain Id                    Default       key=9519490
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.investor.domain.id
+  Investor Quantity                     Default       key=43197274
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.quantity
+  Investor Reference 1                  Default       key=22400953
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.reference1
+  Investor Reference 2                  Default       key=29168674
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.reference2
+  Investor Tranche                      Default       key=45676395
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.tranche
+  Is Debit                              Default       key=4541146
+      journalEntries.journalEntry.transactions.transaction.debit
+  Issuer                                Default       key=8159193
+      journalEntries.journalEntry.transactions.transaction.security.issuer.name
+  Issuer Domain                         Default       key=25714552
+      journalEntries.journalEntry.transactions.transaction.security.issuer.domain.name
+  Issuer Domain Id                      Default       key=10022211
+      journalEntries.journalEntry.transactions.transaction.security.issuer.domain.id
+  Issuer Id                             Default       key=27336145
+      journalEntries.journalEntry.transactions.transaction.position.security.issuer.id
+  JE Index                              Default       key=5398427
+      journalEntries.journalEntry.index
+  JE Type                               Default       key=41520392
+      journalEntries.journalEntry.type.name
+  JE Type Id                            Default       key=17337437
+      journalEntries.journalEntry.type.id
+  Legal Entity                          Default       key=30608065
+      legalEntity.name
+  Legal Entity Domain                   Default       key=24836961
+      legalEntity.domain.name
+  Legal Entity Domain Id                Default       key=20911586
+      legalEntity.domain.id
+  Legal Entity Group                    Default       key=23156968
+      legalEntityGroup.name
+  Legal Entity Group Id                 Default       key=59006221
+      legalEntityGroup.id
+  Legal Entity Id                       Default       key=65281639
+      legalEntity.id
+  Lot                                   Default       key=44828173
+      journalEntries.journalEntry.transactions.transaction.lot.name
+  Lot Id                                Default       key=64037216
+      journalEntries.journalEntry.transactions.transaction.lot.id
+  PIK Income Security                   Default       key=45904602
+      journalEntries.journalEntry.transactions.transaction.paidInKind.name
+  PIK Income Security Id                Default       key=29186972
+      journalEntries.journalEntry.transactions.transaction.paidInKind.id
+  Pool Number                           Default       key=25339758
+      journalEntries.journalEntry.transactions.transaction.pool.name
+  Pool Number Id                        Default       key=62909691
+      journalEntries.journalEntry.transactions.transaction.pool.id
+  Position                              Default       key=28303748
+      journalEntries.journalEntry.transactions.transaction.position.name
+  Position Id                           Default       key=35006753
+      journalEntries.journalEntry.transactions.transaction.position.id
+  Position Security Identifier          Default       key=13163779
+      journalEntries.journalEntry.transactions.transaction.position.suffix
+  Price Per Share                       Default       key=18286043
+      journalEntries.journalEntry.transactions.transaction.pricePerShare
+  Quantity                              Default       key=8648541
+      journalEntries.journalEntry.transactions.transaction.quantity
+  Security                              Default       key=37967795
+      journalEntries.journalEntry.transactions.transaction.security.name
+  Security Id                           Default       key=51730259
+      journalEntries.journalEntry.transactions.transaction.security.id
+  Settlement Date                       Default       key=64794177
+      journalEntries.journalEntry.transactions.transaction.settlementDate
+  Transaction Comments                  Default       key=34583944
+      journalEntries.journalEntry.transactions.transaction.comments
+  Transaction Cost Basis                Default       key=55632140
+      journalEntries.journalEntry.transactions.transaction.costBasis
+  Transaction Currency                  Default       key=59687869
+      journalEntries.journalEntry.transactions.transaction.currency.name
+  Transaction Currency ID               Default       key=256997
+      journalEntries.journalEntry.transactions.transaction.currency.id
+  Transaction Discount                  Default       key=55768420
+      journalEntries.journalEntry.transactions.transaction.discount
+  Transaction GL Reference              Default       key=22151667
+      journalEntries.journalEntry.transactions.transaction.glReference
+  Transaction Hedged                    Default       key=42182500
+      journalEntries.journalEntry.transactions.transaction.hedged
+  Transaction Index                     Default       key=6145542
+      journalEntries.journalEntry.transactions.transaction.index
+  Transaction Legal Entity              Default       key=56073722
+      journalEntries.journalEntry.transactions.transaction.legalEntity.name
+  Transaction Legal Entity Domain       Default       key=21293364
+      journalEntries.journalEntry.transactions.transaction.legalEntity.domain.name
+  Transaction Legal Entity Domain Id    Default       key=57257368
+      journalEntries.journalEntry.transactions.transaction.legalEntity.domain.id
+  Transaction Legal Entity Id           Default       key=9709070
+      journalEntries.journalEntry.transactions.transaction.legalEntity.id
+  Transaction Trade ID                  Default       key=26797023
+      journalEntries.journalEntry.transactions.transaction.tradeIdentifier
+  Transaction Type                      Default       key=58514221
+      journalEntries.journalEntry.transactions.transaction.transactionType.name
+  Transaction Type ID                   Default       key=14010823
+      journalEntries.journalEntry.transactions.transaction.transactionType.Id
+  Transaction Whole Amounts             Default       key=64161744
+      journalEntries.journalEntry.transactions.transaction.wholeAmounts
+  Vehicle                               Default       key=46774907
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.vehicleAccount.vehicle.name
+  Vehicle Account Id                    Default       key=37214122
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.vehicleAccount.id
+  Vehicle Domain                        Default       key=16716368
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.vehicleAccount.vehicle.domain.name
+  Vehicle Domain Id                     Default       key=3573325
+      journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.vehicleAccount.vehicle.domain.id

@@ -1,0 +1,1003 @@
+[
+  {
+    "Key": "Batch",
+    "Value": {
+      "entityName": "Batch",
+      "displayEntityName": "Transaction",
+      "Groups": {
+        "Parameters": {
+          "GroupName": "Parameters",
+          "MappingItems": [
+            {
+              "GroupName": "Parameters",
+              "name": "Closing Date",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Closing Date",
+              "FieldType": "Parameter",
+              "LookupValue": null,
+              "MappingKey": 62860828
+            },
+            {
+              "GroupName": "Parameters",
+              "name": "EndDate",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.EndDate",
+              "FieldType": "Parameter",
+              "LookupValue": null,
+              "MappingKey": 29978395
+            },
+            {
+              "GroupName": "Parameters",
+              "name": "StartDate",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.StartDate",
+              "FieldType": "Parameter",
+              "LookupValue": null,
+              "MappingKey": 27662061
+            }
+          ]
+        },
+        "Transaction - UDF Alternate Mapping": {
+          "GroupName": "Transaction - UDF Alternate Mapping",
+          "MappingItems": [
+            {
+              "GroupName": "Transaction - UDF Alternate Mapping",
+              "name": "UDF Contact ID",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.udfs.udf.contactId",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 62909576
+            },
+            {
+              "GroupName": "Transaction - UDF Alternate Mapping",
+              "name": "UDF Date",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.udfs.udf.effectiveDate",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 28278606
+            },
+            {
+              "GroupName": "Transaction - UDF Alternate Mapping",
+              "name": "UDF ID",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.udfs.udf.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 29551050
+            },
+            {
+              "GroupName": "Transaction - UDF Alternate Mapping",
+              "name": "UDF Lookup ID",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.udfs.udf.lookupId",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 37235973
+            },
+            {
+              "GroupName": "Transaction - UDF Alternate Mapping",
+              "name": "UDF Name",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.udfs.udf.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 27142559
+            },
+            {
+              "GroupName": "Transaction - UDF Alternate Mapping",
+              "name": "UDF Value",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.udfs.udf.value",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 51464209
+            }
+          ]
+        },
+        "Transaction - UDFs": {
+          "GroupName": "Transaction - UDFs",
+          "MappingItems": [
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Bank Account",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Bank Account",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 59663690
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Due Date",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Due Date",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 35461419
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Import Batch ID",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Import Batch ID",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 23556206
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Intercompany",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Intercompany",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 25851286
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Invoice",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Invoice",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 39693505
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Issue Date",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Issue Date",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 40013339
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Reference Link",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Reference Link",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 11423173
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Shares",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Shares",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 43768715
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Source Investor",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Source Investor",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 58032840
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Source LE",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Source LE",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 62118920
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "Transaction Document",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.Transaction Document",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 44717464
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "User Defined Date",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.User Defined Date",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 26561830
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "User Defined ID",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.User Defined ID",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 20224138
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "User Defined Numeric",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.User Defined Numeric",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 20504189
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "User Lookup1",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.User Lookup1",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 6588895
+            },
+            {
+              "GroupName": "Transaction - UDFs",
+              "name": "User Lookup2",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.User Lookup2",
+              "FieldType": "Udf",
+              "LookupValue": null,
+              "MappingKey": 21369126
+            }
+          ]
+        },
+        "Transactions": {
+          "GroupName": "Transactions",
+          "MappingItems": [
+            {
+              "GroupName": "Transactions",
+              "name": "Account",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.account.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 4127489
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Account Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.account.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 23249901
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Allocation Rule",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.allocationRule.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 12063795
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Allocation Rule Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.allocationRule.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 597819
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Amount (LE)",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.legalEntityAmount",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 62617862
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Amount (Local)",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.localAmount",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 32085614
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Batch Comments",
+              "fullQualifiedName": "comments",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 8438318
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Batch Index",
+              "fullQualifiedName": "index",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 42877074
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Batch Reference",
+              "fullQualifiedName": "reference",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 19175878
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Batch Status",
+              "fullQualifiedName": "status",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 415971
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Batch Type",
+              "fullQualifiedName": "type.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 53665956
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Batch Type Id",
+              "fullQualifiedName": "type.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 35679061
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Deal",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.deal.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 50365283
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Deal Domain",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.deal.domain.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 57630510
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Deal Domain Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.deal.domain.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 23572145
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Deal Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.deal.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 14881956
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Effective Date",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.effectiveDate",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 43301856
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Expiration Date",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.expirationDate",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 26493463
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "FX Rate",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.fxRate",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 43591717
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "GL Date",
+              "fullQualifiedName": "glDate",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 1261907
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Income Security",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.incomeSecurity.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 26363605
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Income Security Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.incomeSecurity.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 16649048
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.investor.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 31563664
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Account Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 52463572
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Amount (LE)",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.legalEntityAmount",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 4211054
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Amount (Local)",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.localAmount",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 41383692
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Domain",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.investor.domain.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 54782435
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Domain Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.investor.domain.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 9519490
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Quantity",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.quantity",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 43197274
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Reference 1",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.reference1",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 22400953
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Reference 2",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.reference2",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 29168674
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Investor Tranche",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.tranche",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 45676395
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Is Debit",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.debit",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 4541146
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Issuer",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.security.issuer.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 8159193
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Issuer Domain",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.security.issuer.domain.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 25714552
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Issuer Domain Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.security.issuer.domain.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 10022211
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Issuer Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.position.security.issuer.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 27336145
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "JE Index",
+              "fullQualifiedName": "journalEntries.journalEntry.index",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 5398427
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "JE Type",
+              "fullQualifiedName": "journalEntries.journalEntry.type.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 41520392
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "JE Type Id",
+              "fullQualifiedName": "journalEntries.journalEntry.type.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 17337437
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Legal Entity",
+              "fullQualifiedName": "legalEntity.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 30608065
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Legal Entity Domain",
+              "fullQualifiedName": "legalEntity.domain.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 24836961
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Legal Entity Domain Id",
+              "fullQualifiedName": "legalEntity.domain.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 20911586
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Legal Entity Group",
+              "fullQualifiedName": "legalEntityGroup.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 23156968
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Legal Entity Group Id",
+              "fullQualifiedName": "legalEntityGroup.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 59006221
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Legal Entity Id",
+              "fullQualifiedName": "legalEntity.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 65281639
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Lot",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.lot.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 44828173
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Lot Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.lot.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 64037216
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "PIK Income Security",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.paidInKind.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 45904602
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "PIK Income Security Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.paidInKind.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 29186972
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Pool Number",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.pool.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 25339758
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Pool Number Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.pool.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 62909691
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Position",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.position.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 28303748
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Position Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.position.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 35006753
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Position Security Identifier",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.position.suffix",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 13163779
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Price Per Share",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.pricePerShare",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 18286043
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Quantity",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.quantity",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 8648541
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Security",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.security.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 37967795
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Security Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.security.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 51730259
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Settlement Date",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.settlementDate",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 64794177
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Comments",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.comments",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 34583944
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Cost Basis",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.costBasis",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 55632140
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Currency",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.currency.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 59687869
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Currency ID",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.currency.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 256997
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Discount",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.discount",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 55768420
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction GL Reference",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.glReference",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 22151667
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Hedged",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.hedged",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 42182500
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Index",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.index",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 6145542
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Legal Entity",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.legalEntity.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 56073722
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Legal Entity Domain",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.legalEntity.domain.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 21293364
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Legal Entity Domain Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.legalEntity.domain.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 57257368
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Legal Entity Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.legalEntity.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 9709070
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Trade ID",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.tradeIdentifier",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 26797023
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Type",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.transactionType.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 58514221
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Type ID",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.transactionType.Id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 14010823
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Transaction Whole Amounts",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.wholeAmounts",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 64161744
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Vehicle",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.vehicleAccount.vehicle.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 46774907
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Vehicle Account Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.vehicleAccount.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 37214122
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Vehicle Domain",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.vehicleAccount.vehicle.domain.name",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 16716368
+            },
+            {
+              "GroupName": "Transactions",
+              "name": "Vehicle Domain Id",
+              "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.investorAllocations.investorAllocation.investorAccount.vehicleAccount.vehicle.domain.id",
+              "FieldType": "Default",
+              "LookupValue": null,
+              "MappingKey": 3573325
+            }
+          ]
+        }
+      },
+      "KeyGroups": [
+        [
+          {
+            "KeyGroups": null,
+            "name": "index"
+          },
+          {
+            "KeyGroups": null,
+            "name": "journalEntries.journalEntry.index"
+          },
+          {
+            "KeyGroups": null,
+            "name": "journalEntries.journalEntry.transactions.transaction.index"
+          },
+          {
+            "KeyGroups": [
+              [
+                {
+                  "KeyGroups": null,
+                  "name": "journalEntries.journalEntry.transactions.transaction.transactionType.name"
+                }
+              ],
+              [
+                {
+                  "KeyGroups": null,
+                  "name": "journalEntries.journalEntry.transactions.transaction.transactionType.Id"
+                }
+              ]
+            ],
+            "name": "journalEntries.journalEntry.transactions.transaction.transactionType"
+          },
+          {
+            "KeyGroups": null,
+            "name": "journalEntries.journalEntry.transactions.transaction.effectiveDate"
+          },
+          {
+            "KeyGroups": null,
+            "name": "glDate"
+          },
+          {
+            "KeyGroups": [
+              [
+                {
+                  "KeyGroups": null,
+                  "name": "legalEntity.id"
+                }
+              ],
+              [
+                {
+                  "KeyGroups": null,
+                  "name": "legalEntity.name"
+                }
+              ]
+            ],
+            "name": "legalEntity"
+          }
+        ]
+      ],
+      "RequiredFields": [
+        {
+          "GroupName": "Transactions",
+          "name": "Batch Index",
+          "fullQualifiedName": "index",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 42877074
+        },
+        {
+          "GroupName": "Transactions",
+          "name": "Effective Date",
+          "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.effectiveDate",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 43301856
+        },
+        {
+          "GroupName": "Transactions",
+          "name": "GL Date",
+          "fullQualifiedName": "glDate",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 1261907
+        },
+        {
+          "GroupName": "Transactions",
+          "name": "JE Index",
+          "fullQualifiedName": "journalEntries.journalEntry.index",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 5398427
+        },
+        {
+          "GroupName": "Transactions",
+          "name": "Legal Entity",
+          "fullQualifiedName": "legalEntity.name",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 30608065
+        },
+        {
+          "GroupName": "Transactions",
+          "name": "Legal Entity Id",
+          "fullQualifiedName": "legalEntity.id",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 65281639
+        },
+        {
+          "GroupName": "Transactions",
+          "name": "Transaction Index",
+          "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.index",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 6145542
+        },
+        {
+          "GroupName": "Transactions",
+          "name": "Transaction Type",
+          "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.transactionType.name",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 58514221
+        },
+        {
+          "GroupName": "Transactions",
+          "name": "Transaction Type ID",
+          "fullQualifiedName": "journalEntries.journalEntry.transactions.transaction.transactionType.Id",
+          "FieldType": "Default",
+          "LookupValue": null,
+          "MappingKey": 14010823
+        }
+      ]
+    }
+  }
+]
