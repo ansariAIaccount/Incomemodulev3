@@ -40529,14 +40529,29 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(ready){
       const required = all.filter(d => d.category === 'required');
       const missing  = required.filter(d => _pcsFreshness(d) !== 'ok');
+      // Loaded, but the report didn't return every column we asked for. Not a
+      // blocker — but not a clean bill of health either, so say so.
+      const partial  = required.filter(d => d.last_status === 'partial' && _pcsFreshness(d) === 'ok');
       if(!all.length){
         ready.style.display = 'none';
-      } else if(missing.length === 0){
+      } else if(missing.length === 0 && partial.length === 0){
         ready.style.display = 'block';
         ready.innerHTML =
           '<div style="background:#F0FDF4; border:0.5px solid #86EFAC; border-left:3px solid #16A34A; border-radius:8px; padding:10px 14px; display:flex; align-items:center; gap:10px;">' +
             '<i class="ti ti-circle-check" style="font-size:18px; color:#16A34A;"></i>' +
             '<div style="font-size:12px; color:#14532D;"><b>Reference data ready.</b> All required datasets are loaded and current — DIU lookups will resolve.</div>' +
+          '</div>';
+      } else if(missing.length === 0){
+        ready.style.display = 'block';
+        ready.innerHTML =
+          '<div style="background:#FFFBEB; border:0.5px solid #FCD34D; border-left:3px solid #F59E0B; border-radius:8px; padding:10px 14px; display:flex; align-items:flex-start; gap:10px;">' +
+            '<i class="ti ti-alert-circle" style="font-size:18px; color:#B45309; margin-top:1px;"></i>' +
+            '<div style="font-size:12px; color:#78350F;">' +
+              '<b>All required datasets loaded, but ' + partial.length + ' report' + (partial.length === 1 ? '' : 's') +
+              ' returned fewer columns than the spec asked for.</b> ' +
+              'Lookups will still resolve; the extra columns feed GL mapping and attribution. Check: ' +
+              partial.map(d => _pcsEsc(d.label)).join(', ') + '.' +
+            '</div>' +
           '</div>';
       } else {
         ready.style.display = 'block';
@@ -40566,18 +40581,38 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     table.style.display = 'table';
     if(empty) empty.style.display = 'none';
 
-    const dotColour = { ok:'#16A34A', stale:'#D97706', error:'#DC2626', running:'#4F46E5', never:'var(--n-300)' };
+    const dotColour = { ok:'#16A34A', stale:'#D97706', error:'#DC2626', running:'#4F46E5', never:'var(--n-300)', partial:'#D97706' };
     const statusText = {
       ok: 'Current', stale: 'Stale', error: 'Failed',
-      running: 'Syncing…', never: 'Not loaded'
+      running: 'Syncing…', never: 'Not loaded', partial: 'Loaded · check columns'
     };
 
     tbody.innerHTML = list.map(d => {
-      const f = _pcsFreshness(d);
+      let f = _pcsFreshness(d);
+      if(d.last_status === 'partial' && f === 'ok') f = 'partial';
       const busy = _pcsState.syncing[d.dataset_key];
-      const src = d.source_type === 'diu_api' ? 'DIU API'
-                : d.rw_field_id ? ('RW · FieldID ' + d.rw_field_id)
-                : (d.source_ref || '—');
+
+      // Source cell tells the whole story: which RW report backs this dataset,
+      // whether its id is wired up yet, and what we're falling back to
+      // meanwhile. Clicking the id opens a prompt to set it.
+      let src;
+      if(d.source_type === 'diu_api'){
+        src = '<span style="color:var(--n-600);">DIU API</span>' +
+              '<div style="font-size:10px; color:var(--n-400); margin-top:1px;">/domain?import=true — no RW equivalent</div>';
+      } else if(d.rw_report_id){
+        src = '<a href="#" onclick="window.__pcsSetReportId(\'' + _pcsEsc(d.dataset_key) + '\');return false;" ' +
+                 'style="color:var(--acc-600, #4F46E5); font-weight:600; text-decoration:none;">' +
+                 'RW report ' + d.rw_report_id + '</a>' +
+              (d.rw_report_name ? '<div style="font-size:10px; color:var(--n-400); margin-top:1px;">' + _pcsEsc(d.rw_report_name) + '</div>' : '');
+      } else {
+        src = '<a href="#" onclick="window.__pcsSetReportId(\'' + _pcsEsc(d.dataset_key) + '\');return false;" ' +
+                 'style="color:var(--n-500); text-decoration:none; border-bottom:1px dashed var(--n-300);">' +
+                 '<i class="ti ti-plus" style="font-size:10px; vertical-align:-1px;"></i> Set report id</a>' +
+              '<div style="font-size:10px; color:var(--n-400); margin-top:1px;">' +
+                (d.rw_report_name ? _pcsEsc(d.rw_report_name) + ' · ' : '') +
+                (d.rw_field_id ? 'using lookup ' + d.rw_field_id + ' meanwhile' : 'no fallback') +
+              '</div>';
+      }
       return '<tr style="border-top:0.5px solid var(--n-100);">' +
         '<td style="padding:11px 14px;">' +
           '<div style="display:flex; align-items:flex-start;">' +
@@ -40589,13 +40624,16 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             '</div>' +
           '</div>' +
         '</td>' +
-        '<td style="padding:11px 14px; color:var(--n-600); font-size:11px;">' + _pcsEsc(src) + '</td>' +
+        '<td style="padding:11px 14px; color:var(--n-600); font-size:11px;">' + src + '</td>' +
         '<td style="padding:11px 14px; text-align:right; font-variant-numeric:tabular-nums; color:var(--n-900); font-weight:' + (d.row_count ? '600' : '400') + ';">' +
           (d.row_count ? d.row_count.toLocaleString() : '—') + '</td>' +
         '<td style="padding:11px 14px; color:var(--n-600); font-size:11px;">' + _pcsRelTime(d.last_synced_at) + '</td>' +
         '<td style="padding:11px 14px; font-size:11px; color:' + (busy ? dotColour.running : dotColour[f]) + '; font-weight:600;">' +
           (busy ? '<i class="ti ti-loader-2 pcs-spinning" style="font-size:12px; vertical-align:-2px;"></i> Syncing…' : statusText[f]) +
-          (f === 'error' && d.last_error ? '<div style="font-size:10px; font-weight:400; color:#B91C1C; margin-top:2px; max-width:260px;">' + _pcsEsc(d.last_error.slice(0,120)) + '</div>' : '') +
+          ((f === 'error' || f === 'partial') && d.last_error
+            ? '<div style="font-size:10px; font-weight:400; color:' + (f === 'partial' ? '#B45309' : '#B91C1C') + '; margin-top:2px; max-width:280px; line-height:1.35;" title="' + _pcsEsc(d.last_error) + '">' +
+                _pcsEsc(d.last_error.slice(0,140)) + (d.last_error.length > 140 ? '…' : '') + '</div>'
+            : '') +
         '</td>' +
         '<td style="padding:11px 14px; text-align:center; white-space:nowrap;">' +
           '<button onclick="window.__pcsSyncOne && window.__pcsSyncOne(\'' + _pcsEsc(d.dataset_key) + '\')" ' +
@@ -40608,6 +40646,43 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         '</td>' +
       '</tr>';
     }).join('');
+  };
+
+  // Wire a saved Report Wizard report to a dataset. This is the step that
+  // flips a dataset from "guessing via lookup" to "loading the exact columns
+  // the spec asked for" — so it's worth showing what those columns are.
+  window.__pcsSetReportId = async function(datasetKey){
+    const ds = (_pcsState.datasets || []).find(d => d.dataset_key === datasetKey);
+    if(!ds) return;
+    const map = ds.column_map || {};
+    const expect = map.expect || [];
+
+    const msg =
+      ds.label + '\n' +
+      (ds.rw_report_name ? ds.rw_report_name + '\n' : '') +
+      '\nEnter the saved Report Wizard report id.' +
+      (expect.length ? '\n\nThe report should return these columns:\n  ' + expect.join('\n  ') : '') +
+      (map.filter_value ? '\n\nRows are filtered to ' + map.filter + ' = "' + map.filter_value + '".' : '') +
+      '\n\nLeave blank to clear and fall back to the lookup endpoint.';
+
+    const raw = prompt(msg, ds.rw_report_id ? String(ds.rw_report_id) : '');
+    if(raw === null) return;                       // cancelled
+    const trimmed = String(raw).trim();
+    if(trimmed && !/^\d+$/.test(trimmed)){
+      if(typeof toast === 'function') toast('Report id must be a number', 4000, { kind:'error' });
+      return;
+    }
+    try {
+      await window.SB.updateRefDataset(datasetKey, { rw_report_id: trimmed ? +trimmed : null });
+      await window.__pcsLoad(true);
+      if(typeof toast === 'function'){
+        toast(trimmed ? ds.label + ' → RW report ' + trimmed : ds.label + ' report id cleared',
+              3500, { kind:'success' });
+      }
+    } catch(err){
+      console.error('[PCS-Sync] set report id:', err);
+      if(typeof toast === 'function') toast('Could not save: ' + (err.message || err), 5000, { kind:'error' });
+    }
   };
 
   // Check the proxy + which Investran modules answer.
@@ -40642,8 +40717,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
   };
 
-  // Sync one dataset. Prefers the RW lookup endpoint (fast, no report
-  // needed); falls back to a configured RW report id when one is set.
+  // Sync one dataset — Report Wizard is the extraction path out of Investran.
+  // Prefers a configured saved report; falls back to the generic lookup
+  // endpoint until the reports are built.
   window.__pcsSyncOne = async function(datasetKey){
     const ds = (_pcsState.datasets || []).find(d => d.dataset_key === datasetKey);
     if(!ds) return;
@@ -40656,18 +40732,56 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     window.__pcsRender();
     try {
       let rows = [];
+      let warn = null;
       let sourceRef = ds.source_ref;
 
-      if(ds.source_type === 'diu_api'){
-        // DIU domains — the only dataset that doesn't come from RW
+      // Precedence, deliberate:
+      //   1. A configured RW report id — the authoritative path. Once the
+      //      report exists it returns exactly the columns we specified, so
+      //      it always beats the generic lookup.
+      //   2. RW lookup by FieldID — id/name only, useful before the reports
+      //      are built and for simple lookups that need nothing more.
+      //   3. DIU API — only for import domains, which have no RW equivalent.
+      if(ds.rw_report_id){
+        const r = await fetch(proxy + '/api/rw/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reportId: +ds.rw_report_id })
+        });
+        const j = await r.json();
+        if(!j.ok){
+          const stage = j.stage ? ' (' + j.stage + ')' : '';
+          throw new Error('RW report ' + ds.rw_report_id + stage + ': ' +
+            (j.error ? JSON.stringify(j.error).slice(0,200) : 'run failed'));
+        }
+        const parsed = _pcsRowsFromReport(j.result, ds.column_map || {});
+        rows = parsed.rows;
+        sourceRef = 'RW report ' + ds.rw_report_id;
+        if(parsed.missing.length){
+          // Load anyway — partial data beats none — but say plainly what's absent.
+          warn = 'Report is missing ' + parsed.missing.length + ' expected column' +
+                 (parsed.missing.length === 1 ? '' : 's') + ': ' + parsed.missing.join(', ') +
+                 '. Delivered: ' + parsed.columns.join(', ');
+          console.warn('[PCS-Sync] ' + datasetKey + ' — ' + warn);
+        }
+        if(!rows.length && (j.result && (j.result.data || j.result.Data || []).length)){
+          throw new Error('Report returned rows but none matched' +
+            (ds.column_map && ds.column_map.filter_value
+              ? ' ' + ds.column_map.filter + ' = "' + ds.column_map.filter_value + '"'
+              : '') + '. Delivered columns: ' + parsed.columns.join(', '));
+        }
+      } else if(ds.source_type === 'diu_api'){
+        // Import domains — DIU-only concept, no RW equivalent exists.
         const r = await fetch(proxy + '/api/diu/domains?import=true');
         const j = await r.json();
         if(!j.ok) throw new Error((j.error && (j.error.message || JSON.stringify(j.error))) || 'domain fetch failed');
         const list = Array.isArray(j.domains) ? j.domains : (j.domains && j.domains.value) || [];
         rows = list.map(d => ({ external_id: d.Id != null ? d.Id : d.id, name: d.Name || d.name, payload: d }));
-        sourceRef = '/domain?import=true';
+        sourceRef = 'DIU /domain?import=true';
       } else if(ds.rw_field_id){
-        // RW lookup — direct values, no report execution required
+        // Interim path — lookup values by FieldID. Gives id + name, which is
+        // enough to validate most fields, but not the richer columns the
+        // reports will carry (account type, default account, domain, …).
         const r = await fetch(proxy + '/api/rw/lookups/' + ds.rw_field_id);
         const j = await r.json();
         if(!j.ok) throw new Error((j.error && (j.error.message || JSON.stringify(j.error))) || 'lookup fetch failed');
@@ -40679,24 +40793,21 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           payload:     v
         }));
         sourceRef = 'RW lookup ' + ds.rw_field_id;
-      } else if(ds.source_ref && /^\d+$/.test(String(ds.source_ref))){
-        // A saved RW report id has been configured for this dataset
-        const r = await fetch(proxy + '/api/rw/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reportId: +ds.source_ref })
-        });
-        const j = await r.json();
-        if(!j.ok) throw new Error(j.error ? JSON.stringify(j.error).slice(0,200) : 'report run failed');
-        rows = _pcsRowsFromReport(j.result);
-        sourceRef = 'RW report ' + ds.source_ref;
       } else {
-        throw new Error('No source configured. Set a Report Wizard report id on this dataset, or it needs a lookup FieldID.');
+        throw new Error('No source configured — set a Report Wizard report id on this dataset.');
       }
 
       const saved = await window.SB.replaceRefRows(datasetKey, rows, { sourceRef });
       if(!saved.ok) throw new Error(saved.reason || 'save failed');
-      if(typeof toast === 'function') toast(ds.label + ' — ' + saved.rows + ' rows synced', 3000, { kind:'success' });
+
+      // A report that loaded but is missing columns is a "check this" result,
+      // not a success — record it so it stays visible after the toast fades.
+      if(warn){
+        try { await window.SB.updateRefDataset(datasetKey, { last_status:'partial', last_error: warn }); } catch(_){}
+        if(typeof toast === 'function') toast(ds.label + ' — ' + saved.rows + ' rows, but columns are missing', 7000, { kind:'warn' });
+      } else if(typeof toast === 'function'){
+        toast(ds.label + ' — ' + saved.rows + ' rows synced', 3000, { kind:'success' });
+      }
     } catch(err){
       console.error('[PCS-Sync] ' + datasetKey + ':', err);
       try {
@@ -40712,30 +40823,64 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   };
 
   // Normalise an RW execution result ({columns,data} grid) into our row shape.
-  function _pcsRowsFromReport(result){
-    if(!result) return [];
+  //
+  // `map` is the dataset's column_map, which carries the column names
+  // RW_REPORT_BUILD_SPEC.md asked the report to return. Mapping by explicit
+  // name rather than by pattern-guess matters: if a report comes back with
+  // different headers we want to say so, not quietly load a column of nulls
+  // and let the DIU import fail later on unresolved lookups.
+  //
+  // Returns { rows, missing[] } — `missing` names any expected column the
+  // report didn't deliver.
+  function _pcsRowsFromReport(result, map){
+    map = map || {};
+    const out = { rows: [], missing: [], columns: [] };
+    if(!result) return out;
     const cols = result.columns || result.Columns || [];
-    const data = result.data || result.Data || [];
-    if(!Array.isArray(cols) || !Array.isArray(data)) return [];
-    const names = cols.map(c => (typeof c === 'string' ? c : (c.columnName || c.ColumnName || '')));
-    const idx = n => names.findIndex(x => String(x).toLowerCase().replace(/\s+/g,'') === n);
-    const iId   = idx('id') >= 0 ? idx('id') : names.findIndex(x => /id$/i.test(x));
-    const iName = idx('name') >= 0 ? idx('name') : names.findIndex(x => /name/i.test(x));
-    const iCode = names.findIndex(x => /code/i.test(x));
-    const iAct  = names.findIndex(x => /active/i.test(x));
-    return data.map(row => {
+    const data = result.data    || result.Data    || [];
+    if(!Array.isArray(cols) || !Array.isArray(data)) return out;
+
+    const names = cols.map(c => (typeof c === 'string' ? c : (c.columnName || c.ColumnName || c.name || '')));
+    out.columns = names.slice();
+    const norm  = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g,'');
+    const byName = wanted => {
+      if(!wanted) return -1;
+      const w = norm(wanted);
+      return names.findIndex(n => norm(n) === w);
+    };
+
+    // Flag anything the spec asked for that isn't in the delivered header row.
+    (map.expect || []).forEach(c => { if(byName(c) < 0) out.missing.push(c); });
+
+    // Named columns first; fall back to a pattern guess only when the map is
+    // silent (e.g. a dataset synced via the generic lookup endpoint).
+    const iId   = map.external_id ? byName(map.external_id) : names.findIndex(x => /(^|[^a-z])id$/i.test(x));
+    const iName = map.name        ? byName(map.name)        : names.findIndex(x => /name/i.test(x));
+    const iCode = map.code        ? byName(map.code)        : names.findIndex(x => /code/i.test(x));
+    const iAct  = map.is_active   ? byName(map.is_active)   : names.findIndex(x => /active/i.test(x));
+    const iFilt = map.filter      ? byName(map.filter)      : -1;
+
+    const unwrap = v => (v && typeof v === 'object' && 'value' in v) ? v.value : v;
+
+    data.forEach(row => {
+      // Report 4 ships four lookups in one grid, discriminated by LookupType.
+      if(iFilt >= 0 && map.filter_value){
+        if(norm(unwrap(row[iFilt])) !== norm(map.filter_value)) return;
+      }
       const obj = {};
-      names.forEach((n, i) => { obj[n] = row[i]; });
-      const cell = i => (i >= 0 ? row[i] : null);
-      const unwrap = v => (v && typeof v === 'object' && 'value' in v) ? v.value : v;
-      return {
-        external_id: unwrap(cell(iId)),
-        name:        unwrap(cell(iName)),
-        code:        unwrap(cell(iCode)),
-        is_active:   unwrap(cell(iAct)),
+      names.forEach((n, i) => { obj[n] = unwrap(row[i]); });
+      const cell = i => (i >= 0 ? unwrap(row[i]) : null);
+      let act = cell(iAct);
+      if(typeof act === 'string') act = /^(true|yes|y|1|active)$/i.test(act.trim());
+      out.rows.push({
+        external_id: cell(iId) == null ? null : String(cell(iId)),
+        name:        cell(iName),
+        code:        cell(iCode),
+        is_active:   typeof act === 'boolean' ? act : null,
         payload:     obj
-      };
+      });
     });
+    return out;
   }
 
   window.__pcsSyncAll = async function(){
