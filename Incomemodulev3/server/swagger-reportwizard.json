@@ -1,0 +1,2171 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Investran: Data Extraction (Query Manager)",
+    "description": "Flexible, query like access to Investran data using data extraction API. This API includes all the methods necessary to find reports, execute reports and get report execution results. Some of the common actions are Listing Lookups using fieldId, user defined field(udfId), Retrieving report execution status and results Canceling report execution, Finding list of reports, report by id and report by name and folder.",
+    "contact": {
+      "name": "Query Manager Team",
+      "email": "investran.supportstaff@fisglobal.com"
+    },
+    "license": {
+      "name": "https://fisglobal.com"
+    },
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/api/ReportWizard/v1",
+      "description": "InvestranReportWizardWebAPI-7.5.0"
+    }
+  ],
+  "paths": {
+    "/lookups/{fieldId}": {
+      "get": {
+        "tags": [
+          "Lookup"
+        ],
+        "summary": "Get list of lookups base on a field lookup id.",
+        "description": "Get the list of lookup, supporting odata filtering, limited to 20 by default. The maximun number of lookup will be returned is 100.\r\n\r\nSupported odata query options\r\n\r\n1 - <b>$filter</b>. Example: /lookups/30?$filter=contains(name, 'le')\r\n\r\n2 - <b>$orderby</b>. Example:/lookups/30?$orderby=name desc\r\n\r\n3 - <b>$top</b>. Example: /lookups/30?$top=50\r\n\r\n4 - <b>$skip</b>. Example: /lookups/30?$top=50&$skip=10\r\n\r\nExample with all supported query options:/lookups/30?$filter=contains(name, 'le')&$orderby=name&$top=20&$skip=40\r\n\r\nSupported odata filter operators\r\n\r\n1 - <b>in</b>. Note: The 'in' filter operator is only supported on property 'Id'. Is not supported on property 'Name'.\r\n\r\n\t\tExample: \r\n\t\t/lookups/30?$filter=id in (1, 2, 3)\r\n\r\n2 - <b>ne</b>. \r\n\r\n\t\tExamples: \r\n\r\n\t\tNo Equal by Name\r\n\t\t/lookups/30?$filter=name ne 'le101' \r\n\t\t\r\n\t\tNo Equal By Id\r\n\t\t/lookups/30?$filter=id ne 101\r\n\r\n3 - <b>contains</b>. The 'contains' filter operator is only supported on property 'Name'. Is not supported on property 'Id'\r\n\r\n\t\tExample: \r\n\t\r\n\t\tWill find lookups that contains 'le' in the name\r\n\t\t/lookups/30?$filter=contains(name, 'le')\r\n\t\t\r\n\t\tWill find lookups that contains 'le' in the name but will exclude the one with Id = 1 and Id = 2\r\n\t\t/lookups/30?$filter=contains(name, 'le') AND Id ne 1 AND Id ne 2\r\n\r\nRules:\r\n\r\n1- Using 'in' is only allow once in the filter expression and cannot be combined with another filter operator.\r\n\r\n2- Using 'contains' is only allow  once in the filter expression and can be only combined with 'ne' expressions.\r\n\r\n3- When using 'ne', in the same filter expression, property 'Id' cannot be combined with property 'Name'.",
+        "operationId": "FindLookup",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "1d545945-f979-4bfb-a416-98cf84e1f79e"
+          },
+          {
+            "name": "fieldId",
+            "in": "path",
+            "description": "Field lookup id.",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          },
+          {
+            "name": "$filter",
+            "in": "query",
+            "description": "Specifies the logic to pull back a subset of records.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the logic to pull back a subset of records."
+            }
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Specifies the values used to sort the collection of entries.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the values used to sort the collection of entries."
+            }
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "description": "Specifies the count of entries to skip.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the count of entries to skip."
+            }
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "description": "Specifies the subset of entries by count.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the subset of entries by count."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an instance of find result with lookup count and list of lookup that match filter criteria.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "1d545945-f979-4bfb-a416-98cf84e1f79e"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupFindResult"
+                },
+                "example": {
+                  "rowCount": 1,
+                  "data": [
+                    {
+                      "id": 808,
+                      "name": ".724 Solutions, Inc."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not get the find result because odata query option was invalid.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "1d545945-f979-4bfb-a416-98cf84e1f79e"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"bad request for lookup\",\"status\":\"400\",\"details\":\"Could not get the find result because odata query option was invalid.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "1d545945-f979-4bfb-a416-98cf84e1f79e"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"access denied for lookup\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "1d545945-f979-4bfb-a416-98cf84e1f79e"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"internal server error for lookup\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lookups/{fieldId}/{udfId}": {
+      "get": {
+        "tags": [
+          "Lookup"
+        ],
+        "summary": "Get list of lookups base on a field lookup id and user defined field id.",
+        "description": "Get the list of lookup, supporting odata filtering, limited to 20 by default. The maximun number of lookup will be returned is 100.\r\n\r\nSupported odata query options\r\n\r\n1 - <b>$filter</b>. Example: /lookups/300/20?$filter=contains(name, 'le')\r\n\r\n2 - <b>$orderby</b>. Example:/lookups/300/20?$orderby=name desc\r\n\r\n3 - <b>$top</b>. Example: /lookups/300/20?$top=50\r\n\r\n4 - <b>$skip</b>. Example: /lookups/300/20?$top=50&$skip=10\r\n\r\nExample with all supported query options:/lookups/300/20?$filter=contains(name, 'le')&$orderby=name&$top=20&$skip=40\r\n\r\nSupported odata filter operators\r\n\r\n1 - <b>in</b>. Note: The 'in' filter operator is only supported on property 'Id'. Is not supported on property 'Name'\r\n\r\n\t\tExample: \r\n\t\t/lookups/300/20?$filter=id in (1, 2, 3)\r\n\r\n2 - <b>ne</b>. \r\n\r\n\t\tExamples: \r\n\r\n\t\tNo Equal by Name\r\n\t\t/lookups/300/20?$filter=name ne 'le101' \r\n\t\t\r\n\t\tNo Equal By Id\r\n\t\t/lookups/300/20?$filter=id ne 101\r\n\r\n3 - <b>contains</b>. The 'contains' filter operator is only supported on property 'Name'. Is not supported on property 'Id'\r\n\r\n\t\tExample: \r\n\t\r\n\t\tWill find lookups that contains 'le' in the name\r\n\t\t/lookups/300/20?$filter=contains(name, 'le')\r\n\t\t\r\n\t\tWill find lookups that contains 'le' in the name but will exclude the one with Id = 1 and Id = 2\r\n\t\t/lookups/300/20?$filter=contains(name, 'le') AND Id ne 1 AND Id ne 2\r\n\r\n\t\tRules:\r\n\t\t1-> Using 'in' is only allow once in the filter expression and cannot be combined with another filter operator.\r\n\t\t2-> Using 'contains' is only allow  once in the filter expression and can be only combined with 'ne' expressions.\r\n\t\t3-> When using 'ne', in the same filter expression, property 'Id' cannot be combined with property 'Name'.",
+        "operationId": "FindLookupWithUdf",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "d6d42500-42b8-40d5-a121-8076c6c262c0"
+          },
+          {
+            "name": "fieldId",
+            "in": "path",
+            "description": "Field lookup id.",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          },
+          {
+            "name": "udfId",
+            "in": "path",
+            "description": "The user defined field id.",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          },
+          {
+            "name": "$filter",
+            "in": "query",
+            "description": "Specifies the logic to pull back a subset of records.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the logic to pull back a subset of records."
+            }
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Specifies the values used to sort the collection of entries.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the values used to sort the collection of entries."
+            }
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "description": "Specifies the count of entries to skip.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the count of entries to skip."
+            }
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "description": "Specifies the subset of entries by count.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the subset of entries by count."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an instance of find result with lookup count and list of lookup that match filter criteria.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "d6d42500-42b8-40d5-a121-8076c6c262c0"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupFindResult"
+                },
+                "example": {
+                  "rowCount": 1,
+                  "data": [
+                    {
+                      "id": 827,
+                      "name": ".724 Solutions, Inc."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not get the find result because odata query option was invalid.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "d6d42500-42b8-40d5-a121-8076c6c262c0"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"bad request for lookup\",\"status\":\"400\",\"details\":\"Could not get the find result because odata query option was invalid.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "d6d42500-42b8-40d5-a121-8076c6c262c0"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"access denied for lookup\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "d6d42500-42b8-40d5-a121-8076c6c262c0"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"internal server error for lookup\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lookups/name-only/{fieldId}": {
+      "get": {
+        "tags": [
+          "Lookup"
+        ],
+        "summary": "Get list of name only lookups base on a field lookup id.",
+        "description": "Get the list of lookup, supporting odata filtering, limited to 20 by default. The maximun number of lookup will be returned is 100.\r\n\r\nSupported odata query options\r\n\r\n1 - <b>$filter</b>. Example: /lookups/nameOnly/13?$filter=contains(name, 'le')\r\n\r\n2 - <b>$orderby</b>. Example:/lookups/nameOnly/13?$orderby=name desc\r\n\r\n3 - <b>$top</b>. Example: /lookups/nameOnly/13?$top=50\r\n\r\n4 - <b>$skip</b>. Example: /lookups/nameOnly/13?$top=50&$skip=10\r\n\r\nExample with all supported query options:/lookups/nameOnly/13?$filter=contains(name, 'le')&$orderby=name&$top=20&$skip=40\r\n\r\nSupported odata query operators\r\n\r\n\r\n1 - <b>ne</b>. Examples: \r\n\r\n\t\tNo Equal by Name\r\n\t\t/lookups/nameOnly/13?$filter=name ne 'le101' \r\n\t\t\r\n\r\n2 - <b>contains</b>.The 'contains' filter operator is only supported on property 'Name'.\r\n\r\n\t\tExample: \r\n\t\r\n\t\tWill find lookups that contains 'le' in the name\r\n\t\t/lookups/nameOnly/13?$filter=contains(name, 'le')\r\n\t\t\r\n\t\tWill find lookups that contains 'le' in the name but will exclude the one with Name = 'le01' and Name = 'le02'\r\n\t\t/lookups/nameOnly/13?$filter=contains(name, 'le') AND name ne 'le01' and name ne 'le02'\r\n\r\n\t\tRules:\r\n\t\t1-> Using 'contains' is only allow  once in the filter expression and can be only combined with 'ne' expressions.",
+        "operationId": "FindNameOnlyLookup",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "64a8d352-8f03-4e54-b37e-fa51e341f355"
+          },
+          {
+            "name": "fieldId",
+            "in": "path",
+            "description": "The lookup field id.",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          },
+          {
+            "name": "$filter",
+            "in": "query",
+            "description": "Specifies the logic to pull back a subset of records.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the logic to pull back a subset of records."
+            }
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Specifies the values used to sort the collection of entries.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the values used to sort the collection of entries."
+            }
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "description": "Specifies the count of entries to skip.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the count of entries to skip."
+            }
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "description": "Specifies the subset of entries by count.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the subset of entries by count."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an instance of find result with lookup count and list of name only lookup that match filter criteria.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "64a8d352-8f03-4e54-b37e-fa51e341f355"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupFindResult"
+                },
+                "example": {
+                  "rowCount": 1,
+                  "data": [
+                    {
+                      "id": 55,
+                      "name": ".724 Solutions, Inc."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not get the find result because odata query option was invalid.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "64a8d352-8f03-4e54-b37e-fa51e341f355"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"bad request for lookup\",\"status\":\"400\",\"details\":\"Could not get the find result because odata query option was invalid.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "64a8d352-8f03-4e54-b37e-fa51e341f355"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"access denied for lookup\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "64a8d352-8f03-4e54-b37e-fa51e341f355"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"internal server error for lookup\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lookups/name-only/{fieldId}/{udfId}": {
+      "get": {
+        "tags": [
+          "Lookup"
+        ],
+        "summary": "Get list of name only lookups base on a field lookup id and user defined field id.",
+        "description": "Get the list of lookup, supporting odata filtering, limited to 20 by default. The maximun number of lookups that will be returned is 100.\r\n\r\nSupported odata query options\r\n\r\n1 - <b>$filter</b>. Example: /lookups/nameOnly/130/10?$filter=contains(name, 'le')\r\n\r\n2 - <b>$orderby</b>. Example:/lookups/nameOnly/130/10?$orderby=name desc\r\n\r\n3 - <b>$top</b>. Example: /lookups/nameOnly/130/10?$top=50\r\n\r\n4 - <b>$skip</b>. Example: /lookups/nameOnly/130/10?$top=50&$skip=10\r\n\r\nExample with all supported query options:/lookups/nameOnly/130/10?$filter=contains(name, 'le')&$orderby=name&$top=20&$skip=40\r\n\r\nSupported odata query operators\r\n\r\n\r\n1 - <b>ne</b>. Examples: \r\n\r\n\t\tNo Equal by Name\r\n\t\t/lookups/nameOnly/130/10?$filter=name ne 'le101' \r\n\t\t\r\n\r\n2 - <b>contains</b>.The 'contains' filter operator is only supported on property 'Name'.\r\n\r\n\t\tExample: \r\n\t\r\n\t\tWill find lookups that contains 'le' in the name\r\n\t\t/lookups/nameOnly/130/10?$filter=contains(name, 'le')\r\n\t\t\r\n\t\tWill find lookups that contains 'le' in the name but will exclude the one with Name = 'le01' and Name = 'le02'\r\n\t\t/lookups/nameOnly/130/10?$filter=contains(name, 'le') AND name ne 'le01' and name ne 'le02'\r\n\r\n\t\tRules:\r\n\t\t1-> Using 'contains' is only allow  once in the filter expression and can be only combined with 'ne' expressions.",
+        "operationId": "FindNameOnlyLookupByUdf",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "4b649c74-6729-47ac-a75f-803c2d5fe9fa"
+          },
+          {
+            "name": "fieldId",
+            "in": "path",
+            "description": "The lookup field id.",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          },
+          {
+            "name": "udfId",
+            "in": "path",
+            "description": "The user defined field id.",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          },
+          {
+            "name": "$filter",
+            "in": "query",
+            "description": "Specifies the logic to pull back a subset of records.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the logic to pull back a subset of records."
+            }
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Specifies the values used to sort the collection of entries.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the values used to sort the collection of entries."
+            }
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "description": "Specifies the count of entries to skip.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the count of entries to skip."
+            }
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "description": "Specifies the subset of entries by count.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the subset of entries by count."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an instance of find result with lookup count and list of name only lookup that match filter criteria.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "4b649c74-6729-47ac-a75f-803c2d5fe9fa"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupFindResult"
+                },
+                "example": {
+                  "rowCount": 1,
+                  "data": [
+                    {
+                      "id": 720,
+                      "name": ".724 Solutions, Inc."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not get the find result because odata query option was invalid.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "4b649c74-6729-47ac-a75f-803c2d5fe9fa"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"bad request for lookup\",\"status\":\"400\",\"details\":\"Could not get the find result because odata query option was invalid.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "4b649c74-6729-47ac-a75f-803c2d5fe9fa"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"access denied for lookup\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "4b649c74-6729-47ac-a75f-803c2d5fe9fa"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:lookup\",\"title\":\"internal server error for lookup\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports": {
+      "get": {
+        "tags": [
+          "Report"
+        ],
+        "summary": "Get reports.",
+        "description": "Get reports, supporting odata filtering, limited to 20 by default. The maximun number of report can be returned is 100.\r\n\r\nWhen the report list returns only 1 report, columns and parameters properties will be expanded. If more than one report is returned, columns and parameters properties will be null.\r\n\t\t\r\nSupported odata query options:\r\n\r\n1 - <b>$filter</b>. Example: /reports?$filter=contains(folderName, 'Partner') AND contains(name, 'Capital')\r\n\r\n2 - <b>$orderby</b>. Example: /reports?$orderby=name desc\r\n\r\n3 - <b>$top</b>. Example: /reports?$top=50\r\n\r\n4 - <b>$skip</b>. Example: /reports?$top=50&$skip=10\r\n\r\nExample with all supported query options: .../reports?$filter=contains(folderName, 'Partner') AND contains(name, 'Capital')&$orderby=name&$top=20&$skip=40\r\n\r\nSupported odata query operators\r\n\r\n1- <b>eq</b>. Example: /reports?$filter=name eq 'Partners Capital' AND folderName eq ' Partner Reports'\r\n\r\n2- <b>contains</b>. Example: /reports?$filter=contains(folderName, 'Partner') AND contains(name, 'Capital')\r\n\r\n Note: The above query operators are the only one supported in this version.",
+        "operationId": "Index",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "a40a74e7-a94a-4ef9-a776-c2c53826c2bb"
+          },
+          {
+            "name": "$filter",
+            "in": "query",
+            "description": "Specifies the logic to pull back a subset of records.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the logic to pull back a subset of records."
+            }
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Specifies the values used to sort the collection of entries.",
+            "schema": {
+              "maxLength": 2147483647,
+              "type": "string",
+              "description": "Specifies the values used to sort the collection of entries."
+            }
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "description": "Specifies the count of entries to skip.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the count of entries to skip."
+            }
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "description": "Specifies the subset of entries by count.",
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 2147483647,
+              "type": "number",
+              "description": "Specifies the subset of entries by count."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an instance of find result with report count and list of reports that match filter criteria.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "a40a74e7-a94a-4ef9-a776-c2c53826c2bb"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportFindResult"
+                },
+                "example": {
+                  "rowCount": 2,
+                  "data": [
+                    {
+                      "id": 844,
+                      "name": "Iliquid Funds Account Summary and Performance",
+                      "folderName": "Investran Financial Reports",
+                      "changedBy": "System_Upgrade",
+                      "createdBy": "System_Upgrade",
+                      "changedDate": "2026-08-23T15:54:52.1237203-04:00",
+                      "createdDate": "2026-08-20T15:54:52.1237197-04:00",
+                      "parameters": [],
+                      "columns": []
+                    },
+                    {
+                      "id": 494,
+                      "name": "Summary Trial Balance",
+                      "folderName": "Investran Financial Reports",
+                      "changedBy": "System_Upgrade",
+                      "createdBy": "System_Upgrade",
+                      "changedDate": "2026-08-24T15:54:52.1237214-04:00",
+                      "createdDate": "2026-08-22T15:54:52.1237213-04:00",
+                      "parameters": [],
+                      "columns": []
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not get the find result because odata query option was invalid.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "a40a74e7-a94a-4ef9-a776-c2c53826c2bb"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:report\",\"title\":\"bad request for report\",\"status\":\"400\",\"details\":\"Could not get the find result because odata query option was invalid.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "a40a74e7-a94a-4ef9-a776-c2c53826c2bb"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:report\",\"title\":\"access denied for report\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "a40a74e7-a94a-4ef9-a776-c2c53826c2bb"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:report\",\"title\":\"internal server error for report\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/{reportId}": {
+      "get": {
+        "tags": [
+          "Report"
+        ],
+        "summary": "Get a report by Id.",
+        "description": "Finds the report for a report id, detailed information about the specific report id.",
+        "operationId": "GetReport",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "c32aeb58-3858-41bf-9fec-0d4e17769b39"
+          },
+          {
+            "name": "reportId",
+            "in": "path",
+            "description": "The report id is required to get a specific report. It cannot be zero.",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get a report successfully.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "c32aeb58-3858-41bf-9fec-0d4e17769b39"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Report"
+                },
+                "example": {
+                  "id": 970,
+                  "name": "Iliquid Funds Account Summary and Performance",
+                  "folderName": "Investran Financial Reports",
+                  "changedBy": "System_Upgrade",
+                  "createdBy": "System_Upgrade",
+                  "changedDate": "2026-08-23T15:54:52.1257192-04:00",
+                  "createdDate": "2026-08-20T15:54:52.1257186-04:00",
+                  "parameters": [
+                    {
+                      "id": 815,
+                      "name": "IS Liquid",
+                      "parameterType": "boolean",
+                      "isRequired": false,
+                      "isSystemCurrencyLookup": false,
+                      "parameterLookupValuesLocation": null,
+                      "values": null
+                    }
+                  ],
+                  "columns": [
+                    {
+                      "name": null,
+                      "outputType": "integer",
+                      "supportNavigation": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not get the report because reportId is equal to zero.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "c32aeb58-3858-41bf-9fec-0d4e17769b39"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:report\",\"title\":\"bad request for report\",\"status\":\"400\",\"details\":\"Could not get the report because reportId is equal to zero.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "c32aeb58-3858-41bf-9fec-0d4e17769b39"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:report\",\"title\":\"access denied for report\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "c32aeb58-3858-41bf-9fec-0d4e17769b39"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:report\",\"title\":\"internal server error for report\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions": {
+      "post": {
+        "tags": [
+          "ReportExecution"
+        ],
+        "summary": "Create a new report execution request.",
+        "description": "DataExtraction: Query Manager REST API support two output format: <b>\"application/json\"</b> and <b>\"application/csv\"</b>. Default format is: <b>\"application/json\"</b>. \r\n\r\nWhen requesting a report execution it can be requested either using reportId or a combination of report's name and folder's name.\r\n\r\nWhen passing parameters in the request, it should use the parameter name to identify the parameter. The API support multiple values on parameters.\r\n\r\nList of valid values format to be use as parameter value based on the parameter type.\r\n\r\n\tText: Any character, max lenght: 4000. Example \"value\": \"home\"\r\n\r\n\tNumeric: Pattern: ^((-?[0-9]+)|(-?([0-9]+)?[.][0-9]+))$. Example:\"value\": \"100.2839\"\r\n\r\n\tDate: Format: \"yyyy-mm-dd\". Pattern: ([12]\\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])). Example: \"value\":\"2000-12-31\"\r\n\r\n\tBoolean: Accepted Values: true|false. Pattern: ^(true|false)$. Example \"value\": \"true\"\r\n\r\n\tInteger(Lookup): Pattern: ^(\\+|-)?\\d+$. Example: \"value\": \"1020\"\r\n\r\nExamples:\r\n\t\t\r\n<b>Execute report by Id:</b> \r\n\r\n\t{\r\n\t\t\"reportId\":123, \r\n\t\t\"outputFormat\":\"application/csv\"\r\n\t}\r\n\r\n<b>Execute report by report and folder name:</b> \r\n\r\n    {\r\n\t\t\"reportName\":\"report\", \r\n\t\t\"folderName\":\"folder\", \r\n\t\t\"outputFormat\":\"application/csv\" \r\n\t}\r\n\r\n<b>Execute report by Id with parameters:</b>\r\n\r\n\t{ \r\n\t\t\"reportId\":123, \r\n\t\t\"outputFormat\":\"application/json\",\r\n\t\t\"parameters\": [\r\n\t\t\t\t\t\t{\"name\":\"Text\", \"values\":[{\"value\":\"Home\"}]},\r\n\t\t\t\t\t\t{\"name\":\"Numeric\", \"values\":[{\"value\":\"100.1\"}, {\"value\":\"1000002.23\"}]},\r\n\t\t\t\t\t\t{\"name\":\"Date\", \"values\":[{\"value\":\"2020-01-01\"}, {\"value\":\"2020-02-01\"}]},\r\n\t\t\t\t\t\t{\"name\":\"Boolean\", \"values\":[{\"value\":\"true\"}]},\r\n\t\t\t\t\t\t{\"name\":\"Integer\", \"values\":[{\"value\":\"25\"}, {\"value\":\"125\"}]}\r\n\t\t]\r\n\t}\r\n\t\r\n<b>Execute report by report and folder name with parameters:</b>\r\n\r\n\t{ \r\n\t\t\"reportName\":\"report\", \r\n\t\t\"folderName\":\"folder\",  \r\n\t\t\"outputFormat\":\"application/json\",\r\n\t\t\"parameters\": [\r\n\t\t\t\t\t\t{\"name\":\"Text\", \"values\":[{\"value\":\"Home\"}]},\r\n\t\t\t\t\t\t{\"name\":\"Numeric\", \"values\":[{\"value\":\"100.1\"}, {\"value\":\"1000002.23\"}]},\r\n\t\t\t\t\t\t{\"name\":\"Date\", \"values\":[{\"value\":\"2020-01-01\"}, {\"value\":\"2020-02-01\"}]},\r\n\t\t\t\t\t\t{\"name\":\"Boolean\", \"values\":[{\"value\":\"true\"}]},\r\n\t\t\t\t\t\t{\"name\":\"Integer\", \"values\":[{\"value\":\"25\"}, {\"value\":\"125\"}]}\r\n\t\t]\r\n\t}",
+        "operationId": "Create",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "ebbbd6fe-69a4-425c-9e0f-ae5bd180c4fb"
+          }
+        ],
+        "requestBody": {
+          "description": "The ReportExecutionRequest is required to start the execution for a report",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportExecutionRequest"
+              },
+              "example": {
+                "reportId": 472,
+                "reportName": "Summary Trial Balance",
+                "folderName": "Investran Financial Reports",
+                "outputFormat": "application/csv",
+                "culture": null,
+                "applicationName": null,
+                "parameters": null,
+                "runOnPrimary": null
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creates a new report execution request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "ebbbd6fe-69a4-425c-9e0f-ae5bd180c4fb"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportExecutionInfo"
+                },
+                "example": {
+                  "id": 98005,
+                  "status": "succeeded",
+                  "outputMediaType": "application/json",
+                  "createdDateTime": "2026-08-22T15:54:52.1282183-04:00",
+                  "lastActionDateTime": "2026-08-24T15:54:52.1282191-04:00",
+                  "reportName": "Summary Trial Balance",
+                  "errorCode": null
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "If report execution request is null or report to execute is not valid as well parameters.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "ebbbd6fe-69a4-425c-9e0f-ae5bd180c4fb"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"bad request for reportexecution\",\"status\":\"400\",\"details\":\"If report execution request is null or report to execute is not valid as well parameters.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "ebbbd6fe-69a4-425c-9e0f-ae5bd180c4fb"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"access denied for reportexecution\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "ebbbd6fe-69a4-425c-9e0f-ae5bd180c4fb"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"internal server error for reportexecution\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{reportExecutionId}/status": {
+      "get": {
+        "tags": [
+          "ReportExecution"
+        ],
+        "summary": "Checks the status of the report execution.",
+        "description": "Provides the status of the report execution for a specific report execution id",
+        "operationId": "Status",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "60b01e52-a85d-4e32-baba-ad4373dee31e"
+          },
+          {
+            "name": "reportExecutionId",
+            "in": "path",
+            "description": "report execution id is required to get the status of the report execution",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checks the status of the report execution successfully.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "60b01e52-a85d-4e32-baba-ad4373dee31e"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportExecutionInfo"
+                },
+                "example": {
+                  "id": 82951,
+                  "status": "succeeded",
+                  "outputMediaType": "application/json",
+                  "createdDateTime": "2026-08-22T15:54:52.12923-04:00",
+                  "lastActionDateTime": "2026-08-24T15:54:52.1292302-04:00",
+                  "reportName": "Summary Trial Balance",
+                  "errorCode": null
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not get the report execution status because the ID is invalid.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "60b01e52-a85d-4e32-baba-ad4373dee31e"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"bad request for reportexecution\",\"status\":\"400\",\"details\":\"Could not get the report execution status because the ID is invalid.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "60b01e52-a85d-4e32-baba-ad4373dee31e"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"access denied for reportexecution\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "60b01e52-a85d-4e32-baba-ad4373dee31e"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"internal server error for reportexecution\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{reportExecutionId}/cancel": {
+      "post": {
+        "tags": [
+          "ReportExecution"
+        ],
+        "summary": "Request report execution cancellation",
+        "description": "Cancels the report execution for a specific report execution id. Only the user that requested the execution can cancel it.",
+        "operationId": "Cancel",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "320f0526-a1bc-441f-8248-189237edb4af"
+          },
+          {
+            "name": "reportExecutionId",
+            "in": "path",
+            "description": "report execution id is required to cancel the report execution",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancels a report execution successfully.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "320f0526-a1bc-441f-8248-189237edb4af"
+              }
+            }
+          },
+          "400": {
+            "description": "Could not cancel because the ID is invalid.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "320f0526-a1bc-441f-8248-189237edb4af"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"bad request for reportexecution\",\"status\":\"400\",\"details\":\"Could not cancel because the ID is invalid.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "320f0526-a1bc-441f-8248-189237edb4af"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"access denied for reportexecution\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "320f0526-a1bc-441f-8248-189237edb4af"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"internal server error for reportexecution\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{reportExecutionId}/result": {
+      "get": {
+        "tags": [
+          "ReportExecution"
+        ],
+        "summary": "Gets a json or csv representation of the sucessful report execution result.",
+        "description": "Provides the result of the report execution in json or csv for a specific report execution id",
+        "operationId": "Result",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "header",
+            "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+              "type": "string",
+              "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+              "format": "uuid"
+            },
+            "example": "266dc1f5-1af6-4131-a128-ad67dcbfefd2"
+          },
+          {
+            "name": "reportExecutionId",
+            "in": "path",
+            "description": "report execution id is required to get the result of the report execution",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "maxLength": 10,
+              "type": "integer",
+              "format": "int32"
+            },
+            "example": 99
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gets the report execution result successfully.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "266dc1f5-1af6-4131-a128-ad67dcbfefd2"
+              }
+            }
+          },
+          "400": {
+            "description": "Could not get execution result because the ID is invalid, or the execution did not finish successfully.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "266dc1f5-1af6-4131-a128-ad67dcbfefd2"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"bad request for reportexecution\",\"status\":\"400\",\"details\":\"Could not get execution result because the ID is invalid, or the execution did not finish successfully.\"}"
+              }
+            }
+          },
+          "401": {
+            "description": "Access was denied.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "266dc1f5-1af6-4131-a128-ad67dcbfefd2"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"access denied for reportexecution\",\"status\":\"401\",\"details\":\"access is denied for the request\"}"
+              }
+            }
+          },
+          "503": {
+            "description": "An error occurred when processing the request.",
+            "headers": {
+              "uuid": {
+                "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                "schema": {
+                  "maxLength": 36,
+                  "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                  "type": "string",
+                  "description": "Included for Code Connect compatibility. It is used for API call tracing.",
+                  "format": "uuid"
+                },
+                "example": "266dc1f5-1af6-4131-a128-ad67dcbfefd2"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwaggerErrorResponse"
+                },
+                "example": "{\"type\":\"fisglobal:rwapi:error:reportexecution\",\"title\":\"internal server error for reportexecution\",\"status\":\"503\",\"details\":\"internal server occurred when processing the request.\"}"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Column": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "name"
+          },
+          "outputType": {
+            "$ref": "#/components/schemas/ColumnOutputType"
+          },
+          "supportNavigation": {
+            "type": "boolean",
+            "example": "true"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ColumnOutputType": {
+        "enum": [
+          "text",
+          "numeric",
+          "date",
+          "boolean",
+          "integer",
+          "result",
+          "dateTime"
+        ],
+        "type": "string"
+      },
+      "ExecutionParameter": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "example": "10"
+          },
+          "parameterType": {
+            "$ref": "#/components/schemas/ParameterType"
+          },
+          "name": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "name"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionParameterValue"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExecutionParameterValue": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "value"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Lookup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "example": "10"
+          },
+          "name": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "name"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LookupFindResult": {
+        "type": "object",
+        "properties": {
+          "rowCount": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "example": "10"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Lookup"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ParameterType": {
+        "enum": [
+          "text",
+          "numeric",
+          "date",
+          "boolean",
+          "integer",
+          "dateTime"
+        ],
+        "type": "string"
+      },
+      "ParameterValue": {
+        "type": "object",
+        "properties": {
+          "stringValue": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "stringValue"
+          },
+          "integerValue": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "example": "10"
+          },
+          "dateValue": {
+            "maxLength": 8000,
+            "pattern": "[12]\\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2026-08-25T15:54:52.1224765-04:00"
+          },
+          "booleanValue": {
+            "type": "boolean",
+            "nullable": true,
+            "example": "true"
+          },
+          "decimalValue": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "example": "10"
+          },
+          "name": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "name"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Report": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "example": "10"
+          },
+          "name": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "name"
+          },
+          "folderName": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "folderName"
+          },
+          "changedBy": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "changedBy"
+          },
+          "createdBy": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "createdBy"
+          },
+          "changedDate": {
+            "maxLength": 8000,
+            "pattern": "[12]\\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2026-08-25T15:54:52.1227319-04:00"
+          },
+          "createdDate": {
+            "maxLength": 8000,
+            "pattern": "[12]\\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2026-08-25T15:54:52.1227341-04:00"
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReportParameter"
+            },
+            "nullable": true
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Column"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReportExecutionInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "example": "10"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReportExecutionStatus"
+          },
+          "outputMediaType": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "outputMediaType"
+          },
+          "createdDateTime": {
+            "maxLength": 8000,
+            "pattern": "[12]\\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2026-08-25T15:54:52.1272662-04:00"
+          },
+          "lastActionDateTime": {
+            "maxLength": 8000,
+            "pattern": "[12]\\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2026-08-25T15:54:52.1272685-04:00"
+          },
+          "reportName": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "reportName"
+          },
+          "errorCode": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "errorCode"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReportExecutionRequest": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "example": "10"
+          },
+          "reportName": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "reportName"
+          },
+          "folderName": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "folderName"
+          },
+          "outputFormat": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "outputFormat"
+          },
+          "culture": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "culture"
+          },
+          "applicationName": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "applicationName"
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionParameter"
+            },
+            "nullable": true
+          },
+          "runOnPrimary": {
+            "type": "boolean",
+            "nullable": true,
+            "readOnly": true,
+            "example": "true"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReportExecutionStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "error",
+          "canceled",
+          "throttled"
+        ],
+        "type": "string"
+      },
+      "ReportFindResult": {
+        "type": "object",
+        "properties": {
+          "rowCount": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "example": "10"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Report"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReportParameter": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "maximum": 100,
+            "maxLength": 100,
+            "type": "integer",
+            "format": "int32",
+            "example": "10"
+          },
+          "name": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "name"
+          },
+          "parameterType": {
+            "$ref": "#/components/schemas/ParameterType"
+          },
+          "isRequired": {
+            "type": "boolean",
+            "example": "true"
+          },
+          "isSystemCurrencyLookup": {
+            "type": "boolean",
+            "example": "true"
+          },
+          "parameterLookupValuesLocation": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "parameterLookupValuesLocation"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParameterValue"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SwaggerErrorResponse": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "type"
+          },
+          "title": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "title"
+          },
+          "status": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "status"
+          },
+          "details": {
+            "maxLength": 8000,
+            "type": "string",
+            "nullable": true,
+            "example": "details"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "Bearer": {
+        "type": "apiKey",
+        "description": "JWT Authorization header using the Bearer scheme.\r\n                      Enter 'Bearer' [space] and then your token in the text input below.\r\n                      Example: 'Bearer 12345abcdef'",
+        "name": "Authorization",
+        "in": "header"
+      }
+    }
+  },
+  "security": [
+    {
+      "Bearer": []
+    }
+  ]
+}

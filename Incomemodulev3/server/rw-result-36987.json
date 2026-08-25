@@ -1,0 +1,587 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "AccountId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "AccountCode",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "AccountName",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "AccountType",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "AccountDescription",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "IsActive",
+      "outputType": "Boolean",
+      "presentation": {
+        "trueValue": "Active",
+        "falseValue": "Inactive"
+      }
+    }
+  ],
+  "data": [
+    [
+      0,
+      1,
+      "111000",
+      "Cash",
+      "Assets",
+      "111000 - Cash",
+      true
+    ],
+    [
+      0,
+      4,
+      "141000",
+      "Investments at Cost",
+      "Assets",
+      "141000 - Investments at Cost",
+      true
+    ],
+    [
+      0,
+      21,
+      "211000",
+      "Accounts payable",
+      "Liabilities",
+      "211000 - Accounts payable",
+      true
+    ],
+    [
+      0,
+      29,
+      "30030",
+      "Retained earnings",
+      "Capital",
+      "30030 - Retained earnings",
+      false
+    ],
+    [
+      0,
+      31,
+      "421000",
+      "Investment Interest Income",
+      "Revenues",
+      "421000 - Investment Interest Income",
+      true
+    ],
+    [
+      0,
+      35,
+      "450000",
+      "Unrealized Gain/Loss",
+      "Revenues",
+      "450000 - Unrealized Gain/Loss",
+      true
+    ],
+    [
+      0,
+      38,
+      "511000",
+      "Investment Expenses - Finanacing Costs",
+      "Expenses",
+      "511000 - Investment Expenses - Finanacing Costs",
+      true
+    ],
+    [
+      0,
+      40,
+      "523000",
+      "Partnership Expenses - Financing Costs",
+      "Expenses",
+      "523000 - Partnership Expenses - Financing Costs",
+      true
+    ],
+    [
+      0,
+      42,
+      "521000",
+      "Partnership Expenses - Affiliate Fees",
+      "Expenses",
+      "521000 - Partnership Expenses - Affiliate Fees",
+      true
+    ],
+    [
+      0,
+      48,
+      "522000",
+      "Partnership Expenses - Professional Fees",
+      "Expenses",
+      "522000 - Partnership Expenses - Professional Fees",
+      true
+    ],
+    [
+      0,
+      55,
+      "529000",
+      "Partnership Expenses - Other",
+      "Expenses",
+      "529000 - Partnership Expenses - Other",
+      true
+    ],
+    [
+      0,
+      66,
+      "390000",
+      "Suspense",
+      "Capital",
+      "390000 - Suspense",
+      true
+    ],
+    [
+      0,
+      142,
+      "519000",
+      "Investment Expenses - Other",
+      "Expenses",
+      "519000 - Investment Expenses - Other",
+      true
+    ],
+    [
+      0,
+      145,
+      "142000",
+      "Investments at Fair Market Value",
+      "Assets",
+      "142000 - Investments at Fair Market Value",
+      true
+    ],
+    [
+      0,
+      151,
+      "330000",
+      "Partner transfers",
+      "Capital",
+      "330000 - Partner transfers",
+      true
+    ],
+    [
+      0,
+      153,
+      "440000",
+      "Realized Gain/Loss",
+      "Revenues",
+      "440000 - Realized Gain/Loss",
+      true
+    ],
+    [
+      0,
+      168,
+      "99999",
+      "Deactivate",
+      "Assets",
+      "99999 - Deactivate",
+      true
+    ],
+    [
+      0,
+      256,
+      "112000",
+      "Short Term Investments",
+      "Assets",
+      "112000 - Short Term Investments",
+      true
+    ],
+    [
+      0,
+      257,
+      "113000",
+      "Accounts Receivable",
+      "Assets",
+      "113000 - Accounts Receivable",
+      true
+    ],
+    [
+      0,
+      258,
+      "115000",
+      "Accrued Assets",
+      "Assets",
+      "115000 - Accrued Assets",
+      true
+    ],
+    [
+      0,
+      259,
+      "190000",
+      "Other Assets",
+      "Assets",
+      "190000 - Other Assets",
+      true
+    ],
+    [
+      0,
+      260,
+      "215000",
+      "Accrued Liabilities",
+      "Liabilities",
+      "215000 - Accrued Liabilities",
+      true
+    ],
+    [
+      0,
+      261,
+      "216000",
+      "Withholdings - Liabilities",
+      "Liabilities",
+      "216000 - Withholdings - Liabilities",
+      true
+    ],
+    [
+      0,
+      262,
+      "221000",
+      "Credit Facilities and Notes",
+      "Liabilities",
+      "221000 - Credit Facilities and Notes",
+      true
+    ],
+    [
+      0,
+      263,
+      "222000",
+      "Leverage Facilities",
+      "Liabilities",
+      "222000 - Leverage Facilities",
+      true
+    ],
+    [
+      0,
+      264,
+      "225000",
+      "Long Term Accrued Liabilities",
+      "Liabilities",
+      "225000 - Long Term Accrued Liabilities",
+      true
+    ],
+    [
+      0,
+      265,
+      "229000",
+      "Other Long Term Obligations",
+      "Liabilities",
+      "229000 - Other Long Term Obligations",
+      true
+    ],
+    [
+      0,
+      266,
+      "311000",
+      "Contributions - Investments",
+      "Capital",
+      "311000 - Contributions - Investments",
+      true
+    ],
+    [
+      0,
+      267,
+      "312000",
+      "Contributions - Expenses",
+      "Capital",
+      "312000 - Contributions - Expenses",
+      true
+    ],
+    [
+      0,
+      268,
+      "313000",
+      "Contributions - Working Capital",
+      "Capital",
+      "313000 - Contributions - Working Capital",
+      true
+    ],
+    [
+      0,
+      269,
+      "314000",
+      "Contributions - Late Interest",
+      "Capital",
+      "314000 - Contributions - Late Interest",
+      true
+    ],
+    [
+      0,
+      270,
+      "318000",
+      "Contributions - Syndication Costs",
+      "Capital",
+      "318000 - Contributions - Syndication Costs",
+      true
+    ],
+    [
+      0,
+      271,
+      "319000",
+      "Contributions - Due From LP (Contra Account)",
+      "Capital",
+      "319000 - Contributions - Due From LP (Contra Account)",
+      true
+    ],
+    [
+      0,
+      272,
+      "321000",
+      "Distributions - Income",
+      "Capital",
+      "321000 - Distributions - Income",
+      true
+    ],
+    [
+      0,
+      273,
+      "322000",
+      "Distributions - Return of Capital",
+      "Capital",
+      "322000 - Distributions - Return of Capital",
+      true
+    ],
+    [
+      0,
+      274,
+      "323000",
+      "Distributions - Carried Interest",
+      "Capital",
+      "323000 - Distributions - Carried Interest",
+      true
+    ],
+    [
+      0,
+      275,
+      "324000",
+      "Distributions - Waivers",
+      "Capital",
+      "324000 - Distributions - Waivers",
+      true
+    ],
+    [
+      0,
+      276,
+      "325000",
+      "Distributions - Special GP Distribution",
+      "Capital",
+      "325000 - Distributions - Special GP Distribution",
+      true
+    ],
+    [
+      0,
+      277,
+      "327000",
+      "Distributions - Tax",
+      "Capital",
+      "327000 - Distributions - Tax",
+      true
+    ],
+    [
+      0,
+      278,
+      "329000",
+      "Distributions - Other",
+      "Capital",
+      "329000 - Distributions - Other",
+      true
+    ],
+    [
+      0,
+      279,
+      "351000",
+      "Retained Earnings",
+      "Capital",
+      "351000 - Retained Earnings",
+      true
+    ],
+    [
+      0,
+      280,
+      "411000",
+      "Bank Interest Income",
+      "Revenues",
+      "411000 - Bank Interest Income",
+      true
+    ],
+    [
+      0,
+      281,
+      "413000",
+      "Subsequent Closing Interest Income",
+      "Revenues",
+      "413000 - Subsequent Closing Interest Income",
+      true
+    ],
+    [
+      0,
+      282,
+      "415000",
+      "Brokerage Dividend Income",
+      "Revenues",
+      "415000 - Brokerage Dividend Income",
+      true
+    ],
+    [
+      0,
+      283,
+      "422000",
+      "Investment Income - Paydown at Purchase",
+      "Revenues",
+      "422000 - Investment Income - Paydown at Purchase",
+      true
+    ],
+    [
+      0,
+      284,
+      "431000",
+      "Dividend Income - Unqualified",
+      "Revenues",
+      "431000 - Dividend Income - Unqualified",
+      true
+    ],
+    [
+      0,
+      285,
+      "432000",
+      "Dividend Income - Unqualified - PIK",
+      "Revenues",
+      "432000 - Dividend Income - Unqualified - PIK",
+      true
+    ],
+    [
+      0,
+      286,
+      "433000",
+      "Dividend Income - Qualified",
+      "Revenues",
+      "433000 - Dividend Income - Qualified",
+      true
+    ],
+    [
+      0,
+      287,
+      "434000",
+      "Dividend Income - Qualified - PIK",
+      "Revenues",
+      "434000 - Dividend Income - Qualified - PIK",
+      true
+    ],
+    [
+      0,
+      288,
+      "491000",
+      "Other Income - Offsets",
+      "Revenues",
+      "491000 - Other Income - Offsets",
+      true
+    ],
+    [
+      0,
+      289,
+      "525000",
+      "Partnership Expenses - Bank Fees",
+      "Expenses",
+      "525000 - Partnership Expenses - Bank Fees",
+      true
+    ],
+    [
+      0,
+      290,
+      "526000",
+      "Partnership Expenses - Custody Fees",
+      "Expenses",
+      "526000 - Partnership Expenses - Custody Fees",
+      true
+    ],
+    [
+      0,
+      291,
+      "527000",
+      "Partnership Expenses - Insurance",
+      "Expenses",
+      "527000 - Partnership Expenses - Insurance",
+      true
+    ],
+    [
+      0,
+      292,
+      "528000",
+      "Partnership Expenses - Deal Costs",
+      "Expenses",
+      "528000 - Partnership Expenses - Deal Costs",
+      true
+    ],
+    [
+      0,
+      293,
+      "530000",
+      "Organizational Expenses",
+      "Expenses",
+      "530000 - Organizational Expenses",
+      true
+    ],
+    [
+      0,
+      294,
+      "540000",
+      "Syndication Costs",
+      "Expenses",
+      "540000 - Syndication Costs",
+      true
+    ],
+    [
+      0,
+      295,
+      "492000",
+      "Other Income - Amendments",
+      "Revenues",
+      "492000 - Other Income - Amendments",
+      true
+    ],
+    [
+      0,
+      296,
+      "350001",
+      "Crystalized Carry",
+      "Capital",
+      "350001 - Crystalized Carry",
+      true
+    ],
+    [
+      0,
+      297,
+      "01",
+      "Cash MSPA",
+      "Assets",
+      "01 - Cash MSPA",
+      true
+    ],
+    [
+      0,
+      299,
+      "399999",
+      "Contributions - Whatever",
+      "Capital",
+      "399999 - Contributions - Whatever",
+      true
+    ],
+    [
+      0,
+      301,
+      "317000",
+      "Contributions - Equity Adjustments",
+      "Capital",
+      "317000 - Contributions - Equity Adjustments",
+      true
+    ]
+  ]
+}

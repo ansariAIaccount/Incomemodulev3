@@ -1,0 +1,299 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "LegalEntityId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "LegalEntityName",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "CurrencyCode",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "DomainName",
+      "outputType": "Text"
+    }
+  ],
+  "data": [
+    [
+      0,
+      -1,
+      "No Legal Entity",
+      "USD",
+      "No Legal Entity"
+    ],
+    [
+      0,
+      7,
+      "Monterra Capital Partners I",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      12,
+      "Monterra Capital Partners II",
+      "EUR",
+      "Investran Global"
+    ],
+    [
+      0,
+      43,
+      "FIS Offshore Fund, Ltd.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      44,
+      "FIS Onshore Fund, LLC",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      45,
+      "FIS Master Fund, Ltd.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      46,
+      "FIS Subsidiary I, Ltd.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      47,
+      "FIS Subsidiary II, Ltd.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      48,
+      "FIS Subsidiary III, Ltd.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      49,
+      "Daredevil B.V.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      50,
+      "German B.V.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      51,
+      "Goliath Holdings",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      52,
+      "FIS Co-Investment Fund, Ltd.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      53,
+      "Monterra Capital Partners III",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      86,
+      "Monterra Fund of Funds I",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      87,
+      "Monterra Fund of Funds II",
+      "EUR",
+      "Investran Global"
+    ],
+    [
+      0,
+      89,
+      "FIS Asset Management",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      90,
+      "FIS Asset Management II",
+      "EUR",
+      "Investran Global"
+    ],
+    [
+      0,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      92,
+      "FIS GP",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      94,
+      "Monterra Capital Partners, Master Fund IV",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      95,
+      "Monterra Capital Partners GP, L.P.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      96,
+      "Monterra Capital Management Co., LLC",
+      "USD",
+      "Management Company"
+    ],
+    [
+      0,
+      97,
+      "Monterra Capital, Inc.",
+      "USD",
+      "Management Company"
+    ],
+    [
+      0,
+      98,
+      "Monterra Capital Partners IV SPV, LLC",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      99,
+      "Monterra Capital Partners IV International SPV, LLC",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      100,
+      "Monterra Capital Partners IV Co-Invest, LLC",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      101,
+      "Monterra Capital Partners IV Opportunities Fund",
+      "EUR",
+      "Investran Global"
+    ],
+    [
+      0,
+      106,
+      "FIS Latin America Fund",
+      "BRL",
+      "Investran Global"
+    ],
+    [
+      0,
+      109,
+      "Monterra Real Assets Fund III REIT, LLC",
+      "USD",
+      "Real Assets"
+    ],
+    [
+      0,
+      126,
+      "Monterra Real Assets Fund III",
+      "USD",
+      "Real Assets"
+    ],
+    [
+      0,
+      127,
+      "Monterra Real Assets Fund III Co-Investment",
+      "USD",
+      "Real Assets"
+    ],
+    [
+      0,
+      128,
+      "Monterra Real Assets Fund III Offshore Lux Fund",
+      "USD",
+      "Real Assets"
+    ],
+    [
+      0,
+      129,
+      "Monterra Real Assets Fund III Onshore Fund",
+      "USD",
+      "Real Assets"
+    ],
+    [
+      0,
+      131,
+      "Monterra Capital Partners V",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      152,
+      "LE test",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      153,
+      "LE Services Parent, L.P.",
+      "USD",
+      "Investran Global"
+    ],
+    [
+      0,
+      154,
+      "LE Services Opps 11 Parent, L.P.",
+      "USD",
+      "Investran Global"
+    ]
+  ]
+}

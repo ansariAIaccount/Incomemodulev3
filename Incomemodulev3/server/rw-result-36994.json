@@ -1,0 +1,22 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "Batch Status",
+      "outputType": "Text"
+    }
+  ],
+  "data": [
+    [
+      0,
+      "Held"
+    ],
+    [
+      0,
+      "Posted"
+    ]
+  ]
+}

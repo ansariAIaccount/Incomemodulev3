@@ -1,0 +1,108 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "JETypeId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "JEType",
+      "outputType": "Text"
+    }
+  ],
+  "data": [
+    [
+      0,
+      -117,
+      "FX Revaluation"
+    ],
+    [
+      0,
+      -111,
+      "Final Valuations"
+    ],
+    [
+      0,
+      -110,
+      "Unrealized FX Gain (Loss)"
+    ],
+    [
+      0,
+      -60,
+      "Equity Pickup"
+    ],
+    [
+      0,
+      -15,
+      "Unrealized Market Gain (Loss)"
+    ],
+    [
+      0,
+      -13,
+      "Subsequent Close"
+    ],
+    [
+      0,
+      -12,
+      "Partner Transfer Inputs"
+    ],
+    [
+      0,
+      -11,
+      "Partner Transfer Stub Period"
+    ],
+    [
+      0,
+      -10,
+      "Partner Transfer"
+    ],
+    [
+      0,
+      -3,
+      "Fiscal Year Close"
+    ],
+    [
+      0,
+      -1,
+      "N/A"
+    ],
+    [
+      0,
+      1,
+      "Capital Call"
+    ],
+    [
+      0,
+      7,
+      "Distribution"
+    ],
+    [
+      0,
+      8,
+      "Purchase"
+    ],
+    [
+      0,
+      14,
+      "Sale"
+    ],
+    [
+      0,
+      15,
+      "Nonportfolio Income/Expense"
+    ],
+    [
+      0,
+      58,
+      "Intercompany"
+    ],
+    [
+      0,
+      175,
+      "Tax Adjustment"
+    ]
+  ]
+}

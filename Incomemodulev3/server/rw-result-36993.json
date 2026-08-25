@@ -1,0 +1,296 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "BatchTypeId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "BatchTypeName",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "BatchTypeGroup",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "BatchTypeActive",
+      "outputType": "Boolean",
+      "presentation": {
+        "trueValue": "Active",
+        "falseValue": "InActive"
+      }
+    }
+  ],
+  "data": [
+    [
+      0,
+      -999,
+      "General",
+      null,
+      true
+    ],
+    [
+      0,
+      -94,
+      "Apply Share",
+      null,
+      true
+    ],
+    [
+      0,
+      -93,
+      "FX Translation",
+      null,
+      true
+    ],
+    [
+      0,
+      -82,
+      "Digital Integration Hub Sync",
+      null,
+      true
+    ],
+    [
+      0,
+      -80,
+      "Sale(-80)",
+      null,
+      true
+    ],
+    [
+      0,
+      -79,
+      "MCC Import",
+      null,
+      true
+    ],
+    [
+      0,
+      -78,
+      "FX Revaluation",
+      null,
+      true
+    ],
+    [
+      0,
+      -77,
+      "Defaults",
+      null,
+      true
+    ],
+    [
+      0,
+      -76,
+      "Int & Div BE",
+      null,
+      true
+    ],
+    [
+      0,
+      -75,
+      "LP Capital Event",
+      null,
+      true
+    ],
+    [
+      0,
+      -74,
+      "Fund Financials",
+      "Portfolio Monitoring",
+      true
+    ],
+    [
+      0,
+      -73,
+      "SOI",
+      "Portfolio Monitoring",
+      true
+    ],
+    [
+      0,
+      -72,
+      "KPIs",
+      "Portfolio Monitoring",
+      true
+    ],
+    [
+      0,
+      -71,
+      "Quarterly Report",
+      null,
+      true
+    ],
+    [
+      0,
+      -61,
+      "Intercompany Cash",
+      null,
+      true
+    ],
+    [
+      0,
+      -13,
+      "Unrealized Market Gain (Loss)",
+      null,
+      true
+    ],
+    [
+      0,
+      -12,
+      "Break Period",
+      null,
+      true
+    ],
+    [
+      0,
+      -11,
+      "Equity Pickup",
+      null,
+      true
+    ],
+    [
+      0,
+      -6,
+      "Deal Investment Memo Amount",
+      null,
+      true
+    ],
+    [
+      0,
+      -5,
+      "Deal Commitments",
+      null,
+      true
+    ],
+    [
+      0,
+      -1,
+      "Commitment",
+      null,
+      true
+    ],
+    [
+      0,
+      1,
+      "Gain/Loss",
+      null,
+      true
+    ],
+    [
+      0,
+      2,
+      "Income Accrual",
+      null,
+      true
+    ],
+    [
+      0,
+      3,
+      "Income Payment",
+      null,
+      true
+    ],
+    [
+      0,
+      4,
+      "Fiscal Year Close",
+      null,
+      true
+    ],
+    [
+      0,
+      5,
+      "Valuation Batch",
+      null,
+      true
+    ],
+    [
+      0,
+      8,
+      "Bridged",
+      null,
+      true
+    ],
+    [
+      0,
+      9,
+      "Bridged (Not in GL)",
+      null,
+      true
+    ],
+    [
+      0,
+      101,
+      "Partner Transfer",
+      null,
+      true
+    ],
+    [
+      0,
+      1001,
+      "Subsequent Close",
+      null,
+      true
+    ],
+    [
+      0,
+      1002,
+      "Interest and Dividend Distribution",
+      null,
+      true
+    ],
+    [
+      0,
+      1003,
+      "Call",
+      "Capital",
+      true
+    ],
+    [
+      0,
+      1004,
+      "Distribution",
+      "Capital",
+      true
+    ],
+    [
+      0,
+      1005,
+      "Unrealized FX Gain (Loss)",
+      null,
+      true
+    ],
+    [
+      0,
+      1006,
+      "Purchase",
+      null,
+      true
+    ],
+    [
+      0,
+      1007,
+      "Expense",
+      null,
+      true
+    ],
+    [
+      0,
+      1008,
+      "Sale",
+      null,
+      true
+    ],
+    [
+      0,
+      1009,
+      "Loan Calculator",
+      null,
+      true
+    ]
+  ]
+}

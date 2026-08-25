@@ -1,0 +1,83 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "DomainId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "DomainName",
+      "outputType": "Text"
+    }
+  ],
+  "data": [
+    [
+      0,
+      -2,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      -1,
+      "Investran Global"
+    ],
+    [
+      0,
+      1,
+      "Team Security Admin Domain"
+    ],
+    [
+      0,
+      2,
+      "Import Utility Jobs and Templates"
+    ],
+    [
+      0,
+      3,
+      "Orphan Import Utility Templates"
+    ],
+    [
+      0,
+      4,
+      "Demo Dataset"
+    ],
+    [
+      0,
+      5,
+      "TPA Client 1"
+    ],
+    [
+      0,
+      6,
+      "Accountant"
+    ],
+    [
+      0,
+      7,
+      "Real Assets"
+    ],
+    [
+      0,
+      8,
+      "Client A"
+    ],
+    [
+      0,
+      9,
+      "Management Company"
+    ],
+    [
+      0,
+      10,
+      "Lifecycle Dataset"
+    ],
+    [
+      0,
+      11,
+      "Cascata"
+    ]
+  ]
+}

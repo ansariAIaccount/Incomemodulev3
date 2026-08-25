@@ -1,0 +1,1377 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "CurrencyID",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "CurrencyName",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "CurrencyISO",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "CurrencySymbol",
+      "outputType": "Text"
+    }
+  ],
+  "data": [
+    [
+      0,
+      1,
+      "Venezuela, Bolívar Soberano",
+      "VES",
+      "Bs. S."
+    ],
+    [
+      0,
+      7,
+      "Canada, Dollar",
+      "CAD",
+      "C$"
+    ],
+    [
+      0,
+      8,
+      "Lebanon, Pound",
+      "LBP",
+      ""
+    ],
+    [
+      0,
+      9,
+      "Russia, Ruble",
+      "RUB",
+      ""
+    ],
+    [
+      0,
+      11,
+      "Brazil, Brazilian Real",
+      "BRL",
+      "R$"
+    ],
+    [
+      0,
+      12,
+      "Tunisia, Dinar",
+      "TND",
+      ""
+    ],
+    [
+      0,
+      13,
+      "India, Rupee",
+      "INR",
+      "Rs"
+    ],
+    [
+      0,
+      14,
+      "USA, US Dollar",
+      "USD",
+      "$"
+    ],
+    [
+      0,
+      15,
+      "European Union, Euro",
+      "EUR",
+      "€"
+    ],
+    [
+      0,
+      16,
+      "Great Britain, British Pound",
+      "GBP",
+      "£"
+    ],
+    [
+      0,
+      17,
+      "United Arab Emirates, Dirham",
+      "AED",
+      ""
+    ],
+    [
+      0,
+      18,
+      "Afghanistan, Afghani",
+      "AFN",
+      "Af"
+    ],
+    [
+      0,
+      19,
+      "Albania, Lek",
+      "ALL",
+      "L"
+    ],
+    [
+      0,
+      20,
+      "Armenia, Dram",
+      "AMD",
+      ""
+    ],
+    [
+      0,
+      21,
+      "Netherlands Antilles, Guilder",
+      "ANG",
+      "f"
+    ],
+    [
+      0,
+      22,
+      "Angola, New Kwanza",
+      "AOA",
+      "Kz"
+    ],
+    [
+      0,
+      23,
+      "Argentina, Peso",
+      "ARS",
+      "A"
+    ],
+    [
+      0,
+      24,
+      "Austria, Schilling",
+      "ATS",
+      "ATS"
+    ],
+    [
+      0,
+      25,
+      "Australia, Dollar",
+      "AUD",
+      "A$"
+    ],
+    [
+      0,
+      26,
+      "Aruba, Florin",
+      "AWG",
+      "Af."
+    ],
+    [
+      0,
+      27,
+      "Azerbaijan, Manat",
+      "AZM",
+      ""
+    ],
+    [
+      0,
+      28,
+      "Bosnia and Herzegovina, Convertible Mark",
+      "BAM",
+      "KM"
+    ],
+    [
+      0,
+      29,
+      "Barbados, Dollar",
+      "BBD",
+      "Bds$"
+    ],
+    [
+      0,
+      30,
+      "Bangladesh, Taka",
+      "BDT",
+      "Tk"
+    ],
+    [
+      0,
+      31,
+      "Belgium, Franc",
+      "BEF",
+      "BF"
+    ],
+    [
+      0,
+      32,
+      "Bulgaria, Lev",
+      "BGN",
+      "Lv"
+    ],
+    [
+      0,
+      33,
+      "Bahrain, Dinar",
+      "BHD",
+      "BD"
+    ],
+    [
+      0,
+      34,
+      "Burundi, Burundi Franc",
+      "BIF",
+      "Fbu"
+    ],
+    [
+      0,
+      35,
+      "Bermuda, Dollar",
+      "BMD",
+      "Bd$"
+    ],
+    [
+      0,
+      36,
+      "Brunei Darussalam, Dollar",
+      "BND",
+      "B$"
+    ],
+    [
+      0,
+      37,
+      "Bolivia, Boliviano",
+      "BOB",
+      "Bs"
+    ],
+    [
+      0,
+      39,
+      "Bahamas, Dollar",
+      "BSD",
+      "B$"
+    ],
+    [
+      0,
+      40,
+      "Bhutan, Rupee",
+      "BTN",
+      "Nu"
+    ],
+    [
+      0,
+      41,
+      "Botswana, Pula",
+      "BWP",
+      "P"
+    ],
+    [
+      0,
+      42,
+      "Belarus, Ruble",
+      "BYN",
+      ""
+    ],
+    [
+      0,
+      43,
+      "Belize, Dollar",
+      "BZD",
+      "BZ$"
+    ],
+    [
+      0,
+      45,
+      "Switzerland, Franc",
+      "CHF",
+      ""
+    ],
+    [
+      0,
+      46,
+      "Chile, Peso",
+      "CLP",
+      "Ch$"
+    ],
+    [
+      0,
+      47,
+      "China, Yuan Renminbi",
+      "CNY",
+      "Y"
+    ],
+    [
+      0,
+      48,
+      "Colombia, Peso",
+      "COP",
+      "Col$"
+    ],
+    [
+      0,
+      49,
+      "Costa Rica, Colon",
+      "CRC",
+      "C/"
+    ],
+    [
+      0,
+      50,
+      "Czech Republic, Koruna",
+      "CZK",
+      "Crown "
+    ],
+    [
+      0,
+      51,
+      "Cuba, Peso",
+      "CUP",
+      ""
+    ],
+    [
+      0,
+      52,
+      "Cape Verde, Escudo",
+      "CVE",
+      "C.V.Esc."
+    ],
+    [
+      0,
+      53,
+      "Cyprus, Pound",
+      "CYP",
+      "Cf"
+    ],
+    [
+      0,
+      54,
+      "Germany, Deutsche Mark",
+      "DEM",
+      "DM"
+    ],
+    [
+      0,
+      55,
+      "Djibouti, Franc",
+      "DJF",
+      ""
+    ],
+    [
+      0,
+      56,
+      "Denmark, Krone",
+      "DKK",
+      "DKr"
+    ],
+    [
+      0,
+      57,
+      "Dominican Republic, Peso",
+      "DOP",
+      "RD$"
+    ],
+    [
+      0,
+      58,
+      "Algeria, Algerian Dinar",
+      "DZD",
+      "DA"
+    ],
+    [
+      0,
+      59,
+      "Ecuador, Sucre",
+      "ECS",
+      "S/"
+    ],
+    [
+      0,
+      60,
+      "Estonia, Kroon",
+      "EEK",
+      "KR"
+    ],
+    [
+      0,
+      61,
+      "Egypt, Pound",
+      "EGP",
+      "£E"
+    ],
+    [
+      0,
+      62,
+      "Eritrea, Nakfa",
+      "ERN",
+      ""
+    ],
+    [
+      0,
+      63,
+      "Spain, Peseta",
+      "ESP",
+      ""
+    ],
+    [
+      0,
+      64,
+      "Ethiopia, Birr",
+      "ETB",
+      "Br"
+    ],
+    [
+      0,
+      66,
+      "Finland, Markka",
+      "FIM",
+      "mk"
+    ],
+    [
+      0,
+      67,
+      "Fiji, Dollar",
+      "FJD",
+      "F$"
+    ],
+    [
+      0,
+      68,
+      "Falkland Islands (Malvinas), Pound",
+      "FKP",
+      "£F"
+    ],
+    [
+      0,
+      69,
+      "France, Franc",
+      "FRF",
+      "FR"
+    ],
+    [
+      0,
+      71,
+      "Georgia, Lari",
+      "GEL",
+      ""
+    ],
+    [
+      0,
+      72,
+      "Ghana, Cedi",
+      "GHS",
+      "¢"
+    ],
+    [
+      0,
+      73,
+      "Gibraltar, Pound",
+      "GIP",
+      "£G"
+    ],
+    [
+      0,
+      74,
+      "Gambia, Dalasi",
+      "GMD",
+      ""
+    ],
+    [
+      0,
+      75,
+      "Guinea, Franc",
+      "GNF",
+      ""
+    ],
+    [
+      0,
+      76,
+      "Greece, Drachma",
+      "GRD",
+      "Dr"
+    ],
+    [
+      0,
+      77,
+      "Guatemala, Quetzal",
+      "GTQ",
+      "Q"
+    ],
+    [
+      0,
+      78,
+      "Guyana, Dollar",
+      "GYD",
+      "G$"
+    ],
+    [
+      0,
+      79,
+      "Hong Kong, Dollar",
+      "HKD",
+      "HK$"
+    ],
+    [
+      0,
+      80,
+      "Honduras, Lempira",
+      "HNL",
+      "L"
+    ],
+    [
+      0,
+      81,
+      "Croatia, Kuna",
+      "HRK",
+      "HRK"
+    ],
+    [
+      0,
+      82,
+      "Haiti, Gourde",
+      "HTG",
+      "G"
+    ],
+    [
+      0,
+      83,
+      "Hungary, Forint",
+      "HUF",
+      "Ft"
+    ],
+    [
+      0,
+      84,
+      "Indonesia, Rupiah",
+      "IDR",
+      "Rp"
+    ],
+    [
+      0,
+      85,
+      "Eire (Ireland), Punt",
+      "IEP",
+      "IR£"
+    ],
+    [
+      0,
+      87,
+      "Israel, Shekel",
+      "ILS",
+      "NIS"
+    ],
+    [
+      0,
+      89,
+      "Iraq, Dinar",
+      "IQD",
+      "ID"
+    ],
+    [
+      0,
+      90,
+      "Iran, Rial",
+      "IRR",
+      "Rls"
+    ],
+    [
+      0,
+      91,
+      "Iceland, Krona",
+      "ISK",
+      "IKr"
+    ],
+    [
+      0,
+      92,
+      "Italy, Lira",
+      "ITL",
+      "Lit"
+    ],
+    [
+      0,
+      93,
+      "Jamaica, Dollar",
+      "JMD",
+      "J$"
+    ],
+    [
+      0,
+      94,
+      "Jordan, Dinar",
+      "JOD",
+      "JD"
+    ],
+    [
+      0,
+      95,
+      "Japan, Yen",
+      "JPY",
+      "¥"
+    ],
+    [
+      0,
+      96,
+      "Kenya, Shilling",
+      "KES",
+      "K Sh"
+    ],
+    [
+      0,
+      97,
+      "Kyrgyzstan, Som",
+      "KGS",
+      "S"
+    ],
+    [
+      0,
+      98,
+      "Cambodia, Riel",
+      "KHR",
+      "CR"
+    ],
+    [
+      0,
+      99,
+      "Comoros, Franc",
+      "KMF",
+      ""
+    ],
+    [
+      0,
+      100,
+      "Korea (North), Won",
+      "KPW",
+      "Wn"
+    ],
+    [
+      0,
+      101,
+      "Korea (South), Won",
+      "KRW",
+      "W"
+    ],
+    [
+      0,
+      102,
+      "Kuwait, Dinar",
+      "KWD",
+      "KD"
+    ],
+    [
+      0,
+      103,
+      "Cayman Islands, Dollar",
+      "KYD",
+      ""
+    ],
+    [
+      0,
+      104,
+      "Kazakstan, Tenge",
+      "KZT",
+      ""
+    ],
+    [
+      0,
+      105,
+      "Laos, Kip",
+      "LAK",
+      "KN"
+    ],
+    [
+      0,
+      107,
+      "Sri Lanka, Rupee",
+      "LKR",
+      "SLRs"
+    ],
+    [
+      0,
+      108,
+      "Liberia, Dollar",
+      "LRD",
+      "L$"
+    ],
+    [
+      0,
+      109,
+      "Lesotho, Loti",
+      "LSL",
+      "L"
+    ],
+    [
+      0,
+      110,
+      "Lithuania, Lita",
+      "LTL",
+      "Litai"
+    ],
+    [
+      0,
+      111,
+      "Luxembourg, Franc",
+      "LUF",
+      "LF"
+    ],
+    [
+      0,
+      112,
+      "Latvia, Lat",
+      "LVL",
+      "Ls"
+    ],
+    [
+      0,
+      113,
+      "Libya, Dinar",
+      "LYD",
+      "LD"
+    ],
+    [
+      0,
+      114,
+      "Morocco, Dirham",
+      "MAD",
+      "DH"
+    ],
+    [
+      0,
+      115,
+      "Moldova, Leu",
+      "MDL",
+      ""
+    ],
+    [
+      0,
+      116,
+      "Madagascar, Ariary",
+      "MGA",
+      "FMG"
+    ],
+    [
+      0,
+      117,
+      "Macedonia, Denar",
+      "MKD",
+      "MKD"
+    ],
+    [
+      0,
+      118,
+      "Myanmar (Burma), Kyat",
+      "MMK",
+      "K"
+    ],
+    [
+      0,
+      119,
+      "Mongolia, Tugrik",
+      "MNT",
+      "Tug"
+    ],
+    [
+      0,
+      120,
+      "Macau, Pataca",
+      "MOP",
+      "P"
+    ],
+    [
+      0,
+      121,
+      "Mauritania, Ouguiya",
+      "MRU",
+      "Mau Rs"
+    ],
+    [
+      0,
+      122,
+      "Malta, Lira",
+      "MTL",
+      "Lm"
+    ],
+    [
+      0,
+      123,
+      "Mauritius, Rupee",
+      "MUR",
+      "Rs"
+    ],
+    [
+      0,
+      124,
+      "Maldives (Maldive Islands), Rufiyaa",
+      "MVR",
+      "Rf"
+    ],
+    [
+      0,
+      125,
+      "Malawi, Kwacha",
+      "MWK",
+      "MK"
+    ],
+    [
+      0,
+      126,
+      "Mexico, Peso",
+      "MXN",
+      "Mex$"
+    ],
+    [
+      0,
+      127,
+      "Malaysia, Ringgit",
+      "MYR",
+      "M$"
+    ],
+    [
+      0,
+      128,
+      "Mozambique, Metical",
+      "MZN",
+      ""
+    ],
+    [
+      0,
+      129,
+      "Namibia, Dollar",
+      "NAD",
+      "N$"
+    ],
+    [
+      0,
+      130,
+      "Nigeria, Naira",
+      "NGN",
+      "N"
+    ],
+    [
+      0,
+      131,
+      "Nicaragua, Cordoba Oro",
+      "NIO",
+      "C$"
+    ],
+    [
+      0,
+      132,
+      "Holland (The Netherlands), Guilder",
+      "NLG",
+      ""
+    ],
+    [
+      0,
+      133,
+      "Norway, Krone",
+      "NOK",
+      "NKr"
+    ],
+    [
+      0,
+      134,
+      "Nepal, Nepalese Rupee",
+      "NPR",
+      "NRs"
+    ],
+    [
+      0,
+      135,
+      "New Zealand, Dollar",
+      "NZD",
+      "NZ$"
+    ],
+    [
+      0,
+      136,
+      "Oman, Sul Rial",
+      "OMR",
+      "RO"
+    ],
+    [
+      0,
+      137,
+      "Panama, Balboa",
+      "PAB",
+      "B"
+    ],
+    [
+      0,
+      138,
+      "Peru, Nuevo Sol",
+      "PEN",
+      "S/."
+    ],
+    [
+      0,
+      139,
+      "Papua New Guinea, Kina",
+      "PGK",
+      "K"
+    ],
+    [
+      0,
+      140,
+      "Philippines, Peso",
+      "PHP",
+      "P"
+    ],
+    [
+      0,
+      141,
+      "Pakistan, Rupee",
+      "PKR",
+      "Rs"
+    ],
+    [
+      0,
+      142,
+      "Poland, Zlotych",
+      "PLN",
+      ""
+    ],
+    [
+      0,
+      143,
+      "Portugal, Escudo",
+      "PTE",
+      "Esc"
+    ],
+    [
+      0,
+      144,
+      "Paraguay, Guarani",
+      "PYG",
+      "G"
+    ],
+    [
+      0,
+      145,
+      "Qatar, Rial",
+      "QAR",
+      "QR"
+    ],
+    [
+      0,
+      146,
+      "Romania, Leu",
+      "RON",
+      "L"
+    ],
+    [
+      0,
+      148,
+      "Rwanda, Rwanda Franc",
+      "RWF",
+      "RF"
+    ],
+    [
+      0,
+      149,
+      "Saudi Arabia, Riyal",
+      "SAR",
+      "SRls"
+    ],
+    [
+      0,
+      150,
+      "Solomon Islands, Dollar",
+      "SBD",
+      ""
+    ],
+    [
+      0,
+      151,
+      "Seborga, Luigino",
+      "SBL",
+      ""
+    ],
+    [
+      0,
+      152,
+      "Seychelles, Rupee",
+      "SCR",
+      "SR"
+    ],
+    [
+      0,
+      153,
+      "Sudan, Dinar",
+      "SDG",
+      "Dinar"
+    ],
+    [
+      0,
+      154,
+      "Sweden, Krona",
+      "SEK",
+      "Sk"
+    ],
+    [
+      0,
+      155,
+      "Singapore, Dollar",
+      "SGD",
+      "S$"
+    ],
+    [
+      0,
+      156,
+      "Saint Helena, Pound",
+      "SHP",
+      ""
+    ],
+    [
+      0,
+      157,
+      "Slovenia, Tolar",
+      "SIT",
+      "SlT"
+    ],
+    [
+      0,
+      158,
+      "Slovakia, Koruna",
+      "SKK",
+      "Sk"
+    ],
+    [
+      0,
+      159,
+      "Sierra Leone, Leone",
+      "SLL",
+      ""
+    ],
+    [
+      0,
+      160,
+      "Somalia, Shilling",
+      "SOS",
+      "So. Sh."
+    ],
+    [
+      0,
+      161,
+      "Suriname, Dollars",
+      "SRD",
+      ""
+    ],
+    [
+      0,
+      162,
+      "SÃ£o Tome and Principe, Dobra",
+      "STD",
+      ""
+    ],
+    [
+      0,
+      163,
+      "El Salvador, Colon",
+      "SVC",
+      ""
+    ],
+    [
+      0,
+      164,
+      "Syria, Pound",
+      "SYP",
+      "£S"
+    ],
+    [
+      0,
+      165,
+      "Swaziland, Lilangeni",
+      "SZL",
+      "SFr"
+    ],
+    [
+      0,
+      166,
+      "Thailand, Baht",
+      "THB",
+      "Bht"
+    ],
+    [
+      0,
+      167,
+      "Tajikistan, Somoni",
+      "TJS",
+      ""
+    ],
+    [
+      0,
+      168,
+      "Turkmenistan, Manat",
+      "TMT",
+      ""
+    ],
+    [
+      0,
+      170,
+      "Tonga, Pa'anga",
+      "TOP",
+      ""
+    ],
+    [
+      0,
+      171,
+      "Turkey, Lira",
+      "TRY",
+      "TL"
+    ],
+    [
+      0,
+      172,
+      "Trinidad and Tobago, Dollar",
+      "TTD",
+      "TT$"
+    ],
+    [
+      0,
+      173,
+      "Taiwan, Dollar",
+      "TWD",
+      "NT$"
+    ],
+    [
+      0,
+      174,
+      "Tanzania, Shilling",
+      "TZS",
+      "TSh"
+    ],
+    [
+      0,
+      175,
+      "Ukraine, Hryvnia",
+      "UAH",
+      ""
+    ],
+    [
+      0,
+      176,
+      "Uganda, Shilling",
+      "UGX",
+      "USh"
+    ],
+    [
+      0,
+      178,
+      "Uruguay, Peso",
+      "UYU",
+      "$U"
+    ],
+    [
+      0,
+      179,
+      "Uzbekistan, Som",
+      "UZS",
+      ""
+    ],
+    [
+      0,
+      180,
+      "Venezuela, Bolivar Fuerte",
+      "VEF",
+      "Bs"
+    ],
+    [
+      0,
+      181,
+      "Viet Nam, Dong",
+      "VND",
+      "D"
+    ],
+    [
+      0,
+      182,
+      "Vanuatu, Vatu",
+      "VUV",
+      "VT"
+    ],
+    [
+      0,
+      183,
+      "West Samoa, Tala",
+      "WST",
+      "WS$"
+    ],
+    [
+      0,
+      184,
+      "CFA Franc BEAC, Franc",
+      "XAF",
+      ""
+    ],
+    [
+      0,
+      185,
+      "Silver, Ounces",
+      "XAG",
+      ""
+    ],
+    [
+      0,
+      186,
+      "Gold, Ounces",
+      "XAU",
+      ""
+    ],
+    [
+      0,
+      187,
+      "Dominica, East Caribbean Dollar",
+      "XCD",
+      ""
+    ],
+    [
+      0,
+      188,
+      "IMF Special Drawing Right",
+      "XDR",
+      ""
+    ],
+    [
+      0,
+      189,
+      "CFA Franc BCEAO, Franc",
+      "XOF",
+      ""
+    ],
+    [
+      0,
+      190,
+      "Palladium, Ounces",
+      "XPD",
+      ""
+    ],
+    [
+      0,
+      191,
+      "CFP, Franc",
+      "XPF",
+      ""
+    ],
+    [
+      0,
+      192,
+      "Platinum, Ounces",
+      "XPT",
+      ""
+    ],
+    [
+      0,
+      193,
+      "Yemen, Rial",
+      "YER",
+      "YRls"
+    ],
+    [
+      0,
+      194,
+      "Yugoslavia, New Dinar",
+      "YUM",
+      "Din"
+    ],
+    [
+      0,
+      195,
+      "South Africa, Rand",
+      "ZAR",
+      "R"
+    ],
+    [
+      0,
+      196,
+      "Zambia, Kwacha",
+      "ZMW",
+      "K"
+    ],
+    [
+      0,
+      197,
+      "Zaire, New Zaire",
+      "ZRN",
+      "NZ"
+    ],
+    [
+      0,
+      198,
+      "Zimbabwe, Zimbabwe Dollar",
+      "ZWD",
+      "Z$"
+    ],
+    [
+      0,
+      210,
+      "Andorran, Peseta",
+      "ADP",
+      null
+    ],
+    [
+      0,
+      211,
+      "Burmese, Kyat",
+      "BUK",
+      null
+    ],
+    [
+      0,
+      212,
+      "Monaco, Franc",
+      "MNC",
+      null
+    ],
+    [
+      0,
+      213,
+      "East Timor, Indonesian Rupiah",
+      "TPE",
+      null
+    ],
+    [
+      0,
+      214,
+      "Guinea-Bissau, Peso",
+      "GWP",
+      null
+    ],
+    [
+      0,
+      215,
+      "Azerbaijanian Manat",
+      "AZN",
+      null
+    ],
+    [
+      0,
+      216,
+      "Franc Congolais",
+      "CDF",
+      null
+    ],
+    [
+      0,
+      217,
+      "Serbian Dinar",
+      "CSD",
+      null
+    ],
+    [
+      0,
+      250,
+      "Serbian Dinar",
+      "RSD",
+      ""
+    ],
+    [
+      0,
+      251,
+      "China, Yuan Renminbi (Offshore)",
+      "CNH",
+      "Y"
+    ],
+    [
+      0,
+      273,
+      "Mexico, Unidad de Inversion (UDI)",
+      "MXV",
+      null
+    ]
+  ]
+}

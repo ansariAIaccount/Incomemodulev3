@@ -49,15 +49,22 @@ const LOG_VERBOSE = process.env.LOG_VERBOSE === '1';
 const DIU_PATH = ('/' + (process.env.INVESTRAN_DIU_PATH || '/DataImport')
   .replace(/^\/+/, '').replace(/\/+$/, ''));
 
-// Report Wizard module. Per FIS's own API guide the modern PCS REST surface
-// lives at <base>/ReportWizard/v1 with:
-//   POST executions              → start a saved report
-//   GET  executions/{id}/status  → pending | running | succeeded | error
-//   GET  executions/{id}/result  → rows once succeeded
-//   GET  lookups/{fieldId}       → lookup values (may serve reference data
-//                                  directly, without needing a report)
-// Same /api/<Module>/v1 shape as DataImport, so this is very likely correct —
-// but it is NOT yet verified against the tenant. probe-modules.js checks it.
+// Report Wizard module — VERIFIED against goldenliveuat on 2026-08-25 by
+// fetching the tenant swagger (10 paths, saved as swagger-reportwizard.json)
+// and executing report 36987 end to end (execution 8125, 201 → succeeded →
+// 200 with 61 rows).
+//
+//   POST executions                            → 201, body { id }
+//   GET  executions/{reportExecutionId}/status → "succeeded" | …
+//   GET  executions/{reportExecutionId}/result → { columns, data }
+//   GET  executions/{reportExecutionId}/cancel
+//   GET  lookups/{fieldId}                     → lookup values, no report needed
+//   GET  reports, reports/{reportId}
+//
+// Note the swagger names the path param `reportExecutionId`, not `id`.
+// An earlier reference doc described a /reports/{id}/queue + /reports/jobs/…
+// shape; that is NOT what this tenant exposes. The swagger is the source of
+// truth — see probe-rw.js, which re-derives all of this on demand.
 const RW_PATH = ('/' + (process.env.INVESTRAN_RW_PATH || '/ReportWizard/v1')
   .replace(/^\/+/, '').replace(/\/+$/, ''));
 
@@ -122,12 +129,30 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 // ──────── CORS ──────────────────────────────────────────────────────
+// Matching is exact, not prefix. A startsWith check would let
+// "http://localhost:8000.example.com" through on an allowlist entry of
+// "http://localhost:8000", since the attacker controls everything after the
+// prefix. Localhost is handled by its own pattern so any dev port works
+// without editing .env every time the static server moves.
+const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+function originAllowed(origin){
+  if(ALLOWED_ORIGINS.includes('*')) return true;
+  if(LOCALHOST_ORIGIN.test(origin))  return true;   // any local dev port
+  return ALLOWED_ORIGINS.some(o => o === origin || (o === 'file://' && origin === 'null'));
+}
+
 app.use(cors({
   origin: (origin, cb) => {
+    // No Origin header: curl, server-to-server, or a file:// page. Not a
+    // browser cross-origin request, so there's nothing for CORS to protect.
     if(!origin) return cb(null, true);
-    if(ALLOWED_ORIGINS.includes('*')) return cb(null, true);
-    if(ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return cb(null, true);
-    return cb(new Error('CORS blocked: ' + origin));
+    if(originAllowed(origin)) return cb(null, true);
+    // Log it — a silent CORS rejection surfaces in the browser as an opaque
+    // "Failed to fetch", which is painful to diagnose from the client side.
+    console.warn('[CORS] blocked origin: ' + origin +
+                 '  (allowed: ' + ALLOWED_ORIGINS.join(', ') + ' + any localhost port)');
+    return cb(null, false);
   },
   methods: ['GET','POST','PUT','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization','X-Trace-Id']
@@ -496,7 +521,20 @@ app.get('/api/rw/reports', async (req, res) => {
   try {
     const r = await forwardJSON('GET', RW_PATH + '/reports', null);
     if(!r.ok) return res.status(r.status).json({ ok:false, error: r.data });
-    res.json({ ok:true, reports: r.data });
+
+    // Normalise here rather than in the browser. The payload has been seen as
+    // a bare array, {data:[]} and {value:[]} across Investran modules, and the
+    // client shouldn't have to care which.
+    const raw = Array.isArray(r.data) ? r.data
+              : (r.data && (r.data.data || r.data.value || r.data.items)) || [];
+    const reports = raw.map(x => ({
+      id:       x.id       != null ? x.id       : (x.Id != null ? x.Id : x.reportId),
+      name:     x.name     || x.Name     || x.reportName || x.ReportName || '',
+      bookId:   x.bookId   != null ? x.bookId   : (x.BookId != null ? x.BookId : null),
+      bookName: x.bookName || x.BookName || x.book || ''
+    })).filter(x => x.id != null);
+
+    res.json({ ok:true, count: reports.length, reports, raw: r.data });
   } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
 });
 
@@ -564,8 +602,14 @@ app.post('/api/rw/run', async (req, res) => {
       await new Promise(r => setTimeout(r, 1500));
       const st = await forwardJSON('GET', RW_PATH + '/executions/' + execId + '/status', null);
       if(!st.ok) return res.status(st.status).json({ ok:false, stage:'status', executionId: execId, error: st.data });
-      state = String((st.data && (st.data.status || st.data.Status)) || '').toLowerCase();
-      if(state === 'succeeded' || state === 'error' || state === 'canceled') break;
+      // Observed shape is { status: "succeeded" }, but tolerate a bare string
+      // so a variation in the response doesn't spin until the timeout.
+      state = String(
+        typeof st.data === 'string' ? st.data
+          : (st.data && (st.data.status || st.data.Status || st.data.state)) || ''
+      ).toLowerCase();
+      if(/^(succeeded|success|completed)$/.test(state)) { state = 'succeeded'; break; }
+      if(/^(error|failed|canceled|cancelled)$/.test(state)) break;
     }
     if(state !== 'succeeded'){
       return res.status(202).json({ ok:false, stage:'poll', executionId: execId, state,

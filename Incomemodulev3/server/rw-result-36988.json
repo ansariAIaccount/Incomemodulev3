@@ -1,0 +1,5372 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "TransTypeId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "TransTypeName",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "DefaultAccountId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "DefaultAccountCode",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "IsActive",
+      "outputType": "Boolean",
+      "presentation": {
+        "trueValue": "Yes",
+        "falseValue": "No"
+      }
+    },
+    {
+      "columnName": "LegalEntityId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "LegalEntityName",
+      "outputType": "Text"
+    }
+  ],
+  "data": [
+    [
+      0,
+      -927,
+      "Memo: By Dynamic AR",
+      null,
+      null,
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      -927,
+      "Memo: By Dynamic AR",
+      null,
+      null,
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      -927,
+      "Memo: By Dynamic AR",
+      null,
+      null,
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      -927,
+      "Memo: By Dynamic AR",
+      null,
+      null,
+      true,
+      154,
+      "LE Services Opps 11 Parent, L.P."
+    ],
+    [
+      0,
+      -360,
+      "BE Call: Partnership expenses",
+      168,
+      "99999",
+      true,
+      49,
+      "Daredevil B.V."
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      48,
+      "FIS Subsidiary III, Ltd."
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      -12,
+      "Suspense (credit)",
+      66,
+      "390000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      -11,
+      "Percent transfer in",
+      null,
+      null,
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      -11,
+      "Percent transfer in",
+      null,
+      null,
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      -11,
+      "Percent transfer in",
+      null,
+      null,
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      -11,
+      "Percent transfer in",
+      null,
+      null,
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      -10,
+      "Percent transfer out",
+      null,
+      null,
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      -10,
+      "Percent transfer out",
+      null,
+      null,
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      -10,
+      "Percent transfer out",
+      null,
+      null,
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      -10,
+      "Percent transfer out",
+      null,
+      null,
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      -5,
+      "Deal commitments",
+      null,
+      null,
+      true,
+      106,
+      "FIS Latin America Fund"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      48,
+      "FIS Subsidiary III, Ltd."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      49,
+      "Daredevil B.V."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      51,
+      "Goliath Holdings"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      95,
+      "Monterra Capital Partners GP, L.P."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      97,
+      "Monterra Capital, Inc."
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      98,
+      "Monterra Capital Partners IV SPV, LLC"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      100,
+      "Monterra Capital Partners IV Co-Invest, LLC"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      101,
+      "Monterra Capital Partners IV Opportunities Fund"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      106,
+      "FIS Latin America Fund"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      152,
+      "LE test"
+    ],
+    [
+      0,
+      -1,
+      "Investor commitments",
+      null,
+      null,
+      true,
+      153,
+      "LE Services Parent, L.P."
+    ],
+    [
+      0,
+      183,
+      "Expense -  Partnership - Deal costs",
+      292,
+      "528000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      183,
+      "Expense -  Partnership - Deal costs",
+      292,
+      "528000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      183,
+      "Expense -  Partnership - Deal costs",
+      292,
+      "528000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      183,
+      "Expense -  Partnership - Deal costs",
+      292,
+      "528000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      183,
+      "Expense -  Partnership - Deal costs",
+      292,
+      "528000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      48,
+      "FIS Subsidiary III, Ltd."
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      49,
+      "Daredevil B.V."
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      51,
+      "Goliath Holdings"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      106,
+      "FIS Latin America Fund"
+    ],
+    [
+      0,
+      283,
+      "Cash received",
+      1,
+      "111000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      101,
+      "Monterra Capital Partners IV Opportunities Fund"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      106,
+      "FIS Latin America Fund"
+    ],
+    [
+      0,
+      284,
+      "Contributions - Investments - Cash contributed",
+      266,
+      "311000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      285,
+      "Expense -  Professional fees - Legal",
+      48,
+      "522000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      48,
+      "FIS Subsidiary III, Ltd."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      49,
+      "Daredevil B.V."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      51,
+      "Goliath Holdings"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      97,
+      "Monterra Capital, Inc."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      98,
+      "Monterra Capital Partners IV SPV, LLC"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      101,
+      "Monterra Capital Partners IV Opportunities Fund"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      106,
+      "FIS Latin America Fund"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      152,
+      "LE test"
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      153,
+      "LE Services Parent, L.P."
+    ],
+    [
+      0,
+      302,
+      "Cash disbursed",
+      1,
+      "111000",
+      true,
+      154,
+      "LE Services Opps 11 Parent, L.P."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      48,
+      "FIS Subsidiary III, Ltd."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      49,
+      "Daredevil B.V."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      51,
+      "Goliath Holdings"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      98,
+      "Monterra Capital Partners IV SPV, LLC"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      106,
+      "FIS Latin America Fund"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      152,
+      "LE test"
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      153,
+      "LE Services Parent, L.P."
+    ],
+    [
+      0,
+      1001,
+      "Purchase of investment - Cash",
+      4,
+      "141000",
+      true,
+      154,
+      "LE Services Opps 11 Parent, L.P."
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      1004,
+      "Expense -  Management fees - Gross",
+      42,
+      "521000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1007,
+      "Sale of investment - Return of capital",
+      4,
+      "141000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      49,
+      "Daredevil B.V."
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      1010,
+      "Income - Investment interest - Cash",
+      31,
+      "421000",
+      true,
+      95,
+      "Monterra Capital Partners GP, L.P."
+    ],
+    [
+      0,
+      1012,
+      "Income - Other - Offsets",
+      288,
+      "491000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1012,
+      "Income - Other - Offsets",
+      288,
+      "491000",
+      true,
+      48,
+      "FIS Subsidiary III, Ltd."
+    ],
+    [
+      0,
+      1012,
+      "Income - Other - Offsets",
+      288,
+      "491000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1012,
+      "Income - Other - Offsets",
+      288,
+      "491000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      1013,
+      "Distributions - Return of excess capital called",
+      273,
+      "322000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1013,
+      "Distributions - Return of excess capital called",
+      273,
+      "322000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1013,
+      "Distributions - Return of excess capital called",
+      273,
+      "322000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1013,
+      "Distributions - Return of excess capital called",
+      273,
+      "322000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1013,
+      "Distributions - Return of excess capital called",
+      273,
+      "322000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1013,
+      "Distributions - Return of excess capital called",
+      273,
+      "322000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1173,
+      "Distributions - Income - Investment",
+      272,
+      "321000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1174,
+      "Distributions - Return of capital",
+      273,
+      "322000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      95,
+      "Monterra Capital Partners GP, L.P."
+    ],
+    [
+      0,
+      1186,
+      "Expense -  Professional fees - Audit",
+      48,
+      "522000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      101,
+      "Monterra Capital Partners IV Opportunities Fund"
+    ],
+    [
+      0,
+      1202,
+      "Contributions due from Investors",
+      257,
+      "113000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1246,
+      "Income - Dividend",
+      284,
+      "431000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1246,
+      "Income - Dividend",
+      284,
+      "431000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1246,
+      "Income - Dividend",
+      284,
+      "431000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1246,
+      "Income - Dividend",
+      284,
+      "431000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1246,
+      "Income - Dividend",
+      284,
+      "431000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      1246,
+      "Income - Dividend",
+      284,
+      "431000",
+      true,
+      51,
+      "Goliath Holdings"
+    ],
+    [
+      0,
+      1246,
+      "Income - Dividend",
+      284,
+      "431000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1279,
+      "Distributions - Income - Dividend income",
+      272,
+      "321000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1279,
+      "Distributions - Income - Dividend income",
+      272,
+      "321000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1279,
+      "Distributions - Income - Dividend income",
+      272,
+      "321000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1279,
+      "Distributions - Income - Dividend income",
+      272,
+      "321000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1279,
+      "Distributions - Income - Dividend income",
+      272,
+      "321000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      1279,
+      "Distributions - Income - Dividend income",
+      272,
+      "321000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1280,
+      "Contributions - Expense - Management fee",
+      267,
+      "312000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1281,
+      "Contributions - Expense - Cash contributed",
+      267,
+      "312000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1281,
+      "Contributions - Expense - Cash contributed",
+      267,
+      "312000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1281,
+      "Contributions - Expense - Cash contributed",
+      267,
+      "312000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1290,
+      "Other payable",
+      21,
+      "211000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      1290,
+      "Other payable",
+      21,
+      "211000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1290,
+      "Other payable",
+      21,
+      "211000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1290,
+      "Other payable",
+      21,
+      "211000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1290,
+      "Other payable",
+      21,
+      "211000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1290,
+      "Other payable",
+      21,
+      "211000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1290,
+      "Other payable",
+      21,
+      "211000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1290,
+      "Other payable",
+      21,
+      "211000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      1294,
+      "Unrealized gain/(loss) - F/X gain/(loss)",
+      35,
+      "450000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1294,
+      "Unrealized gain/(loss) - F/X gain/(loss)",
+      35,
+      "450000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1294,
+      "Unrealized gain/(loss) - F/X gain/(loss)",
+      35,
+      "450000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1294,
+      "Unrealized gain/(loss) - F/X gain/(loss)",
+      35,
+      "450000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1294,
+      "Unrealized gain/(loss) - F/X gain/(loss)",
+      35,
+      "450000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1294,
+      "Unrealized gain/(loss) - F/X gain/(loss)",
+      35,
+      "450000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1300,
+      "Realized gain/(loss) - Short term",
+      153,
+      "440000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1302,
+      "Realized gain/(loss) - Short term - F/X",
+      153,
+      "440000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1302,
+      "Realized gain/(loss) - Short term - F/X",
+      153,
+      "440000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1302,
+      "Realized gain/(loss) - Short term - F/X",
+      153,
+      "440000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1323,
+      "Investments at Fair Market Value - Unrealized gain/(loss) - F/X",
+      145,
+      "142000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1323,
+      "Investments at Fair Market Value - Unrealized gain/(loss) - F/X",
+      145,
+      "142000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1323,
+      "Investments at Fair Market Value - Unrealized gain/(loss) - F/X",
+      145,
+      "142000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1323,
+      "Investments at Fair Market Value - Unrealized gain/(loss) - F/X",
+      145,
+      "142000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1323,
+      "Investments at Fair Market Value - Unrealized gain/(loss) - F/X",
+      145,
+      "142000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1323,
+      "Investments at Fair Market Value - Unrealized gain/(loss) - F/X",
+      145,
+      "142000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1331,
+      "Valuation estimate (price/unit)",
+      null,
+      null,
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1333,
+      "Valuation estimate (value)",
+      null,
+      null,
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      1334,
+      "Valuation Final (value)",
+      null,
+      null,
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1354,
+      "Expense -  Organizational expenses",
+      293,
+      "530000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1354,
+      "Expense -  Organizational expenses",
+      293,
+      "530000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1354,
+      "Expense -  Organizational expenses",
+      293,
+      "530000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1354,
+      "Expense -  Organizational expenses",
+      293,
+      "530000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1354,
+      "Expense -  Organizational expenses",
+      293,
+      "530000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1354,
+      "Expense -  Organizational expenses",
+      293,
+      "530000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      95,
+      "Monterra Capital Partners GP, L.P."
+    ],
+    [
+      0,
+      1355,
+      "Expense -  Professional fees - Tax",
+      48,
+      "522000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1356,
+      "Expense -  Partnership - Bank fees",
+      289,
+      "525000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1356,
+      "Expense -  Partnership - Bank fees",
+      289,
+      "525000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1356,
+      "Expense -  Partnership - Bank fees",
+      289,
+      "525000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1356,
+      "Expense -  Partnership - Bank fees",
+      289,
+      "525000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1356,
+      "Expense -  Partnership - Bank fees",
+      289,
+      "525000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1356,
+      "Expense -  Partnership - Bank fees",
+      289,
+      "525000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1356,
+      "Expense -  Partnership - Bank fees",
+      289,
+      "525000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1357,
+      "Contributions - Working Capital Commitment",
+      268,
+      "313000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1357,
+      "Contributions - Working Capital Commitment",
+      268,
+      "313000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1357,
+      "Contributions - Working Capital Commitment",
+      268,
+      "313000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1357,
+      "Contributions - Working Capital Commitment",
+      268,
+      "313000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1357,
+      "Contributions - Working Capital Commitment",
+      268,
+      "313000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1357,
+      "Contributions - Working Capital Commitment",
+      268,
+      "313000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1357,
+      "Contributions - Working Capital Commitment",
+      268,
+      "313000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1358,
+      "Contributions - Expense - Offering costs",
+      267,
+      "312000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1358,
+      "Contributions - Expense - Offering costs",
+      267,
+      "312000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1358,
+      "Contributions - Expense - Offering costs",
+      267,
+      "312000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1358,
+      "Contributions - Expense - Offering costs",
+      267,
+      "312000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1358,
+      "Contributions - Expense - Offering costs",
+      267,
+      "312000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1358,
+      "Contributions - Expense - Offering costs",
+      267,
+      "312000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1358,
+      "Contributions - Expense - Offering costs",
+      267,
+      "312000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1359,
+      "Contributions - Expense - Other",
+      267,
+      "312000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1359,
+      "Contributions - Expense - Other",
+      267,
+      "312000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1359,
+      "Contributions - Expense - Other",
+      267,
+      "312000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1359,
+      "Contributions - Expense - Other",
+      267,
+      "312000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1359,
+      "Contributions - Expense - Other",
+      267,
+      "312000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1359,
+      "Contributions - Expense - Other",
+      267,
+      "312000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1360,
+      "Expense - Affiliate fees - Administration fees",
+      42,
+      "521000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1360,
+      "Expense - Affiliate fees - Administration fees",
+      42,
+      "521000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1360,
+      "Expense - Affiliate fees - Administration fees",
+      42,
+      "521000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1360,
+      "Expense - Affiliate fees - Administration fees",
+      42,
+      "521000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1360,
+      "Expense - Affiliate fees - Administration fees",
+      42,
+      "521000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1360,
+      "Expense - Affiliate fees - Administration fees",
+      42,
+      "521000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1360,
+      "Expense - Affiliate fees - Administration fees",
+      42,
+      "521000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1360,
+      "Expense - Affiliate fees - Administration fees",
+      42,
+      "521000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1395,
+      "Unrealized gain/(loss) - Investment gain/(loss)",
+      35,
+      "450000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1395,
+      "Unrealized gain/(loss) - Investment gain/(loss)",
+      35,
+      "450000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1395,
+      "Unrealized gain/(loss) - Investment gain/(loss)",
+      35,
+      "450000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1395,
+      "Unrealized gain/(loss) - Investment gain/(loss)",
+      35,
+      "450000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1395,
+      "Unrealized gain/(loss) - Investment gain/(loss)",
+      35,
+      "450000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1395,
+      "Unrealized gain/(loss) - Investment gain/(loss)",
+      35,
+      "450000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      1396,
+      "Unrealized gain or (loss)",
+      35,
+      "450000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      53,
+      "Monterra Capital Partners III"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      1397,
+      "Investments at Fair Market Value - Unrealized gain/(loss)",
+      145,
+      "142000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      1398,
+      "Investments at Fair Market Value - Unrealized loss",
+      145,
+      "142000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1398,
+      "Investments at Fair Market Value - Unrealized loss",
+      145,
+      "142000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1398,
+      "Investments at Fair Market Value - Unrealized loss",
+      145,
+      "142000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1398,
+      "Investments at Fair Market Value - Unrealized loss",
+      145,
+      "142000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1398,
+      "Investments at Fair Market Value - Unrealized loss",
+      145,
+      "142000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1398,
+      "Investments at Fair Market Value - Unrealized loss",
+      145,
+      "142000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1417,
+      "Unrealized gain/(loss) - F/X loss",
+      35,
+      "450000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1417,
+      "Unrealized gain/(loss) - F/X loss",
+      35,
+      "450000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1417,
+      "Unrealized gain/(loss) - F/X loss",
+      35,
+      "450000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1417,
+      "Unrealized gain/(loss) - F/X loss",
+      35,
+      "450000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1417,
+      "Unrealized gain/(loss) - F/X loss",
+      35,
+      "450000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1417,
+      "Unrealized gain/(loss) - F/X loss",
+      35,
+      "450000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1418,
+      "Investments at Fair Market Value - Unrealized loss - F/X",
+      145,
+      "142000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1418,
+      "Investments at Fair Market Value - Unrealized loss - F/X",
+      145,
+      "142000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1418,
+      "Investments at Fair Market Value - Unrealized loss - F/X",
+      145,
+      "142000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1418,
+      "Investments at Fair Market Value - Unrealized loss - F/X",
+      145,
+      "142000",
+      true,
+      87,
+      "Monterra Fund of Funds II"
+    ],
+    [
+      0,
+      1418,
+      "Investments at Fair Market Value - Unrealized loss - F/X",
+      145,
+      "142000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1418,
+      "Investments at Fair Market Value - Unrealized loss - F/X",
+      145,
+      "142000",
+      true,
+      90,
+      "FIS Asset Management II"
+    ],
+    [
+      0,
+      1419,
+      "Contributions - Investments - From Parent",
+      266,
+      "311000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1419,
+      "Contributions - Investments - From Parent",
+      266,
+      "311000",
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      1419,
+      "Contributions - Investments - From Parent",
+      266,
+      "311000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1419,
+      "Contributions - Investments - From Parent",
+      266,
+      "311000",
+      true,
+      48,
+      "FIS Subsidiary III, Ltd."
+    ],
+    [
+      0,
+      1419,
+      "Contributions - Investments - From Parent",
+      266,
+      "311000",
+      true,
+      49,
+      "Daredevil B.V."
+    ],
+    [
+      0,
+      1419,
+      "Contributions - Investments - From Parent",
+      266,
+      "311000",
+      true,
+      50,
+      "German B.V."
+    ],
+    [
+      0,
+      1419,
+      "Contributions - Investments - From Parent",
+      266,
+      "311000",
+      true,
+      51,
+      "Goliath Holdings"
+    ],
+    [
+      0,
+      1419,
+      "Contributions - Investments - From Parent",
+      266,
+      "311000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      1420,
+      "Purchase of Investment - In Subsidiary",
+      4,
+      "141000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1420,
+      "Purchase of Investment - In Subsidiary",
+      4,
+      "141000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1420,
+      "Purchase of Investment - In Subsidiary",
+      4,
+      "141000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1420,
+      "Purchase of Investment - In Subsidiary",
+      4,
+      "141000",
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      1420,
+      "Purchase of Investment - In Subsidiary",
+      4,
+      "141000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1420,
+      "Purchase of Investment - In Subsidiary",
+      4,
+      "141000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1420,
+      "Purchase of Investment - In Subsidiary",
+      4,
+      "141000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1420,
+      "Purchase of Investment - In Subsidiary",
+      4,
+      "141000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      43,
+      "FIS Offshore Fund, Ltd."
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      45,
+      "FIS Master Fund, Ltd."
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      46,
+      "FIS Subsidiary I, Ltd."
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      47,
+      "FIS Subsidiary II, Ltd."
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      52,
+      "FIS Co-Investment Fund, Ltd."
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      1422,
+      "Gain/loss from subsidiaries",
+      4,
+      "141000",
+      true,
+      95,
+      "Monterra Capital Partners GP, L.P."
+    ],
+    [
+      0,
+      1443,
+      "Income - Interest - Subsequent closes",
+      281,
+      "413000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1443,
+      "Income - Interest - Subsequent closes",
+      281,
+      "413000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      1443,
+      "Income - Interest - Subsequent closes",
+      281,
+      "413000",
+      true,
+      86,
+      "Monterra Fund of Funds I"
+    ],
+    [
+      0,
+      1443,
+      "Income - Interest - Subsequent closes",
+      281,
+      "413000",
+      true,
+      89,
+      "FIS Asset Management"
+    ],
+    [
+      0,
+      1548,
+      "Contributions receivable from Investors",
+      257,
+      "113000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      1548,
+      "Contributions receivable from Investors",
+      257,
+      "113000",
+      true,
+      12,
+      "Monterra Capital Partners II"
+    ],
+    [
+      0,
+      2023,
+      "Intercompany receivable",
+      257,
+      "113000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      2030,
+      "Portfolio cash interest receivable",
+      257,
+      "113000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2030,
+      "Portfolio cash interest receivable",
+      257,
+      "113000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2047,
+      "Investment accretion - Original issue discount",
+      4,
+      "141000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2055,
+      "Purchase of investment - Conversion/Like kind exchange",
+      4,
+      "141000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2055,
+      "Purchase of investment - Conversion/Like kind exchange",
+      4,
+      "141000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2066,
+      "Intercompany payables",
+      21,
+      "211000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2069,
+      "Investment purchased payable",
+      21,
+      "211000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2069,
+      "Investment purchased payable",
+      21,
+      "211000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2069,
+      "Investment purchased payable",
+      21,
+      "211000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      2069,
+      "Investment purchased payable",
+      21,
+      "211000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2072,
+      "Accrued Expenses - Insurance expense",
+      260,
+      "215000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2073,
+      "Accrued Expenses - Professional fees - Audit expenses",
+      260,
+      "215000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2073,
+      "Accrued Expenses - Professional fees - Audit expenses",
+      260,
+      "215000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      2073,
+      "Accrued Expenses - Professional fees - Audit expenses",
+      260,
+      "215000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2074,
+      "Accrued Expenses - Professional fees - Other",
+      260,
+      "215000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2075,
+      "Accrued Expenses - Professional fees - Tax preparation fee",
+      260,
+      "215000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2075,
+      "Accrued Expenses - Professional fees - Tax preparation fee",
+      260,
+      "215000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      2075,
+      "Accrued Expenses - Professional fees - Tax preparation fee",
+      260,
+      "215000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2114,
+      "Distributions - Other - Stock",
+      278,
+      "329000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2132,
+      "Realized gains/(losses)",
+      153,
+      "440000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2134,
+      "Realized gain/(loss) - Long term",
+      153,
+      "440000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2143,
+      "Expense -  Investment Expenses - Other",
+      142,
+      "519000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      2143,
+      "Expense -  Investment Expenses - Other",
+      142,
+      "519000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2143,
+      "Expense -  Investment Expenses - Other",
+      142,
+      "519000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2143,
+      "Expense -  Investment Expenses - Other",
+      142,
+      "519000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      2143,
+      "Expense -  Investment Expenses - Other",
+      142,
+      "519000",
+      true,
+      101,
+      "Monterra Capital Partners IV Opportunities Fund"
+    ],
+    [
+      0,
+      2143,
+      "Expense -  Investment Expenses - Other",
+      142,
+      "519000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2146,
+      "Expense -  Management fees - Offsets",
+      42,
+      "521000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2146,
+      "Expense -  Management fees - Offsets",
+      42,
+      "521000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      2146,
+      "Expense -  Management fees - Offsets",
+      42,
+      "521000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2148,
+      "Expense -  Professional fees - Consultants",
+      48,
+      "522000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      2155,
+      "Expense -  Partnership - Insurance",
+      291,
+      "527000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      2155,
+      "Expense -  Partnership - Insurance",
+      291,
+      "527000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2155,
+      "Expense -  Partnership - Insurance",
+      291,
+      "527000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2155,
+      "Expense -  Partnership - Insurance",
+      291,
+      "527000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      2155,
+      "Expense -  Partnership - Insurance",
+      291,
+      "527000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2159,
+      "Expense -  Syndication costs",
+      294,
+      "540000",
+      true,
+      -1,
+      "No Legal Entity"
+    ],
+    [
+      0,
+      2160,
+      "Distributions - Return of capital - Recallable",
+      273,
+      "322000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2162,
+      "Income - Investment interest - OID",
+      31,
+      "421000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2165,
+      "Expense -  Partnership - Deal costs - Due Diligence",
+      292,
+      "528000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2165,
+      "Expense -  Partnership - Deal costs - Due Diligence",
+      292,
+      "528000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2166,
+      "Short term investments - Bridge Loan",
+      256,
+      "112000",
+      true,
+      97,
+      "Monterra Capital, Inc."
+    ],
+    [
+      0,
+      2167,
+      "Credit facility borrowings - Bridge Loan",
+      262,
+      "221000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      2168,
+      "Expense -  Professional fees - Fund Accounting Expenses",
+      48,
+      "522000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      2169,
+      "Management fee payable",
+      21,
+      "211000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2169,
+      "Management fee payable",
+      21,
+      "211000",
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      2169,
+      "Management fee payable",
+      21,
+      "211000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2172,
+      "Purchase of investment - Notes - initial drawdown",
+      4,
+      "141000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2175,
+      "Sale of investment - Notes - Return of capital",
+      4,
+      "141000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2181,
+      "Memo - Credit Facility Line - Asset Backed",
+      null,
+      null,
+      true,
+      93,
+      "Monterra Capital Partners, L.P. Offshore Fund IV"
+    ],
+    [
+      0,
+      2181,
+      "Memo - Credit Facility Line - Asset Backed",
+      null,
+      null,
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2182,
+      "Memo - Credit Facility Line - Commitment Backed",
+      null,
+      null,
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2183,
+      "Line of Credit - Asset backed - Payment",
+      262,
+      "221000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2185,
+      "Line of Credit - Asset backed - Drawdown",
+      262,
+      "221000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2187,
+      "TAX: Ordinary Dividends",
+      null,
+      null,
+      true,
+      44,
+      "FIS Onshore Fund, LLC"
+    ],
+    [
+      0,
+      2190,
+      "Expense -  Offering costs",
+      294,
+      "540000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2190,
+      "Expense -  Offering costs",
+      294,
+      "540000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2191,
+      "Suspense (subsequent close)",
+      66,
+      "390000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2192,
+      "Suspense (partner transfer)",
+      66,
+      "390000",
+      true,
+      91,
+      "Monterra Capital Partners, L.P. Onshore Fund IV"
+    ],
+    [
+      0,
+      2203,
+      "Sale of investment - Return of capital - stock distribution to partners",
+      4,
+      "141000",
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ],
+    [
+      0,
+      2209,
+      "Expense -  Financing costs - Other",
+      40,
+      "523000",
+      true,
+      7,
+      "Monterra Capital Partners I"
+    ],
+    [
+      0,
+      2209,
+      "Expense -  Financing costs - Other",
+      40,
+      "523000",
+      true,
+      94,
+      "Monterra Capital Partners, Master Fund IV"
+    ],
+    [
+      0,
+      2209,
+      "Expense -  Financing costs - Other",
+      40,
+      "523000",
+      true,
+      96,
+      "Monterra Capital Management Co., LLC"
+    ],
+    [
+      0,
+      2209,
+      "Expense -  Financing costs - Other",
+      40,
+      "523000",
+      true,
+      101,
+      "Monterra Capital Partners IV Opportunities Fund"
+    ],
+    [
+      0,
+      2213,
+      "TAX: RITC - Aussie Example",
+      null,
+      null,
+      true,
+      131,
+      "Monterra Capital Partners V"
+    ]
+  ]
+}

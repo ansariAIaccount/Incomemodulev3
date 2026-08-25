@@ -1,0 +1,124 @@
+{
+  "columns": [
+    {
+      "columnName": "Subtotal Level",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "AllocationRuleId",
+      "outputType": "Integer"
+    },
+    {
+      "columnName": "AllocationRuleName",
+      "outputType": "Text"
+    },
+    {
+      "columnName": "Status",
+      "outputType": "Text"
+    }
+  ],
+  "data": [
+    [
+      0,
+      4,
+      "By Unfunded Commitment",
+      "System"
+    ],
+    [
+      0,
+      5,
+      "By Commitment & Closing Date",
+      "System"
+    ],
+    [
+      0,
+      10,
+      "By Commitment (No Date)",
+      "System"
+    ],
+    [
+      0,
+      11,
+      "By Average Cash Balance",
+      "System"
+    ],
+    [
+      0,
+      12,
+      "Investment Cost (As of GL Date)",
+      "System"
+    ],
+    [
+      0,
+      13,
+      "By Specific Closing Date Commitment",
+      "System"
+    ],
+    [
+      0,
+      14,
+      "Fiscal Year End Close (Allocated)",
+      "System"
+    ],
+    [
+      0,
+      15,
+      "Fiscal Year End Close (UnAllocated)",
+      "System"
+    ],
+    [
+      0,
+      16,
+      "Investment Cost by Deal/Position",
+      "System"
+    ],
+    [
+      0,
+      116,
+      "Management Fees",
+      "Normal"
+    ],
+    [
+      0,
+      117,
+      "Management Fees Qtrly",
+      "Normal"
+    ],
+    [
+      0,
+      118,
+      "Copy of By Unfunded Commitment",
+      "Draft"
+    ],
+    [
+      0,
+      119,
+      "By Dynamic Memo",
+      "Normal"
+    ],
+    [
+      0,
+      121,
+      "By Commitment By LP Only",
+      "Normal"
+    ],
+    [
+      0,
+      122,
+      "Copy of By Commitment & Closing Date",
+      "Draft"
+    ],
+    [
+      0,
+      123,
+      "Copy (1) of By Commitment & Closing Date",
+      "Draft"
+    ],
+    [
+      0,
+      124,
+      "Copy of Investment Cost by Deal/Position",
+      "Draft"
+    ]
+  ]
+}

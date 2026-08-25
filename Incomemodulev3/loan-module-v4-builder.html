@@ -261,6 +261,12 @@
     // Registering every controller lets the reconnect path abort in-flight
     // requests FIRST, freeing slots so the probe can actually run.
     const reg = (window.__liveFetches = window.__liveFetches || new Set());
+    // Tag the controller with its URL. abortAll needs this: killing an
+    // in-flight /auth/v1/token refresh is actively harmful, because that call
+    // holds supabase-js's navigator lock. Abort it and the lock can be left
+    // held, after which every request that needs a token queues behind it
+    // forever — which is exactly the "stuck until hard refresh" symptom.
+    ac.__pcsUrl = url;
     reg.add(ac);
     const unregister = () => { try { reg.delete(ac); } catch(_){} };
 
@@ -316,14 +322,31 @@
     abortAll: function(reason){
       const reg = window.__liveFetches;
       if(!reg || !reg.size) return 0;
-      const n = reg.size;
       const err = new Error(reason || 'aborted to free the connection pool');
       err.name = 'AbortError';
-      // Copy first — abort() mutates the set via the unregister handlers.
-      Array.from(reg).forEach(ac => { try { ac.abort(err); } catch(_){} });
+
+      // Never abort auth traffic. supabase-js serialises token refresh behind
+      // a Web Lock keyed on the storage key. If we abort the refresh mid-flight
+      // the lock can be left held, and from then on every request that needs a
+      // token waits on a lock nobody will release — the tab looks permanently
+      // disconnected and only a reload clears it. Token refreshes are also
+      // short and few, so they're not what's saturating the pool anyway.
+      const spared = [];
+      const victims = [];
+      Array.from(reg).forEach(ac => {
+        if(/\/auth\/v1\//i.test(ac.__pcsUrl || '')) spared.push(ac);
+        else victims.push(ac);
+      });
+
+      victims.forEach(ac => { try { ac.abort(err); } catch(_){} });
       reg.clear();
-      console.warn('[fetch-watchdog] abortAll → released ' + n + ' connection slot(s) · reason: ' + (reason || 'n/a'));
-      return n;
+      spared.forEach(ac => reg.add(ac));      // keep them registered
+
+      console.warn('[fetch-watchdog] abortAll → released ' + victims.length +
+        ' connection slot(s)' +
+        (spared.length ? ', spared ' + spared.length + ' auth request(s)' : '') +
+        ' · reason: ' + (reason || 'n/a'));
+      return victims.length;
     }
   };
 })();
@@ -3346,6 +3369,9 @@
   </div>
 
   <!-- Readiness banner — tells the user plainly whether they can post yet -->
+  <!-- Staleness sits above readiness: "loaded but old" is a different problem
+       from "never loaded", and has a different one-click fix. -->
+  <div id="pcs-stale"     style="display:none; margin-bottom:10px;"></div>
   <div id="pcs-readiness" style="display:none; margin-bottom:14px;"></div>
 
   <div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px;">
@@ -3867,22 +3893,88 @@
         <div style="font-size:10px; color:var(--n-500); margin-top:5px; line-height:1.4;">Only book GL entries up to this effective date. Blank runs the full term to maturity.</div>
       </div>
 
-      <!-- Post-back status -->
+      <!-- Post-back status.
+           Investran's own Batch Status list (report 36994) returns two values,
+           not the three we originally offered. Until a live batch has landed
+           and been reconciled, everything goes as Held — the batch reaches
+           Investran but stays out of the GL until someone approves it there.
+           The other options remain visible but disabled, so the intended
+           workflow is still legible rather than silently removed. -->
       <div style="border:0.5px solid var(--n-200); border-radius:8px; padding:9px 11px; background:var(--n-50,#FAFAFA);">
         <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px;">
           <i class="ti ti-send" style="font-size:13px; color:var(--n-500);"></i>
           <label for="opt-postback-status" style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-600);">Post-back status</label>
-          <span id="postback-status-chip" class="chip blue" style="font-size:9px; margin-left:auto;">POSTED</span>
+          <span id="postback-status-chip" class="chip amber" style="font-size:9px; margin-left:auto;">HELD</span>
         </div>
         <select id="opt-postback-status" class="b-input" style="width:100%; padding:5px 8px; font-size:12px;"
-                onchange="try{ if(window.B&&window.B.deal){ window.B.deal.postbackStatus=this.value; } window.PCS_POSTBACK_STATUS=this.value; var c=document.getElementById('postback-status-chip'); if(c){ c.textContent=this.value.toUpperCase(); c.className='chip '+(this.value==='draft'?'gray':this.value==='approved'?'amber':'blue'); } }catch(_){}">
-          <option value="draft">Draft — unposted, for review</option>
-          <option value="approved">Approved — signed off, not yet posted</option>
-          <option value="posted" selected>Posted — final, booked in the GL</option>
+                onchange="try{ if(window.B&&window.B.deal){ window.B.deal.postbackStatus=this.value; } window.PCS_POSTBACK_STATUS=this.value; var c=document.getElementById('postback-status-chip'); if(c){ c.textContent=this.value.toUpperCase(); c.className='chip '+(this.value==='held'?'amber':this.value==='draft'?'gray':this.value==='approved'?'amber':'blue'); } }catch(_){}">
+          <option value="held" selected>Held — lands in Investran, not yet in the GL</option>
+          <option value="draft"    disabled>Draft — not in Investran's status list</option>
+          <option value="approved" disabled>Approved — not in Investran's status list</option>
+          <option value="posted"   disabled>Posted — enable once a batch is reconciled</option>
         </select>
-        <div style="font-size:10px; color:var(--n-500); margin-top:5px; line-height:1.4;">State the JE batch arrives with in PCS / Investran.</div>
+        <div style="font-size:10px; color:var(--n-500); margin-top:5px; line-height:1.4;">
+          Batches post as <b>Held</b> so nothing reaches the general ledger without review in Investran.
+        </div>
       </div>
 
+    </div>
+
+    <!-- Inspect what would actually be sent, before sending it. -->
+    <div style="display:flex; align-items:center; gap:10px; margin-top:12px; padding-top:12px; border-top:0.5px solid var(--n-200);">
+      <button type="button" class="mat-btn outline" onclick="window.__previewDIUTemplate && window.__previewDIUTemplate()">
+        <i class="ti ti-table" style="font-size:14px;"></i>DIU template preview
+      </button>
+      <div style="font-size:10.5px; color:var(--n-500); line-height:1.45;">
+        The exact workbook Investran receives — every column, every row, blanks highlighted.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ DIU template preview ═══════════════════════════════════════════
+       Renders the same workbook the delivery path builds — same GL event
+       config, same account remapping, same batch grouping, same Held status.
+       Blank cells are tinted: a blank in a lookup column is the single most
+       common cause of a rejected import, and it costs nothing to see it
+       here instead of in an error log afterwards.
+  ══════════════════════════════════════════════════════════════════════ -->
+  <div id="diu-preview-modal" style="display:none; position:fixed; inset:0; z-index:9000; background:rgba(15,23,42,0.55); align-items:center; justify-content:center; padding:24px;">
+    <div style="background:var(--surface-2,white); border-radius:12px; width:100%; max-width:1400px; max-height:88vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+
+      <div style="display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:0.5px solid var(--n-200);">
+        <i class="ti ti-table" style="font-size:19px; color:var(--n-500);"></i>
+        <div>
+          <div style="font-size:14px; font-weight:600; color:var(--n-900);">DIU template preview</div>
+          <div style="font-size:11px; color:var(--n-500);">Exactly what would be sent to Investran</div>
+        </div>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+          <button type="button" class="mat-btn outline" onclick="window.__diuPreviewDownload && window.__diuPreviewDownload()">
+            <i class="ti ti-download" style="font-size:14px;"></i>Download .xlsx
+          </button>
+          <button type="button" class="mat-btn outline" onclick="window.__diuPreviewClose && window.__diuPreviewClose()" aria-label="Close">
+            <i class="ti ti-x" style="font-size:14px;"></i>
+          </button>
+        </div>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:14px; padding:10px 18px; border-bottom:0.5px solid var(--n-200); background:var(--n-50,#FAFAFA); flex-wrap:wrap;">
+        <div style="display:flex; gap:2px;">
+          <button type="button" class="diu-prev-tab" data-sheet="GL"
+                  onclick="window.__diuPreviewRender && window.__diuPreviewRender('GL')"
+                  style="padding:5px 13px; border:0.5px solid var(--n-200); border-radius:6px; background:var(--n-900,#111); color:white; font-size:11px; font-weight:600; cursor:pointer;">GL</button>
+          <button type="button" class="diu-prev-tab" data-sheet="PortfolioPosition"
+                  onclick="window.__diuPreviewRender && window.__diuPreviewRender('PortfolioPosition')"
+                  style="padding:5px 13px; border:0.5px solid var(--n-200); border-radius:6px; background:transparent; color:var(--n-600); font-size:11px; font-weight:600; cursor:pointer;">PortfolioPosition</button>
+        </div>
+        <div id="diu-prev-meta" style="font-size:11px; color:var(--n-600);">—</div>
+      </div>
+
+      <div id="diu-prev-body" style="flex:1; overflow:auto; background:var(--surface-2,white);"></div>
+
+      <div style="padding:9px 18px; border-top:0.5px solid var(--n-200); background:var(--n-50,#FAFAFA); font-size:10.5px; color:var(--n-500); display:flex; align-items:center; gap:8px;">
+        <span style="display:inline-block; width:11px; height:11px; background:#FFFBEB; border:0.5px solid var(--n-300); border-radius:2px;"></span>
+        Tinted cells are empty. In a lookup column that means Investran can't resolve the value and will reject the row.
+      </div>
     </div>
   </div>
 
@@ -5871,54 +5963,148 @@
         </div>
       </div>
 
-      <!-- ═══ DIU Proxy config — Investran Data Import Utility integration ═══ -->
-      <div style="margin-top:20px; padding:14px 16px; border:1px solid #0D2645; border-radius:10px; background:linear-gradient(135deg,#0D2645 0%,#1A3A6E 100%); color:white;">
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-          <span class="material-icons-outlined text-[20px]" style="color:#93C5FD;">cloud_upload</span>
-          <div style="font-weight:700; font-size:13px;">Investran DIU Integration</div>
+      <!-- ═══ Investran Integration ═══════════════════════════════════════
+           Split by direction, because RW and DIU move data opposite ways:
+             Inbound  · Report Wizard → pulls master data OUT of Investran
+             Outbound · DIU           → pushes GL batches INTO Investran
+           Connection is shared — one proxy, one token, configured once.
+      ══════════════════════════════════════════════════════════════════ -->
+      <div style="margin-top:20px; border:1px solid #0D2645; border-radius:10px; background:linear-gradient(135deg,#0D2645 0%,#1A3A6E 100%); color:white; overflow:hidden;">
+
+        <div style="display:flex; align-items:center; gap:10px; padding:14px 16px 0;">
+          <span class="material-icons-outlined text-[20px]" style="color:#93C5FD;">sync_alt</span>
+          <div style="font-weight:700; font-size:13px;">Investran Integration</div>
           <span id="diucfg-status-chip" class="chip" style="margin-left:auto; font-size:10px; font-weight:600; padding:3px 8px; border-radius:10px; background:#334155; color:#E2E8F0;">simulator</span>
         </div>
-        <div style="font-size:11px; color:#CBD5E1; margin-bottom:12px; line-height:1.5;">
-          Point Stage 2's <b>Post JE</b> button at a live Investran DIU proxy. When blank, the button falls back to the built-in simulator with a DEMO MODE banner.
-          See <code style="background:rgba(255,255,255,0.1); padding:1px 5px; border-radius:3px;">DIU_PROXY_QUICKSTART.md</code> for deploy paths.
+
+        <!-- Direction of travel, stated once so the tabs below make sense -->
+        <div style="display:flex; align-items:center; gap:8px; padding:10px 16px 0; font-size:10.5px; color:#94A3B8; font-family:ui-monospace,monospace;">
+          <span style="color:#6EE7B7;">Investran</span>
+          <span style="color:#475569;">──▶</span>
+          <span style="color:#93C5FD;">Report&nbsp;Wizard</span>
+          <span style="color:#475569;">──▶</span>
+          <span style="color:#E2E8F0;">Loan&nbsp;Module</span>
+          <span style="color:#475569;">──▶</span>
+          <span style="color:#FCD34D;">DIU</span>
+          <span style="color:#475569;">──▶</span>
+          <span style="color:#6EE7B7;">Investran</span>
         </div>
-        <div style="display:grid; gap:10px;">
-          <div>
-            <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
-              DIU Proxy URL <span style="color:#94A3B8; font-weight:400; text-transform:none; letter-spacing:0;">— leave blank for simulator</span>
-            </label>
-            <input id="diucfg-proxy-url" type="text" placeholder="http://localhost:4318 · https://investran-diu-proxy.onrender.com" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:12px;"/>
-            <div style="font-size:10.5px; color:#93C5FD; margin-top:4px;">The proxy holds the OAuth client secret. Browser never sees Investran credentials.</div>
+
+        <div class="inv-tabs" style="display:flex; gap:2px; padding:12px 16px 0; border-bottom:1px solid rgba(255,255,255,0.08);">
+          <button type="button" class="inv-tab active" data-invtab="conn"
+                  style="padding:7px 14px; background:rgba(255,255,255,0.12); color:white; border:0; border-radius:6px 6px 0 0; font-size:11px; font-weight:600; cursor:pointer;">
+            Connection</button>
+          <button type="button" class="inv-tab" data-invtab="in"
+                  style="padding:7px 14px; background:transparent; color:#94A3B8; border:0; border-radius:6px 6px 0 0; font-size:11px; font-weight:600; cursor:pointer;">
+            Inbound · Report Wizard</button>
+          <button type="button" class="inv-tab" data-invtab="out"
+                  style="padding:7px 14px; background:transparent; color:#94A3B8; border:0; border-radius:6px 6px 0 0; font-size:11px; font-weight:600; cursor:pointer;">
+            Outbound · DIU</button>
+        </div>
+
+        <!-- ─── Connection (shared by both directions) ─────────────────── -->
+        <div class="inv-pane" data-invpane="conn" style="padding:14px 16px;">
+          <div style="font-size:11px; color:#CBD5E1; margin-bottom:12px; line-height:1.5;">
+            Both integrations reach Investran through this proxy. It holds the bearer token, so the browser never sees Investran credentials.
+          </div>
+          <div style="display:grid; gap:10px;">
+            <div>
+              <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
+                Proxy URL <span style="color:#94A3B8; font-weight:400; text-transform:none; letter-spacing:0;">— leave blank to use the built-in simulator</span>
+              </label>
+              <input id="diucfg-proxy-url" type="text" placeholder="http://localhost:4318 · https://investran-diu-proxy.onrender.com" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:12px;"/>
+              <div style="font-size:10.5px; color:#93C5FD; margin-top:4px;">Run locally with <code style="background:rgba(255,255,255,0.1); padding:1px 5px; border-radius:3px;">cd server &amp;&amp; npm start</code></div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:2px;">
+              <button id="btn-diucfg-test" type="button" style="padding:6px 14px; background:#10B981; color:white; border:none; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;">
+                <span class="material-icons-outlined" style="font-size:14px;">network_check</span>Test connection
+              </button>
+              <div id="diucfg-test-result" style="font-size:11px; color:#CBD5E1;">—</div>
+            </div>
+            <!-- Populated by the health check: tenant, token expiry, module roots -->
+            <div id="inv-conn-detail" style="display:none; margin-top:4px; padding:10px 12px; background:rgba(0,0,0,0.22); border-radius:6px; font-size:11px; font-family:ui-monospace,monospace; color:#CBD5E1; line-height:1.7;"></div>
+          </div>
+        </div>
+
+        <!-- ─── Inbound · Report Wizard ────────────────────────────────── -->
+        <div class="inv-pane" data-invpane="in" style="padding:14px 16px; display:none;">
+          <div style="font-size:11px; color:#CBD5E1; margin-bottom:12px; line-height:1.5;">
+            Report Wizard pulls the master data we validate journal entries against — GL accounts, transaction types, legal entities.
+            Map each dataset to a saved report; sync then runs from <b>Tools → PCS Sync</b>.
+          </div>
+          <div style="display:grid; gap:10px; grid-template-columns:1fr 1fr;">
+            <div>
+              <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">Module path</label>
+              <input id="rwcfg-path" type="text" placeholder="/ReportWizard/v1" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
+              <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Set on the proxy via <code style="background:rgba(255,255,255,0.1); padding:1px 4px; border-radius:3px;">INVESTRAN_RW_PATH</code>. Shown here for reference.</div>
+            </div>
+            <div>
+              <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">Report book <span style="color:#94A3B8; font-weight:400; text-transform:none; letter-spacing:0;">— optional filter</span></label>
+              <input id="rwcfg-book" type="text" placeholder="188 · Loan_Module" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
+              <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Narrows the Browse list to one book.</div>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:8px; margin:14px 0 6px;">
+            <div style="font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD;">Dataset → report mapping</div>
+            <button id="btn-rwcfg-browse" type="button" style="margin-left:auto; padding:5px 11px; background:rgba(255,255,255,0.1); color:#E2E8F0; border:1px solid #334155; border-radius:5px; font-size:10.5px; font-weight:600; cursor:pointer;">
+              Browse reports from Investran</button>
+            <button id="btn-rwcfg-reload" type="button" style="padding:5px 11px; background:rgba(255,255,255,0.1); color:#E2E8F0; border:1px solid #334155; border-radius:5px; font-size:10.5px; font-weight:600; cursor:pointer;">
+              Reload</button>
+          </div>
+
+          <div style="max-height:320px; overflow:auto; border:1px solid #334155; border-radius:6px;">
+            <table style="width:100%; border-collapse:collapse; font-size:11px;">
+              <thead>
+                <tr style="background:rgba(0,0,0,0.25);">
+                  <th style="text-align:left;  padding:7px 10px; color:#93C5FD; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Dataset</th>
+                  <th style="text-align:left;  padding:7px 10px; color:#93C5FD; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Report</th>
+                  <th style="text-align:left;  padding:7px 10px; color:#93C5FD; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; width:96px;">Report&nbsp;id</th>
+                  <th style="text-align:right; padding:7px 10px; color:#93C5FD; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; width:70px;">Rows</th>
+                  <th style="text-align:left;  padding:7px 10px; color:#93C5FD; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; width:120px;">Last synced</th>
+                </tr>
+              </thead>
+              <tbody id="rwcfg-tbody">
+                <tr><td colspan="5" style="padding:16px; text-align:center; color:#94A3B8;">Connect to the database to load datasets.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-size:10.5px; color:#94A3B8; margin-top:8px;">
+            Changes save as you type. <b>Tools → PCS Sync</b> runs the reports and shows what came back.
+          </div>
+        </div>
+
+        <!-- ─── Outbound · DIU ─────────────────────────────────────────── -->
+        <div class="inv-pane" data-invpane="out" style="padding:14px 16px; display:none;">
+          <div style="font-size:11px; color:#CBD5E1; margin-bottom:12px; line-height:1.5;">
+            DIU carries generated journal entries back into Investran. Stage 2's <b>Post JE</b> button uses these settings; with no proxy configured it falls back to the simulator with a DEMO MODE banner.
           </div>
           <div style="display:grid; gap:10px; grid-template-columns:1fr 1fr 1fr;">
             <div>
               <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
-                Template Override <span style="color:#94A3B8; font-weight:400; text-transform:none; letter-spacing:0;">— optional</span>
+                Template override <span style="color:#94A3B8; font-weight:400; text-transform:none; letter-spacing:0;">— optional</span>
               </label>
               <input id="diucfg-template" type="text" placeholder="auto (framework-based)" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
               <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Blank = pick from framework (USGAAP → USGAAP_Loan_GL_DIU_Template etc.)</div>
             </div>
             <div>
               <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
-                LE Domain
+                LE domain
               </label>
               <input id="diucfg-le-domain" type="text" placeholder="NWF" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
               <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Default: NWF</div>
             </div>
             <div>
               <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
-                Allocation Rule
+                Allocation rule
               </label>
               <input id="diucfg-allocation-rule" type="text" placeholder="No Allocation" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
               <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Default: No Allocation</div>
             </div>
           </div>
-          <div style="display:flex; gap:8px; align-items:center; margin-top:2px;">
-            <button id="btn-diucfg-test" type="button" style="padding:6px 14px; background:#10B981; color:white; border:none; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;">
-              <span class="material-icons-outlined" style="font-size:14px;">network_check</span>Test DIU Connection
-            </button>
-            <div id="diucfg-test-result" style="font-size:11px; color:#CBD5E1;">—</div>
-          </div>
+          <!-- Import-rights blocker. Surfaced here because this is where someone
+               configuring the outbound path would look when a job fails. -->
+          <div id="inv-domain-warning" style="display:none; margin-top:12px; padding:10px 12px; background:rgba(180,83,9,0.18); border:1px solid #B45309; border-left:3px solid #F59E0B; border-radius:6px; font-size:11px; color:#FDE68A; line-height:1.55;"></div>
         </div>
       </div>
 
@@ -8496,7 +8682,44 @@ window.SB = (function(){
           try { _authSubscription.unsubscribe(); } catch(_){}
           _authSubscription = null;
         }
+        // ─── Dispose the previous client properly ──────────────────────
+        // unsubscribe() only detaches the onAuthStateChange listener. It does
+        // NOT stop GoTrueClient's auto-refresh ticker, which supabase-js starts
+        // when autoRefreshToken is true and which then runs for the life of the
+        // page on a ~30s interval.
+        //
+        // So every rebuild left behind a live timer. After a few reconnects
+        // there were N of them, all firing token refreshes against the same
+        // origin and all contending for the same Web Lock (they share a storage
+        // key). That pile-up is why the tab ended up permanently unable to
+        // reach the DB and only a hard refresh fixed it — reload is the only
+        // thing that was killing the orphaned tickers.
+        //
+        // stopAutoRefresh() is the documented way to stop it. Also drop any
+        // realtime sockets, which hold a connection of their own.
+        if(_client){
+          try {
+            if(_client.auth && typeof _client.auth.stopAutoRefresh === 'function'){
+              _client.auth.stopAutoRefresh();
+            }
+          } catch(e){ console.warn('[SB] stopAutoRefresh on old client failed:', e); }
+          try {
+            if(typeof _client.removeAllChannels === 'function') _client.removeAllChannels();
+          } catch(_){}
+          console.log('[SB] disposed previous client (auto-refresh stopped)');
+        }
         _client = window.__supabaseCreateClient(SUPABASE_URL, key || ' ', options);
+        // Instrumentation. This bug has been "fixed" several times without
+        // holding, so make the thing that matters observable: how many clients
+        // this tab has built. A healthy session builds exactly one. If this
+        // climbs, the leak is back — and now we'll see it in the console
+        // instead of inferring it from a stuck tab.
+        window.__sbClientBuilds = (window.__sbClientBuilds || 0) + 1;
+        if(window.__sbClientBuilds > 1){
+          console.warn('[SB] client build #' + window.__sbClientBuilds +
+            ' — each rebuild is a reconnect. If this number keeps climbing, ' +
+            'investigate what is failing the health ping rather than rebuilding.');
+        }
         // V4 fix: guard the probe with a hard timeout. If Chrome's connection
         // pool is exhausted (6-per-origin cap) the supabase-js query would
         // otherwise hang forever — leaving the client in a half-initialised
@@ -8763,12 +8986,22 @@ window.SB = (function(){
       // Posted runs — audit trail is sacred. Excludes the run we just wrote.
       // Fire-and-forget: log-only on error, never fail the outer save.
       try {
+        // Only purge runs older than the grace window. A run saved seconds ago
+        // may still be writing its cashflow schedule — that insert references
+        // run_id, so deleting the run underneath it fails the foreign key and
+        // the schedule is silently lost. Two runs in quick succession is the
+        // normal case (re-run after an edit), so this race is easy to hit.
+        // Excluding our own id isn't enough; it's the *previous* run that's
+        // still in flight.
+        const PURGE_GRACE_MS = 5 * 60 * 1000;
+        const cutoff = new Date(Date.now() - PURGE_GRACE_MS).toISOString();
         const { data: purged, error: purgeErr } = await _client
           .from('accounting_runs')
           .delete()
           .eq('deal_id', dealId)
           .in('status', ['Draft','Calculated','Cancelled','Error'])
           .neq('id', runRow.id)
+          .lt('run_at', cutoff)
           .select('id');
         if(purgeErr){
           console.warn('[SB] auto-purge stale runs failed (non-fatal):', purgeErr.message);
@@ -11051,7 +11284,15 @@ window.SB = (function(){
             .from('covenant_breach_log')
             .upsert(row, { onConflict: 'covenant_id,breach_date', ignoreDuplicates: false });
           if(upErr){
-            console.error('[SB] syncBreachLog upsert:', upErr);
+            // Log the fields that identify the problem. Dumping the error
+            // object alone renders as "Object" in the console, which is what
+            // made this one hard to diagnose in the first place.
+            console.error('[SB] syncBreachLog upsert failed · covenant=' + c.id +
+              ' breach_date=' + c.breachDate +
+              ' · ' + (upErr.code || '?') + ' ' + (upErr.message || '') +
+              (upErr.details ? ' — ' + upErr.details : '') +
+              (upErr.hint ? ' (hint: ' + upErr.hint + ')' : ''));
+            stats.skipped++;
           } else {
             stats.inserted++;
           }
@@ -14719,13 +14960,27 @@ const PORTFOLIO_POSITION_COLS = [
   'Security','Security Type','Security Currency'
 ];
 
-function downloadDIUFilled(){
-  try {
-  if(!M.acctJournals || !M.acctJournals.length){ toast('Run accounting first — no JE rows to export'); return; }
-  if(typeof XLSX === 'undefined'){ toast('XLSX library not loaded — refresh the page'); console.error('[DIU] XLSX undefined'); return; }
+// Build the DIU workbook and return its parts.
+//
+// Preview and download both call this — deliberately. A preview built by a
+// separate code path can drift from what actually gets sent, and then it's
+// worse than no preview at all: it tells you the batch is fine when it isn't.
+// Everything downstream (GL event config, account remapping, batch grouping,
+// sanitising, Held status) happens here, once.
+//
+// Returns { wb, glRows, ppRows, filename, inst, batchCount } or throws.
+function buildDIUWorkbook(){
+  if(!M.acctJournals || !M.acctJournals.length) throw new Error('Run accounting first — no JE rows to export');
+  if(typeof XLSX === 'undefined') throw new Error('XLSX library not loaded — refresh the page');
   const inst = currentInstrument();
-  if(!inst){ toast('No active deal — pick one from the header'); return; }
-  console.log('[DIU] downloadDIUFilled start — journals:', M.acctJournals.length, 'deal:', inst.id);
+  if(!inst) throw new Error('No active deal — pick one from the header');
+  return __diuBuildInner(inst);
+}
+if(typeof window !== 'undefined') window.buildDIUWorkbook = buildDIUWorkbook;
+
+function __diuBuildInner(inst){
+  {
+  console.log('[DIU] build start — journals:', M.acctJournals.length, 'deal:', inst.id);
   // Apply client GL account remapping (same as pushToWorkday). Overwrites the
   // in-memory journals so downstream sanitisers, batch grouping and CSV/XLSX
   // rendering all use the mapped codes. Pass-through when no mappings exist.
@@ -14789,10 +15044,17 @@ function downloadDIUFilled(){
   //                 mapped to Investran's Batch Status vocabulary.
   //   currency    — Transaction Currency, from the deal.
   //   glReference — a stable per-JE reference so a re-post can be traced.
+  // Investran's Batch Status vocabulary comes from report 36994 — it returns
+  // two values, and "Held" is the one we submit under. A status Investran
+  // doesn't recognise gets the whole batch rejected, so anything unexpected
+  // falls back to Held rather than guessing.
+  //
+  // A saved deal may still carry an older postbackStatus of draft/approved/
+  // posted from before this was pinned; those map to Held too.
   const _postback = (document.getElementById('opt-postback-status') || {}).value
                  || (window.B && window.B.deal && window.B.deal.postbackStatus)
-                 || 'posted';
-  const _batchStatus = ({ draft: 'Draft', approved: 'Approved', posted: 'Posted' })[_postback] || 'Posted';
+                 || 'held';
+  const _batchStatus = ({ held: 'Held', posted: 'Posted' })[_postback] || 'Held';
   const _ccy = inst.currency || (window.B && window.B.deal && window.B.deal.currency) || 'USD';
   const stampedJournals = M.acctJournals.map(j => Object.assign({}, j, {
     batchId:     glDateToBatchId.get(j.glDate || j.effectiveDate || dateStamp),
@@ -14824,14 +15086,25 @@ function downloadDIUFilled(){
       console.warn('[DIU] step: column-width calc skipped:', colErr);
     }
   }
-  // Generate + download
-  console.log('[DIU] step: XLSX.write start');
-  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  console.log('[DIU] step: XLSX.write done, bytes =', out && out.byteLength);
+  return {
+    wb, glRows, ppRows, inst, dateStamp,
+    filename:   `investran-diu-${inst.id}-${dateStamp}.xlsx`,
+    batchCount: glDateToBatchId.size,
+    batchStatus: _batchStatus
+  };
+  }
+}
+if(typeof window !== 'undefined') window.__diuBuildInner = __diuBuildInner;
+
+// Write a built workbook to disk.
+function __diuSaveWorkbook(built){
+  console.log('[DIU] XLSX.write start');
+  const out = XLSX.write(built.wb, { bookType: 'xlsx', type: 'array' });
+  console.log('[DIU] XLSX.write done, bytes =', out && out.byteLength);
   const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `investran-diu-${inst.id}-${dateStamp}.xlsx`;
+  a.download = built.filename;
   // Some browsers (notably Safari + Firefox on file:// origins) ignore
   // `a.click()` unless the anchor is in the document. Append → click → remove.
   document.body.appendChild(a);
@@ -14840,8 +15113,21 @@ function downloadDIUFilled(){
     URL.revokeObjectURL(a.href);
     if(a.parentNode) a.parentNode.removeChild(a);
   }, 0);
+  return a.download;
+}
+if(typeof window !== 'undefined') window.__diuSaveWorkbook = __diuSaveWorkbook;
+
+function downloadDIUFilled(){
+  try {
+  if(!M.acctJournals || !M.acctJournals.length){ toast('Run accounting first — no JE rows to export'); return; }
+  if(typeof XLSX === 'undefined'){ toast('XLSX library not loaded — refresh the page'); console.error('[DIU] XLSX undefined'); return; }
+  const inst = currentInstrument();
+  if(!inst){ toast('No active deal — pick one from the header'); return; }
+  const built = __diuBuildInner(inst);
+  const { glRows, ppRows } = built;
+  const name = __diuSaveWorkbook(built);
   toast(`Downloaded filled DIU XLSX — ${glRows.length} JE rows · ${ppRows.length} portfolio position${ppRows.length === 1 ? '' : 's'}`);
-  console.log('[DIU] downloadDIUFilled OK — file:', a.download);
+  console.log('[DIU] downloadDIUFilled OK — file:', name);
   } catch(err) {
     console.error('[DIU] downloadDIUFilled failed:', err);
     toast('DIU XLSX export failed: ' + (err && err.message ? err.message : String(err)), 6000);
@@ -14861,6 +15147,123 @@ function downloadDIUFilled(){
 // Expose to window so the button's inline onclick can resolve it even if the
 // JS bundle was loaded in a context where module scope isolates the function.
 if(typeof window !== 'undefined') window.downloadDIUFilled = downloadDIUFilled;
+
+// ─── DIU template preview ────────────────────────────────────────────────
+// Shows exactly what would be sent to Investran, from the same build the
+// delivery path uses. Two sheets, in the DIU column order, with blanks
+// visible — because a blank in a lookup column is what gets a batch rejected,
+// and it's much cheaper to see it here than in an import error log.
+let _diuPreview = null;
+
+window.__previewDIUTemplate = function(){
+  try {
+    if(!M.acctJournals || !M.acctJournals.length){
+      if(typeof runAccounting === 'function'){
+        toast('Running accounting first…', 2000);
+        runAccounting();
+      }
+    }
+    _diuPreview = buildDIUWorkbook();
+  } catch(err){
+    toast(String(err.message || err), 5000, { kind:'error' });
+    return;
+  }
+  const m = document.getElementById('diu-preview-modal');
+  if(m) m.style.display = 'flex';
+  __diuPreviewRender('GL');
+};
+
+window.__diuPreviewRender = function(sheet){
+  if(!_diuPreview) return;
+  const isGL    = sheet !== 'PortfolioPosition';
+  const rows    = isGL ? _diuPreview.glRows : _diuPreview.ppRows;
+  const headers = isGL ? DIU_HEADERS : PORTFOLIO_POSITION_COLS;
+
+  document.querySelectorAll('.diu-prev-tab').forEach(b => {
+    const on = b.getAttribute('data-sheet') === (isGL ? 'GL' : 'PortfolioPosition');
+    b.style.background = on ? 'var(--n-900,#111)' : 'transparent';
+    b.style.color      = on ? 'white' : 'var(--n-600)';
+  });
+
+  const meta = document.getElementById('diu-prev-meta');
+  if(meta){
+    // Count blanks in columns Investran resolves as lookups. These are the
+    // failures worth catching before submission rather than after.
+    const lookupCols = headers.filter(h => /account|entity|deal|currency|type|status|domain|security|issuer|position/i.test(h));
+    let blanks = 0, blankCols = new Set();
+    rows.forEach(r => lookupCols.forEach(c => {
+      if(r[c] === '' || r[c] == null){ blanks++; blankCols.add(c); }
+    }));
+    meta.innerHTML =
+      '<span style="color:var(--n-900); font-weight:600;">' + rows.length + '</span> rows · ' +
+      '<span style="color:var(--n-900); font-weight:600;">' + headers.length + '</span> columns' +
+      (isGL ? ' · <span style="color:var(--n-900); font-weight:600;">' + _diuPreview.batchCount + '</span> batch' +
+              (_diuPreview.batchCount === 1 ? '' : 'es') +
+              ' · status <span class="chip amber" style="font-size:9px;">' + _pcsEscLite(_diuPreview.batchStatus) + '</span>'
+            : '') +
+      (blanks
+        ? ' · <span style="color:#B45309;"><i class="ti ti-alert-triangle" style="font-size:12px; vertical-align:-2px;"></i> ' +
+          blanks + ' blank lookup value' + (blanks === 1 ? '' : 's') + ' in ' +
+          Array.from(blankCols).slice(0,4).map(_pcsEscLite).join(', ') +
+          (blankCols.size > 4 ? ' +' + (blankCols.size - 4) + ' more' : '') + '</span>'
+        : ' · <span style="color:#16A34A;"><i class="ti ti-circle-check" style="font-size:12px; vertical-align:-2px;"></i> no blank lookups</span>');
+  }
+
+  const body = document.getElementById('diu-prev-body');
+  if(!body) return;
+  if(!rows.length){
+    body.innerHTML = '<div style="padding:40px; text-align:center; color:var(--n-500); font-size:12px;">This sheet is empty.</div>';
+    return;
+  }
+  const MAX = 300;   // enough to inspect; the xlsx carries everything
+  const shown = rows.slice(0, MAX);
+  body.innerHTML =
+    '<table style="border-collapse:collapse; font-size:11px; white-space:nowrap;">' +
+      '<thead><tr>' +
+        '<th style="position:sticky; top:0; left:0; z-index:3; background:var(--n-100,#F3F4F6); padding:6px 8px; border:0.5px solid var(--n-200); font-size:9.5px; color:var(--n-500);">#</th>' +
+        headers.map(h =>
+          '<th style="position:sticky; top:0; z-index:2; background:var(--n-100,#F3F4F6); padding:6px 10px; border:0.5px solid var(--n-200); ' +
+                     'text-align:left; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-600);">' +
+            _pcsEscLite(h) + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      shown.map((r, i) =>
+        '<tr>' +
+          '<td style="position:sticky; left:0; background:var(--n-50,#FAFAFA); padding:5px 8px; border:0.5px solid var(--n-200); ' +
+                     'color:var(--n-400); font-variant-numeric:tabular-nums;">' + (i+1) + '</td>' +
+          headers.map(h => {
+            const v = r[h];
+            const empty = v === '' || v == null;
+            const num = typeof v === 'number';
+            return '<td style="padding:5px 10px; border:0.5px solid var(--n-200); ' +
+                   (num ? 'text-align:right; font-variant-numeric:tabular-nums; ' : '') +
+                   (empty ? 'background:#FFFBEB;' : '') + '">' +
+                   (empty ? '' : _pcsEscLite(num ? v.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : v)) +
+                   '</td>';
+          }).join('') +
+        '</tr>').join('') +
+      '</tbody></table>' +
+    (rows.length > MAX
+      ? '<div style="padding:10px 14px; font-size:11px; color:var(--n-500); background:var(--n-50,#FAFAFA); border-top:0.5px solid var(--n-200);">' +
+        'Showing the first ' + MAX + ' of ' + rows.length + ' rows. The download contains all of them.</div>'
+      : '');
+};
+
+window.__diuPreviewDownload = function(){
+  if(!_diuPreview){ toast('Nothing built yet', 3000); return; }
+  const name = __diuSaveWorkbook(_diuPreview);
+  toast('Downloaded ' + name, 3500, { kind:'success' });
+};
+
+window.__diuPreviewClose = function(){
+  const m = document.getElementById('diu-preview-modal');
+  if(m) m.style.display = 'none';
+};
+
+// Local escaper — this IIFE doesn't share scope with the PCS Sync helpers.
+function _pcsEscLite(s){
+  return String(s == null ? '' : s).replace(/[<>&"']/g,
+    ch => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[ch]));
+}
 
 // ============================================================
 // POST JE  (Stage 2 → Investran Data Import Utility / DIU API)
@@ -15226,12 +15629,17 @@ function handlePostJeClick(){
       if(typeof toast === 'function') toast('Accounting produced no journals — check the active deal', 4000);
       return;
     }
-    // Read the user-selected post-back status (Draft / Approved / Posted) and
-    // stamp each JE row before delivery so PCS/Investran receives them at the
-    // chosen state. Also expose the status on window for the transport layer.
+    // Post-back status. Pinned to Held until a live batch has been reconciled
+    // in Investran — Held means the batch arrives but stays out of the GL.
+    // Anything else on a saved deal is coerced, so an old deal carrying
+    // "posted" can't quietly book straight to the ledger.
     const statusEl = document.getElementById('opt-postback-status');
-    const postbackStatus = (statusEl && statusEl.value) ||
-                           ((window.B && window.B.deal && window.B.deal.postbackStatus)) || 'posted';
+    let postbackStatus = (statusEl && statusEl.value) ||
+                         ((window.B && window.B.deal && window.B.deal.postbackStatus)) || 'held';
+    if(postbackStatus !== 'held'){
+      console.warn('[Investran] coercing post-back status "' + postbackStatus + '" → "held"');
+      postbackStatus = 'held';
+    }
     window.PCS_POSTBACK_STATUS = postbackStatus;
     M.acctJournals.forEach(j => { j.postbackStatus = postbackStatus; });
     console.log('[Investran] posting ' + M.acctJournals.length + ' JEs with status=' + postbackStatus);
@@ -15528,15 +15936,222 @@ window.openDBConfigModal = function(){
       }
       const data = await res.json().catch(() => ({}));
       if(data.investranConfigured){
-        diuTestResult.innerHTML = '<span style="color:#34D399;">✓ Live · configured for ' + escapeHTML(data.investranBase || '(unknown)') + (data.tokenCached ? ' · OAuth token cached' : '') + '</span>';
+        diuTestResult.innerHTML = '<span style="color:#34D399;">✓ Live · ' + escapeHTML(data.investranBase || '(unknown)') + '</span>';
       } else {
-        diuTestResult.innerHTML = '<span style="color:#FBBF24;">◐ Proxy reachable but Investran credentials are blank in .env — Post JE will error until CLIENT_ID/SECRET are set on the proxy.</span>';
+        diuTestResult.innerHTML = '<span style="color:#FBBF24;">◐ Proxy reachable but Investran credentials are blank in .env.</span>';
       }
+      __invRenderConnDetail(data);
     } catch(err) {
       const msg = err && err.name === 'AbortError' ? 'timeout after 8s' : (err && err.message ? err.message : String(err));
       diuTestResult.innerHTML = '<span style="color:#F87171;">✕ ' + escapeHTML(msg) + '</span>';
+      __invRenderConnDetail(null);
     }
   };
+
+  // Expand the healthz payload into something readable. Token expiry gets
+  // colour because a silently-expired token produces 401s that look like
+  // permission problems, which is a slow thing to diagnose.
+  function __invRenderConnDetail(h){
+    const box = document.getElementById('inv-conn-detail');
+    if(!box) return;
+    if(!h){ box.style.display = 'none'; return; }
+    const row = (k, v, colour) =>
+      '<div><span style="color:#64748B; display:inline-block; width:130px;">' + k + '</span>' +
+      '<span style="color:' + (colour || '#E2E8F0') + ';">' + escapeHTML(String(v == null ? '—' : v)) + '</span></div>';
+
+    let expiry = '—', expiryColour = '#94A3B8';
+    if(h.tokenDaysLeft != null){
+      const d = h.tokenDaysLeft;
+      expiry = d < 0 ? 'EXPIRED ' + Math.abs(d) + ' days ago' : d + ' days';
+      expiryColour = d < 0 ? '#F87171' : d < 7 ? '#FBBF24' : '#34D399';
+    }
+    box.innerHTML =
+      row('Tenant',        (h.tenant && (h.tenant.database || h.tenant.server)) || '—') +
+      row('Inbound · RW',  h.rwRoot  || '—', h.rwRoot  ? '#93C5FD' : '#64748B') +
+      row('Outbound · DIU',h.diuRoot || '—', h.diuRoot ? '#FCD34D' : '#64748B') +
+      row('Token expires', expiry, expiryColour) +
+      (h.authMode ? row('Auth mode', h.authMode) : '');
+    box.style.display = 'block';
+  }
+
+  // ─── Investran Integration tab strip ──────────────────────────────────
+  document.querySelectorAll('.inv-tab').forEach(btn => {
+    btn.onclick = () => {
+      const want = btn.getAttribute('data-invtab');
+      document.querySelectorAll('.inv-tab').forEach(b => {
+        const on = b === btn;
+        b.classList.toggle('active', on);
+        b.style.background = on ? 'rgba(255,255,255,0.12)' : 'transparent';
+        b.style.color      = on ? 'white' : '#94A3B8';
+      });
+      document.querySelectorAll('.inv-pane').forEach(p => {
+        p.style.display = p.getAttribute('data-invpane') === want ? 'block' : 'none';
+      });
+      if(want === 'in') __rwCfgLoad();
+    };
+  });
+
+  // ─── Inbound · Report Wizard: dataset → report mapping ────────────────
+  // The mapping lives in pcs_ref_datasets, same rows PCS Sync reads. This is
+  // the editor; PCS Sync is the runner. Kept as one source of truth so a
+  // report id set here is immediately live there.
+  let _rwCfgRows = [];
+  let _rwCfgReports = null;    // cached report list from the tenant
+
+  window.__rwCfgLoad = async function(){
+    const tb = document.getElementById('rwcfg-tbody');
+    if(!tb) return;
+    if(!window.SB || !window.SB.fetchRefDatasets){
+      tb.innerHTML = '<tr><td colspan="5" style="padding:16px; text-align:center; color:#94A3B8;">Database adapter not ready.</td></tr>';
+      return;
+    }
+    tb.innerHTML = '<tr><td colspan="5" style="padding:16px; text-align:center; color:#94A3B8;">Loading…</td></tr>';
+    try {
+      _rwCfgRows = await window.SB.fetchRefDatasets();
+    } catch(err){
+      tb.innerHTML = '<tr><td colspan="5" style="padding:16px; text-align:center; color:#F87171;">' +
+                     escapeHTML(String(err.message || err)) + '</td></tr>';
+      return;
+    }
+    __rwCfgRender();
+  };
+
+  function __rwCfgRender(){
+    const tb = document.getElementById('rwcfg-tbody');
+    if(!tb) return;
+    // DIU-sourced datasets aren't RW-mapped — show them greyed rather than
+    // hiding them, so the list matches PCS Sync row-for-row.
+    if(!_rwCfgRows.length){
+      tb.innerHTML = '<tr><td colspan="5" style="padding:16px; text-align:center; color:#94A3B8;">No datasets registered.</td></tr>';
+      return;
+    }
+    const catColour = { required:'#F87171', attribution:'#93C5FD', optional:'#64748B' };
+    tb.innerHTML = _rwCfgRows.map(d => {
+      const isDiu = d.source_type === 'diu_api';
+      const rows  = d.row_count ? d.row_count.toLocaleString() : '—';
+      const when  = d.last_synced_at
+        ? new Date(d.last_synced_at).toLocaleDateString(undefined,{month:'short',day:'numeric'}) +
+          ' ' + new Date(d.last_synced_at).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})
+        : 'never';
+      return '<tr style="border-top:1px solid rgba(255,255,255,0.06);">' +
+        '<td style="padding:6px 10px; color:#E2E8F0;">' + escapeHTML(d.label) +
+          '<span style="margin-left:6px; font-size:9px; text-transform:uppercase; letter-spacing:0.4px; color:' +
+            (catColour[d.category] || '#64748B') + ';">' + escapeHTML(d.category || '') + '</span></td>' +
+        '<td style="padding:6px 10px; color:#94A3B8;">' +
+          (isDiu ? '<i style="color:#64748B;">DIU API — no report</i>' : escapeHTML(d.rw_report_name || '—')) + '</td>' +
+        '<td style="padding:6px 10px;">' +
+          (isDiu ? '<span style="color:#475569;">n/a</span>' :
+            '<input type="text" inputmode="numeric" value="' + (d.rw_report_id || '') + '" ' +
+              'data-rwkey="' + escapeHTML(d.dataset_key) + '" placeholder="—" ' +
+              'style="width:80px; padding:3px 6px; border:1px solid #334155; border-radius:4px; ' +
+                     'background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>') +
+        '</td>' +
+        '<td style="padding:6px 10px; text-align:right; color:' + (d.row_count ? '#E2E8F0' : '#475569') +
+          '; font-variant-numeric:tabular-nums;">' + rows + '</td>' +
+        '<td style="padding:6px 10px; color:' + (d.last_synced_at ? '#94A3B8' : '#475569') + ';">' + when + '</td>' +
+      '</tr>';
+    }).join('');
+
+    // Save on blur rather than on every keystroke — a report id is typed a
+    // digit at a time and each intermediate value would be a wasted write.
+    tb.querySelectorAll('input[data-rwkey]').forEach(inp => {
+      inp.onblur = async () => {
+        const key = inp.getAttribute('data-rwkey');
+        const ds  = _rwCfgRows.find(r => r.dataset_key === key);
+        const raw = inp.value.trim();
+        const val = raw ? +raw : null;
+        if(raw && !/^\d+$/.test(raw)){
+          inp.style.borderColor = '#F87171';
+          if(typeof toast === 'function') toast('Report id must be a number', 3500, { kind:'error' });
+          return;
+        }
+        if((ds && ds.rw_report_id) === val || (!ds.rw_report_id && val === null)) return;   // unchanged
+        inp.style.borderColor = '#334155';
+        try {
+          const patch = { rw_report_id: val };
+          // If the id matches one we listed from the tenant, capture its name
+          // too, so the Report column stops saying "—" without a extra fetch.
+          const match = val != null && _rwCfgReports && _rwCfgReports.find(r => +r.id === val);
+          if(match) patch.rw_report_name = match.name;
+          await window.SB.updateRefDataset(key, patch);
+          if(ds){ ds.rw_report_id = val; if(match) ds.rw_report_name = match.name; }
+          __rwCfgRender();
+          if(typeof toast === 'function'){
+            toast(val ? ds.label + ' → report ' + val : ds.label + ' unmapped', 2500, { kind:'success' });
+          }
+        } catch(err){
+          inp.style.borderColor = '#F87171';
+          if(typeof toast === 'function') toast('Save failed: ' + (err.message || err), 5000, { kind:'error' });
+        }
+      };
+      inp.onkeydown = e => { if(e.key === 'Enter') inp.blur(); };
+    });
+  }
+
+  // Pull the saved-report list off the tenant so report ids can be picked
+  // rather than transcribed. Filtered by book when one is set.
+  window.__rwCfgBrowse = async function(){
+    const proxy = (function(){
+      try { const v = (localStorage.getItem('pcs_v3_diu_proxy_url')||'').trim(); if(v) return v.replace(/\/$/,''); } catch(_){}
+      const el = document.getElementById('diucfg-proxy-url');
+      return el && el.value ? el.value.trim().replace(/\/$/,'') : null;
+    })();
+    if(!proxy){
+      if(typeof toast === 'function') toast('Set the proxy URL on the Connection tab first', 4500, { kind:'info' });
+      return;
+    }
+    if(typeof toast === 'function') toast('Fetching reports from Investran…', 2500, { kind:'info' });
+    try {
+      const r = await fetch(proxy + '/api/rw/reports');
+      const j = await r.json();
+      if(!j.ok) throw new Error(j.error ? JSON.stringify(j.error).slice(0,200) : 'HTTP ' + r.status);
+
+      // The proxy already normalises the shape.
+      _rwCfgReports = (j.reports || []).map(x => ({
+        id:   x.id,
+        name: x.name || '(unnamed)',
+        book: x.bookName || (x.bookId != null ? String(x.bookId) : '')
+      }));
+
+      // Book filter accepts either the id or the name — "188", "Loan_Module"
+      // or the "188 · Loan_Module" form shown in the placeholder.
+      const bookFilter = ((document.getElementById('rwcfg-book') || {}).value || '').trim();
+      const terms = bookFilter.split(/[·|,]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+      const list = terms.length
+        ? _rwCfgReports.filter(x => {
+            const hay = (String(x.book) + ' ' + String(x.id)).toLowerCase();
+            return terms.some(t => hay.indexOf(t) !== -1);
+          })
+        : _rwCfgReports;
+
+      if(!list.length){
+        alert('The proxy returned ' + _rwCfgReports.length + ' reports, but none matched the book filter "' +
+              bookFilter + '".\n\nClear the Report book field to see them all.');
+        return;
+      }
+      alert('Reports available' + (bf ? ' in book "' + bookFilter + '"' : '') + ' (' + list.length + '):\n\n' +
+        list.slice(0, 60).map(x => '  ' + String(x.id).padEnd(8) + x.name + (x.book ? '   [' + x.book + ']' : '')).join('\n') +
+        (list.length > 60 ? '\n  … ' + (list.length - 60) + ' more' : '') +
+        '\n\nType the id into the Report id column.');
+    } catch(err){
+      if(typeof toast === 'function') toast('Could not list reports: ' + (err.message || err), 6000, { kind:'error' });
+    }
+  };
+
+  (function wireRwCfg(){
+    const b1 = document.getElementById('btn-rwcfg-browse');
+    const b2 = document.getElementById('btn-rwcfg-reload');
+    if(b1) b1.onclick = () => window.__rwCfgBrowse();
+    if(b2) b2.onclick = () => window.__rwCfgLoad();
+    // Book filter is a local preference — no reason to round-trip the DB.
+    const bk = document.getElementById('rwcfg-book');
+    if(bk){
+      try { bk.value = localStorage.getItem('pcs_v3_rw_book') || ''; } catch(_){}
+      bk.oninput = () => { try { localStorage.setItem('pcs_v3_rw_book', bk.value.trim()); } catch(_){} };
+    }
+    const pathEl = document.getElementById('rwcfg-path');
+    if(pathEl){ pathEl.value = '/ReportWizard/v1'; pathEl.readOnly = true; pathEl.style.opacity = '0.7'; }
+  })();
 
   // Update the per-type UI when the dropdown changes.
   function applyTypeUI(){
@@ -40444,14 +41059,41 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
 
   function _pcsEsc(s){ return String(s == null ? '' : s).replace(/[<>&"']/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[ch])); }
 
+  // The proxy URL is owned by the DIU config panel, which persists it as a
+  // plain string under 'pcs_v3_diu_proxy_url'. Read that key — it's the one
+  // the rest of the app uses. The live input is checked too, so a value typed
+  // but not yet saved still works.
   function _pcsProxyUrl(){
     try {
-      const cfg = JSON.parse(localStorage.getItem('diu-config') || '{}');
-      if(cfg.proxyUrl) return String(cfg.proxyUrl).replace(/\/$/, '');
+      const v = (localStorage.getItem('pcs_v3_diu_proxy_url') || '').trim();
+      if(v) return v.replace(/\/$/, '');
     } catch(_){}
     const el = document.getElementById('diucfg-proxy-url');
-    if(el && el.value) return String(el.value).replace(/\/$/, '');
+    if(el && el.value && el.value.trim()) return el.value.trim().replace(/\/$/, '');
     return null;
+  }
+
+  // Shown when no proxy is configured. Offers to set it inline rather than
+  // sending the user off to find a panel — the local default is right almost
+  // every time, so asking is faster than navigating.
+  function _pcsNoProxy(){
+    const url = prompt(
+      'PCS Sync reaches Investran through the local proxy, which isn\'t configured yet.\n\n' +
+      'Start it with:  cd server && npm start\n\n' +
+      'Then confirm the URL below.',
+      'http://localhost:4318'
+    );
+    if(url === null) return;
+    const clean = String(url).trim().replace(/\/$/, '');
+    if(!/^https?:\/\//.test(clean)){
+      if(typeof toast === 'function') toast('URL must start with http:// or https://', 4000, { kind:'error' });
+      return;
+    }
+    try { localStorage.setItem('pcs_v3_diu_proxy_url', clean); } catch(_){}
+    const el = document.getElementById('diucfg-proxy-url');
+    if(el) el.value = clean;
+    if(typeof toast === 'function') toast('Proxy set to ' + clean + ' — try Sync again', 4000, { kind:'success' });
+    window.__pcsTestConnection && window.__pcsTestConnection();
   }
 
   // Freshness: compare last_synced_at against the dataset's stale_after_hours.
@@ -40494,6 +41136,18 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       }
       return;
     }
+    // An accounting run writes thousands of rows and saturates the browser's
+    // per-origin connection pool. A read issued in that window doesn't fail —
+    // it never gets a slot, times out at 8s, and counts toward the consecutive-
+    // timeout budget that eventually forces a sign-out. So wait for the write
+    // to finish rather than competing with it.
+    const _busy = () => !!(window.SB && window.SB.heavyWriteDepth > 0);
+    if(_busy()){
+      console.log('[PCS-Sync] waiting for heavy write to finish before loading');
+      for(let i = 0; i < 60 && _busy(); i++){        // cap at 30s
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
     try {
       _pcsState.datasets = await window.SB.fetchRefDatasets();
       _pcsState.loaded = true;
@@ -40501,6 +41155,26 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       window.__pcsTestConnection();
     } catch(err){
       console.error('[PCS-Sync] load failed:', err);
+      // One retry after a pause. The common cause is transient pool pressure,
+      // and a bare error state here reads as "the feature is broken".
+      await new Promise(r => setTimeout(r, 2500));
+      try {
+        _pcsState.datasets = await window.SB.fetchRefDatasets();
+        _pcsState.loaded = true;
+        window.__pcsRender();
+        window.__pcsTestConnection();
+        return;
+      } catch(err2){
+        console.error('[PCS-Sync] load failed on retry:', err2);
+      }
+      const emptyEl = document.getElementById('pcs-empty');
+      if(emptyEl){
+        emptyEl.style.display = 'block';
+        const t = emptyEl.querySelector('.v4-empty-title');
+        const b = emptyEl.querySelector('.v4-empty-body');
+        if(t) t.textContent = 'Could not load the dataset registry';
+        if(b) b.textContent = 'The database did not respond. If an accounting run is in progress, wait for it to finish and reopen this page.';
+      }
     }
   };
 
@@ -40528,10 +41202,40 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // Readiness banner — can we generate a DIU job yet?
     if(ready){
       const required = all.filter(d => d.category === 'required');
-      const missing  = required.filter(d => _pcsFreshness(d) !== 'ok');
+      const missing  = required.filter(d => _pcsFreshness(d) !== 'ok' && _pcsFreshness(d) !== 'stale');
       // Loaded, but the report didn't return every column we asked for. Not a
       // blocker — but not a clean bill of health either, so say so.
       const partial  = required.filter(d => d.last_status === 'partial' && _pcsFreshness(d) === 'ok');
+      // Stale = loaded once, but older than its expected refresh cadence.
+      // Sync stays manual, so this is the only thing that will tell you.
+      const stale    = all.filter(d => _pcsFreshness(d) === 'stale');
+
+      // Stale gets its own banner above readiness — a dataset that's present
+      // but three days old fails differently from one that was never loaded,
+      // and the fix (sync these specific ones) is different too.
+      const staleBox = document.getElementById('pcs-stale');
+      if(staleBox){
+        if(!stale.length){ staleBox.style.display = 'none'; }
+        else {
+          const cadence = h => h >= 720 ? 'monthly' : h >= 168 ? 'weekly' : h >= 24 ? 'daily' : h + 'h';
+          staleBox.style.display = 'block';
+          staleBox.innerHTML =
+            '<div style="background:#FFF7ED; border:0.5px solid #FDBA74; border-left:3px solid #EA580C; border-radius:8px; padding:10px 14px; display:flex; align-items:flex-start; gap:10px;">' +
+              '<i class="ti ti-clock-exclamation" style="font-size:18px; color:#C2410C; margin-top:1px;"></i>' +
+              '<div style="flex:1; font-size:12px; color:#7C2D12;">' +
+                '<b>' + stale.length + ' dataset' + (stale.length === 1 ? ' is' : 's are') + ' past the expected refresh.</b>' +
+                '<div style="margin-top:5px; line-height:1.6;">' +
+                  stale.map(d => '· ' + _pcsEsc(d.label) + ' — last synced ' + _pcsRelTime(d.last_synced_at) +
+                                 ' <span style="color:#9A3412;">(expected ' + cadence(d.stale_after_hours || 168) + ')</span>').join('<br>') +
+                '</div>' +
+              '</div>' +
+              '<button onclick="window.__pcsSyncStale && window.__pcsSyncStale()" class="mat-btn outline !py-1 !px-3" ' +
+                      'style="font-size:11px; white-space:nowrap; align-self:center;">' +
+                '<i class="ti ti-refresh" style="font-size:12px;"></i>Sync these</button>' +
+            '</div>';
+        }
+      }
+
       if(!all.length){
         ready.style.display = 'none';
       } else if(missing.length === 0 && partial.length === 0){
@@ -40725,7 +41429,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!ds) return;
     const proxy = _pcsProxyUrl();
     if(!proxy){
-      if(typeof toast === 'function') toast('Set the DIU Proxy URL in Settings first', 4000, { kind:'info' });
+      _pcsNoProxy();
       return;
     }
     _pcsState.syncing[datasetKey] = true;
@@ -40757,11 +41461,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         const parsed = _pcsRowsFromReport(j.result, ds.column_map || {});
         rows = parsed.rows;
         sourceRef = 'RW report ' + ds.rw_report_id;
+        // Load anyway — partial data beats none — but say plainly what didn't
+        // line up, so a mismatch is caught here rather than at DIU import.
+        const notes = [];
         if(parsed.missing.length){
-          // Load anyway — partial data beats none — but say plainly what's absent.
-          warn = 'Report is missing ' + parsed.missing.length + ' expected column' +
-                 (parsed.missing.length === 1 ? '' : 's') + ': ' + parsed.missing.join(', ') +
-                 '. Delivered: ' + parsed.columns.join(', ');
+          notes.push('Missing expected column' + (parsed.missing.length === 1 ? '' : 's') +
+                     ': ' + parsed.missing.join(', '));
+        }
+        if(parsed.inferred.length){
+          notes.push('Matched by inference — ' + parsed.inferred.join('; '));
+        }
+        if(parsed.deduped){
+          // Not a warning — expected when a dataset projects one dimension out
+          // of a wider grid. Reported so the row count is explainable.
+          console.info('[PCS-Sync] ' + datasetKey + ' — collapsed ' + parsed.deduped +
+                       ' duplicate rows from the report grid');
+        }
+        if(notes.length){
+          warn = notes.join('. ') + '. Report returned: ' + parsed.columns.join(', ');
           console.warn('[PCS-Sync] ' + datasetKey + ' — ' + warn);
         }
         if(!rows.length && (j.result && (j.result.data || j.result.Data || []).length)){
@@ -40834,7 +41551,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // report didn't deliver.
   function _pcsRowsFromReport(result, map){
     map = map || {};
-    const out = { rows: [], missing: [], columns: [] };
+    const out = { rows: [], missing: [], columns: [], inferred: [] };
     if(!result) return out;
     const cols = result.columns || result.Columns || [];
     const data = result.data    || result.Data    || [];
@@ -40852,38 +41569,108 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // Flag anything the spec asked for that isn't in the delivered header row.
     (map.expect || []).forEach(c => { if(byName(c) < 0) out.missing.push(c); });
 
-    // Named columns first; fall back to a pattern guess only when the map is
-    // silent (e.g. a dataset synced via the generic lookup endpoint).
-    const iId   = map.external_id ? byName(map.external_id) : names.findIndex(x => /(^|[^a-z])id$/i.test(x));
-    const iName = map.name        ? byName(map.name)        : names.findIndex(x => /name/i.test(x));
-    const iCode = map.code        ? byName(map.code)        : names.findIndex(x => /code/i.test(x));
-    const iAct  = map.is_active   ? byName(map.is_active)   : names.findIndex(x => /active/i.test(x));
-    const iFilt = map.filter      ? byName(map.filter)      : -1;
+    // Three tiers, in order of confidence:
+    //   1. exact (normalised) match on the mapped name
+    //   2. a column that ends with the mapped name — RW often prefixes with
+    //      the entity, so "GL Account Id" should still satisfy "AccountId"
+    //   3. a generic pattern guess, so a report with unexpected headers still
+    //      loads something identifiable rather than a column of nulls
+    // Tier 2 and 3 are recorded so we can show which columns were inferred.
+    out.inferred = [];
+    const resolve = (mapped, fallbackRe, role) => {
+      if(mapped){
+        const exact = byName(mapped);
+        if(exact >= 0) return exact;
+        const w = norm(mapped);
+        const loose = names.findIndex(n => { const v = norm(n); return v.endsWith(w) || v.startsWith(w); });
+        if(loose >= 0){ out.inferred.push(role + ' → "' + names[loose] + '" (expected "' + mapped + '")'); return loose; }
+      }
+      if(!fallbackRe) return -1;
+      const guess = names.findIndex(x => fallbackRe.test(x));
+      if(guess >= 0 && mapped) out.inferred.push(role + ' → "' + names[guess] + '" (guessed)');
+      return guess;
+    };
+
+    const iId   = resolve(map.external_id, /(^|[^a-z])id$/i, 'id');
+    const iName = resolve(map.name,        /name|descr/i,    'name');
+    const iCode = resolve(map.code,        /code/i,          'code');
+    const iAct  = resolve(map.is_active,   /active/i,        'active');
+    const iFilt = map.filter ? byName(map.filter) : -1;
 
     const unwrap = v => (v && typeof v === 'object' && 'value' in v) ? v.value : v;
 
+    // Several reports return a wider grid than the dataset needs. Transaction
+    // Types is trans-type × legal-entity (533 rows for ~100 types) because the
+    // default account is entity-scoped; Positions and Securities is one grid
+    // feeding four datasets, each keyed on a different column. There's a
+    // unique index on (dataset_key, external_id), so those repeat and would
+    // collide. Two ways out, chosen per dataset:
+    //
+    //   key_parts  build a composite external_id from several columns —
+    //              use when the extra rows carry information worth keeping
+    //   dedupe     keep the first row per external_id — use when the dataset
+    //              is one dimension projected out of a wider grid
+    const iParts = (map.key_parts || []).map(byName);
+    const seen   = map.dedupe ? new Set() : null;
+    let dropped  = 0;
+
     data.forEach(row => {
-      // Report 4 ships four lookups in one grid, discriminated by LookupType.
-      if(iFilt >= 0 && map.filter_value){
+      // Optional row filter — drops RW subtotal lines, and discriminates when
+      // one report carries several lookup types.
+      if(iFilt >= 0 && map.filter_value != null){
         if(norm(unwrap(row[iFilt])) !== norm(map.filter_value)) return;
       }
       const obj = {};
       names.forEach((n, i) => { obj[n] = unwrap(row[i]); });
       const cell = i => (i >= 0 ? unwrap(row[i]) : null);
+
+      let ext;
+      if(iParts.length && iParts.every(i => i >= 0)){
+        ext = iParts.map(i => { const v = cell(i); return v == null ? '' : String(v); }).join('|');
+        if(!ext.replace(/\|/g,'')) ext = null;          // every part blank
+      } else {
+        const v = cell(iId);
+        ext = (v == null || String(v).trim() === '') ? null : String(v).trim();
+      }
+
+      if(seen && ext != null){
+        if(seen.has(ext)){ dropped++; return; }
+        seen.add(ext);
+      }
+
       let act = cell(iAct);
-      if(typeof act === 'string') act = /^(true|yes|y|1|active)$/i.test(act.trim());
+      if(typeof act === 'string'){
+        const s = act.trim();
+        act = /^(true|yes|y|1|active|system)$/i.test(s) ? true
+            : /^(false|no|n|0|inactive|disabled)$/i.test(s) ? false
+            : null;                                      // unknown vocabulary
+      }
       out.rows.push({
-        external_id: cell(iId) == null ? null : String(cell(iId)),
+        external_id: ext,
         name:        cell(iName),
         code:        cell(iCode),
         is_active:   typeof act === 'boolean' ? act : null,
         payload:     obj
       });
     });
+    if(dropped) out.deduped = dropped;
     return out;
   }
 
+  // Refresh only what's gone stale — the common case once everything's loaded
+  // once. Cheaper than a full sync and doesn't re-run reports needlessly.
+  window.__pcsSyncStale = async function(){
+    if(!_pcsProxyUrl()){ _pcsNoProxy(); return; }
+    const list = (_pcsState.datasets || []).filter(d => _pcsFreshness(d) === 'stale');
+    if(!list.length) return;
+    for(const d of list) await window.__pcsSyncOne(d.dataset_key);
+    if(typeof toast === 'function') toast('Refreshed ' + list.length + ' stale dataset' + (list.length === 1 ? '' : 's'), 3000, { kind:'success' });
+  };
+
   window.__pcsSyncAll = async function(){
+    // Check the proxy once here — otherwise a missing URL would prompt the
+    // user separately for every dataset in the loop.
+    if(!_pcsProxyUrl()){ _pcsNoProxy(); return; }
     const list = (_pcsState.datasets || []).filter(d => d.category === 'required' || d.category === 'attribution');
     if(!list.length) return;
     if(!confirm('Sync ' + list.length + ' datasets from Investran?\n\nThis runs them one at a time and may take a minute.')) return;
