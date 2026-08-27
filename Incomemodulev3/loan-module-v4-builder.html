@@ -2783,79 +2783,11 @@
       </div>
     </details>
 
-    <!-- ─── CONSTRUCTION / ARRANGER (mezz support) ───
-         Collapsed by default — only relevant for construction-finance,
-         mezzanine, and syndicated deals where senior debt sits above
-         this facility and the LVR/LTC/RLVR covenant math needs an
-         explicit "as-if-complete" valuation + TDC + QPS + NRV. Also
-         captures the lender role (arranger/manager vs lender of
-         record) which changes fee treatment. All fields optional. -->
-    <details class="builder-section" id="b-construction-section">
-      <summary>
-        <div class="builder-section-icon icon-emerald"><i class="ti ti-buildings" style="font-size:20px;"></i></div>
-        <div><div class="builder-section-title">Construction / arranger — mezz support</div><div class="builder-section-subtitle">Senior debt ref · valuation · LVR/LTC/RLVR inputs · arranger role. Leave blank for plain term loans.</div></div>
-      </summary>
-      <div class="builder-section-body">
-        <div class="b-field-grid">
-          <!-- Structure dropdown lives at the top of Deal Setup now (#b-deal-structure).
-               This panel only shows when structure = construction_mezz, so no
-               need to duplicate the picker here. -->
-          <div><label class="b-label">Lender role</label>
-            <select id="b-lender-role" class="b-input">
-              <option value="">— select —</option>
-              <option value="lender_of_record">Lender of record</option>
-              <option value="arranger_manager">Arranger / manager</option>
-              <option value="both">Both</option>
-            </select>
-          </div>
-          <div><label class="b-label">Senior debt provider</label><input id="b-senior-provider" type="text" placeholder="e.g. Major AU bank" class="b-input"/></div>
-          <div><label class="b-label">Senior debt limit</label><input id="b-senior-limit" type="number" min="0" step="1000000" placeholder="e.g. 130000000" class="b-input"/></div>
-          <div><label class="b-label">As-if-complete value</label><input id="b-aic-value" type="number" min="0" step="1000000" placeholder="Net of GST + selling costs" class="b-input"/></div>
-          <div><label class="b-label">Total development cost</label><input id="b-tdc" type="number" min="0" step="1000000" placeholder="Incl. senior finance costs" class="b-input"/></div>
-          <div><label class="b-label">Qualifying presales (QPS)</label><input id="b-qps" type="number" min="0" step="1000000" placeholder="e.g. 46500000" class="b-input"/></div>
-          <div><label class="b-label">Net realisation value (NRV)</label><input id="b-nrv" type="number" min="0" step="1000000" placeholder="Net of GST + selling costs" class="b-input"/></div>
-          <div><label class="b-label">Guarantor min net assets</label><input id="b-min-nav" type="number" min="0" step="1000000" placeholder="e.g. 15000000" class="b-input"/></div>
-          <!-- Cost-overrun mechanic: obligor guarantee % of TDC, plus the
-               fallback funding rate if investor A chooses to fund overrun.
-               Term sheet: 10% cost-overrun guarantee, investor fallback at
-               facility IRR + 5% margin, applied to the overrun portion only. -->
-          <div><label class="b-label">Cost-overrun guarantee (% of TDC)</label>
-            <input id="b-overrun-pct" type="number" min="0" max="100" step="0.5" placeholder="e.g. 10" class="b-input"/>
-            <div id="b-overrun-amount" class="text-[10px] text-gray-500 mt-1"></div>
-          </div>
-          <div><label class="b-label">Overrun funding rate (facility IRR + margin bps)</label>
-            <input id="b-overrun-margin-bps" type="number" min="0" step="25" placeholder="e.g. 500 = +5%" class="b-input"/>
-            <div class="text-[10px] text-gray-500 mt-1">Rate paid on investor-funded overruns. Only applied to the overrun portion.</div>
-          </div>
-          <!-- ─── QS-verified drawdown gating ─── term sheet: 30-day availability
-               period, $5m min drawdown, progressive on a cost-to-complete basis
-               against QS-verified progress. These four fields drive inline
-               validation on each tranche's drawdown rows. -->
-          <div><label class="b-label">Availability period (days from close)</label>
-            <input id="b-avail-days" type="number" min="0" step="1" placeholder="e.g. 30" class="b-input"/>
-            <div id="b-avail-window" class="text-[10px] text-gray-500 mt-1"></div>
-          </div>
-          <div><label class="b-label">Minimum drawdown ($)</label>
-            <input id="b-min-drawdown" type="number" min="0" step="500000" placeholder="e.g. 5000000" class="b-input"/>
-          </div>
-          <div><label class="b-label">Drawdown basis</label>
-            <select id="b-drawdown-basis" class="b-input">
-              <option value="">—</option>
-              <option value="lump_sum">Lump sum at close</option>
-              <option value="cost_to_complete">Cost-to-complete (QS-verified)</option>
-              <option value="periodic">Periodic (schedule)</option>
-              <option value="revolving">Revolving / borrowing-base</option>
-            </select>
-          </div>
-          <div style="display:flex; align-items:end;">
-            <label class="text-[11px] text-gray-700 flex items-center gap-2" style="cursor:pointer;">
-              <input id="b-qs-evidence" type="checkbox" style="width:14px; height:14px;"/>
-              Require QS progress evidence on each drawdown
-            </label>
-          </div>
-        </div>
-      </div>
-    </details>
+    <!-- Construction / arranger and Legal & compliance used to sit here.
+         Both moved below the core build flow on 2026-08-25 — see the end of
+         this section list. They're supplementary and apply to some deals
+         only, so leading with them pushed the fields used on every deal
+         further down the page. -->
 
     <!-- ─── BORROWING BASE CONFIGURATION ─── FirstAg support: shown only
          when facility.type = revolvingBorrowingBase. Toggled visible by
@@ -2896,76 +2828,6 @@
         <!-- Sub-panels for asset classes / locations / offtakers — rendered by
              window.__renderBBSubPanels() when the deal has a UUID. -->
         <div id="b-bb-subpanels" style="margin-top:16px;"></div>
-      </div>
-    </details>
-
-    <!-- ─── LEGAL & COMPLIANCE ─── mezz support: target close, intercreditor,
-         s128F, reimbursement floor, prepayment consent, governing law. -->
-    <details class="builder-section" id="b-legal-section">
-      <summary>
-        <div class="builder-section-icon icon-indigo"><i class="ti ti-gavel" style="font-size:20px;"></i></div>
-        <div>
-          <div class="builder-section-title">Legal &amp; compliance</div>
-          <div class="builder-section-subtitle">Target close · intercreditor deed · s128F public-offer · reimbursement floor · prepayment consent · governing law</div>
-        </div>
-      </summary>
-      <div class="builder-section-body">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div><label class="b-label">Target financial close date</label>
-            <input id="b-target-close" type="date" class="b-input"/>
-          </div>
-          <div><label class="b-label">Intercreditor deed reference</label>
-            <input id="b-intercreditor-ref" type="text" placeholder="e.g. ICD-2026-042 or 'signed 2026-04-15'" class="b-input"/>
-          </div>
-          <div><label class="b-label">Reimbursement min budget ($, ex-GST)</label>
-            <input id="b-reimbursement-min" type="number" min="0" step="10000" placeholder="e.g. 60000" class="b-input"/>
-          </div>
-          <div><label class="b-label">Governing law jurisdiction</label>
-            <select id="b-governing-law" class="b-input">
-              <option value="">—</option>
-              <option value="NSW">New South Wales (NSW)</option>
-              <option value="VIC">Victoria (VIC)</option>
-              <option value="QLD">Queensland (QLD)</option>
-              <option value="WA">Western Australia (WA)</option>
-              <option value="SA">South Australia (SA)</option>
-              <option value="ACT">Australian Capital Territory (ACT)</option>
-              <option value="TAS">Tasmania (TAS)</option>
-              <option value="NT">Northern Territory (NT)</option>
-              <option value="UK">England &amp; Wales (UK)</option>
-              <option value="NY">New York (US)</option>
-              <option value="DE">Delaware (US)</option>
-              <option value="OTHER">Other</option>
-            </select>
-          </div>
-          <div style="display:flex; align-items:end;">
-            <label class="text-[11px] text-gray-700 flex items-center gap-2" style="cursor:pointer;">
-              <input id="b-s128f" type="checkbox" style="width:14px; height:14px;"/>
-              s128F Public Offer (ITAA 1936) compliant
-            </label>
-          </div>
-          <div style="display:flex; align-items:end;">
-            <label class="text-[11px] text-gray-700 flex items-center gap-2" style="cursor:pointer;">
-              <input id="b-prepay-consent" type="checkbox" style="width:14px; height:14px;"/>
-              No prepayment without investor consent
-            </label>
-          </div>
-          <!-- Dual-book (secondary framework). Common when an AU fund sells
-               to US LPs (IFRS primary + US GAAP secondary) or a subsidiary
-               reports under local GAAP but rolls up to a group in IFRS. -->
-          <div><label class="b-label">Secondary reporting framework (optional)</label>
-            <select id="b-secondary-framework" class="b-input">
-              <option value="">— none · single book —</option>
-              <option value="IFRS">IFRS</option>
-              <option value="USGAAP">US GAAP</option>
-              <option value="ASPE">ASPE (Canada)</option>
-              <option value="AASB">AASB (Australia)</option>
-            </select>
-            <div class="text-[10px] text-gray-500 mt-1">When set, Accounting runs the engine twice and produces side-by-side JEs. Use for dual-GAAP reporting (e.g. AU fund with US LPs).</div>
-          </div>
-          <div><label class="b-label">Secondary framework — purpose (optional)</label>
-            <input id="b-secondary-framework-purpose" type="text" placeholder="e.g. US LP reporting · AASB group consolidation" class="b-input"/>
-          </div>
-        </div>
       </div>
     </details>
 
@@ -3217,6 +3079,158 @@
       <div class="builder-section-body">
         <div id="allocations-container" style="display:grid; gap:8px;">
           <div id="allocations-empty" class="text-[11px] text-gray-500 italic">No fund allocations. Click "Add allocation" to assign this deal to one or more funds (e.g. 60% PCS US Fund I, 40% PCS Cayman III). When empty, the deal is treated as 100% retained.</div>
+        </div>
+      </div>
+    </details>
+
+    <!-- ═══ Supplementary detail ═══════════════════════════════════════════
+         Moved here 2026-08-25 from directly under Deal Setup. Construction /
+         arranger applies only to construction-mezz deals, and Legal &
+         compliance is filled in once at close rather than while modelling —
+         so both sat above Facility Setup, Tranches and Fees for no good
+         reason. Same ids, same wiring; only the position changed.
+    ══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- ─── CONSTRUCTION / ARRANGER (mezz support) ───
+         Collapsed by default — only relevant for construction-finance,
+         mezzanine, and syndicated deals where senior debt sits above
+         this facility and the LVR/LTC/RLVR covenant math needs an
+         explicit "as-if-complete" valuation + TDC + QPS + NRV. Also
+         captures the lender role (arranger/manager vs lender of
+         record) which changes fee treatment. All fields optional. -->
+    <details class="builder-section" id="b-construction-section">
+      <summary>
+        <div class="builder-section-icon icon-emerald"><i class="ti ti-buildings" style="font-size:20px;"></i></div>
+        <div><div class="builder-section-title">Construction / arranger — mezz support</div><div class="builder-section-subtitle">Senior debt ref · valuation · LVR/LTC/RLVR inputs · arranger role. Leave blank for plain term loans.</div></div>
+      </summary>
+      <div class="builder-section-body">
+        <div class="b-field-grid">
+          <!-- Structure dropdown lives at the top of Deal Setup now (#b-deal-structure).
+               This panel only shows when structure = construction_mezz, so no
+               need to duplicate the picker here. -->
+          <div><label class="b-label">Lender role</label>
+            <select id="b-lender-role" class="b-input">
+              <option value="">— select —</option>
+              <option value="lender_of_record">Lender of record</option>
+              <option value="arranger_manager">Arranger / manager</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+          <div><label class="b-label">Senior debt provider</label><input id="b-senior-provider" type="text" placeholder="e.g. Major AU bank" class="b-input"/></div>
+          <div><label class="b-label">Senior debt limit</label><input id="b-senior-limit" type="number" min="0" step="1000000" placeholder="e.g. 130000000" class="b-input"/></div>
+          <div><label class="b-label">As-if-complete value</label><input id="b-aic-value" type="number" min="0" step="1000000" placeholder="Net of GST + selling costs" class="b-input"/></div>
+          <div><label class="b-label">Total development cost</label><input id="b-tdc" type="number" min="0" step="1000000" placeholder="Incl. senior finance costs" class="b-input"/></div>
+          <div><label class="b-label">Qualifying presales (QPS)</label><input id="b-qps" type="number" min="0" step="1000000" placeholder="e.g. 46500000" class="b-input"/></div>
+          <div><label class="b-label">Net realisation value (NRV)</label><input id="b-nrv" type="number" min="0" step="1000000" placeholder="Net of GST + selling costs" class="b-input"/></div>
+          <div><label class="b-label">Guarantor min net assets</label><input id="b-min-nav" type="number" min="0" step="1000000" placeholder="e.g. 15000000" class="b-input"/></div>
+          <!-- Cost-overrun mechanic: obligor guarantee % of TDC, plus the
+               fallback funding rate if investor A chooses to fund overrun.
+               Term sheet: 10% cost-overrun guarantee, investor fallback at
+               facility IRR + 5% margin, applied to the overrun portion only. -->
+          <div><label class="b-label">Cost-overrun guarantee (% of TDC)</label>
+            <input id="b-overrun-pct" type="number" min="0" max="100" step="0.5" placeholder="e.g. 10" class="b-input"/>
+            <div id="b-overrun-amount" class="text-[10px] text-gray-500 mt-1"></div>
+          </div>
+          <div><label class="b-label">Overrun funding rate (facility IRR + margin bps)</label>
+            <input id="b-overrun-margin-bps" type="number" min="0" step="25" placeholder="e.g. 500 = +5%" class="b-input"/>
+            <div class="text-[10px] text-gray-500 mt-1">Rate paid on investor-funded overruns. Only applied to the overrun portion.</div>
+          </div>
+          <!-- ─── QS-verified drawdown gating ─── term sheet: 30-day availability
+               period, $5m min drawdown, progressive on a cost-to-complete basis
+               against QS-verified progress. These four fields drive inline
+               validation on each tranche's drawdown rows. -->
+          <div><label class="b-label">Availability period (days from close)</label>
+            <input id="b-avail-days" type="number" min="0" step="1" placeholder="e.g. 30" class="b-input"/>
+            <div id="b-avail-window" class="text-[10px] text-gray-500 mt-1"></div>
+          </div>
+          <div><label class="b-label">Minimum drawdown ($)</label>
+            <input id="b-min-drawdown" type="number" min="0" step="500000" placeholder="e.g. 5000000" class="b-input"/>
+          </div>
+          <div><label class="b-label">Drawdown basis</label>
+            <select id="b-drawdown-basis" class="b-input">
+              <option value="">—</option>
+              <option value="lump_sum">Lump sum at close</option>
+              <option value="cost_to_complete">Cost-to-complete (QS-verified)</option>
+              <option value="periodic">Periodic (schedule)</option>
+              <option value="revolving">Revolving / borrowing-base</option>
+            </select>
+          </div>
+          <div style="display:flex; align-items:end;">
+            <label class="text-[11px] text-gray-700 flex items-center gap-2" style="cursor:pointer;">
+              <input id="b-qs-evidence" type="checkbox" style="width:14px; height:14px;"/>
+              Require QS progress evidence on each drawdown
+            </label>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- ─── LEGAL & COMPLIANCE ─── mezz support: target close, intercreditor,
+         s128F, reimbursement floor, prepayment consent, governing law. -->
+    <details class="builder-section" id="b-legal-section">
+      <summary>
+        <div class="builder-section-icon icon-indigo"><i class="ti ti-gavel" style="font-size:20px;"></i></div>
+        <div>
+          <div class="builder-section-title">Legal &amp; compliance</div>
+          <div class="builder-section-subtitle">Target close · intercreditor deed · s128F public-offer · reimbursement floor · prepayment consent · governing law</div>
+        </div>
+      </summary>
+      <div class="builder-section-body">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div><label class="b-label">Target financial close date</label>
+            <input id="b-target-close" type="date" class="b-input"/>
+          </div>
+          <div><label class="b-label">Intercreditor deed reference</label>
+            <input id="b-intercreditor-ref" type="text" placeholder="e.g. ICD-2026-042 or 'signed 2026-04-15'" class="b-input"/>
+          </div>
+          <div><label class="b-label">Reimbursement min budget ($, ex-GST)</label>
+            <input id="b-reimbursement-min" type="number" min="0" step="10000" placeholder="e.g. 60000" class="b-input"/>
+          </div>
+          <div><label class="b-label">Governing law jurisdiction</label>
+            <select id="b-governing-law" class="b-input">
+              <option value="">—</option>
+              <option value="NSW">New South Wales (NSW)</option>
+              <option value="VIC">Victoria (VIC)</option>
+              <option value="QLD">Queensland (QLD)</option>
+              <option value="WA">Western Australia (WA)</option>
+              <option value="SA">South Australia (SA)</option>
+              <option value="ACT">Australian Capital Territory (ACT)</option>
+              <option value="TAS">Tasmania (TAS)</option>
+              <option value="NT">Northern Territory (NT)</option>
+              <option value="UK">England &amp; Wales (UK)</option>
+              <option value="NY">New York (US)</option>
+              <option value="DE">Delaware (US)</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </div>
+          <div style="display:flex; align-items:end;">
+            <label class="text-[11px] text-gray-700 flex items-center gap-2" style="cursor:pointer;">
+              <input id="b-s128f" type="checkbox" style="width:14px; height:14px;"/>
+              s128F Public Offer (ITAA 1936) compliant
+            </label>
+          </div>
+          <div style="display:flex; align-items:end;">
+            <label class="text-[11px] text-gray-700 flex items-center gap-2" style="cursor:pointer;">
+              <input id="b-prepay-consent" type="checkbox" style="width:14px; height:14px;"/>
+              No prepayment without investor consent
+            </label>
+          </div>
+          <!-- Dual-book (secondary framework). Common when an AU fund sells
+               to US LPs (IFRS primary + US GAAP secondary) or a subsidiary
+               reports under local GAAP but rolls up to a group in IFRS. -->
+          <div><label class="b-label">Secondary reporting framework (optional)</label>
+            <select id="b-secondary-framework" class="b-input">
+              <option value="">— none · single book —</option>
+              <option value="IFRS">IFRS</option>
+              <option value="USGAAP">US GAAP</option>
+              <option value="ASPE">ASPE (Canada)</option>
+              <option value="AASB">AASB (Australia)</option>
+            </select>
+            <div class="text-[10px] text-gray-500 mt-1">When set, Accounting runs the engine twice and produces side-by-side JEs. Use for dual-GAAP reporting (e.g. AU fund with US LPs).</div>
+          </div>
+          <div><label class="b-label">Secondary framework — purpose (optional)</label>
+            <input id="b-secondary-framework-purpose" type="text" placeholder="e.g. US LP reporting · AASB group consolidation" class="b-input"/>
+          </div>
         </div>
       </div>
     </details>
@@ -12103,9 +12117,26 @@ window.SB = (function(){
           created_by:               _uid,
           updated_at:               new Date().toISOString()
         }));
-        const { error: cvErr } = await _client.from('covenants').insert(rows);
+        // Return the inserted rows so we can write the new ids back onto the
+        // in-memory covenants. This is a delete-then-insert, so every save
+        // mints fresh UUIDs — and anything still holding the old id is now
+        // holding a key that doesn't exist. syncBreachLog does exactly that,
+        // which is why it failed with a foreign-key violation on every run
+        // after the first save.
+        const { data: cvRows, error: cvErr } = await _client
+          .from('covenants').insert(rows).select('id, covenant_no');
         if(cvErr){ console.error('[SB] saveDeal: covenants:', cvErr); return { ok:false, reason: cvErr.message }; }
         counts.covenants = rows.length;
+        if(Array.isArray(cvRows)){
+          // covenant_no is 1-based and assigned from array order above, so it
+          // maps straight back to the source index.
+          const byNo = new Map(cvRows.map(r => [r.covenant_no, r.id]));
+          covList.forEach((c, i) => {
+            const fresh = byNo.get(i + 1);
+            if(fresh) c.id = fresh;
+          });
+          console.log('[SB] saveDeal: refreshed ' + cvRows.length + ' covenant id(s) in memory');
+        }
       }
 
       // Multi-fund Phase 1 — persist fund allocations for this deal. Uses the
@@ -12978,6 +13009,62 @@ window.SB = (function(){
       _reconnectAttempts = 0;
       _authKicked = false;
       return _tryReconnect('manual reconnect requested by user');
+    },
+    // ─── Diagnostic: force N client rebuilds and measure the damage ──────
+    // The "stuck until hard refresh" bug only appears after several rebuilds,
+    // which is why it took a week of normal use to reproduce and six failed
+    // fixes to chase. This forces the condition on demand.
+    //
+    // Each rebuild used to orphan a GoTrueClient auto-refresh ticker. Their
+    // effect is cumulative and shows up as ping latency climbing rebuild over
+    // rebuild, ending in a hang. So we rebuild N times and watch the latency.
+    //
+    // Run in the console:  await SB.diagnoseReconnect(6)
+    //
+    // Healthy   → latency flat, verdict PASS
+    // Leaking   → latency climbs or a ping times out, verdict FAIL
+    diagnoseReconnect: async function(n){
+      n = Math.min(Math.max(+n || 5, 1), 15);
+      const startBuilds = window.__sbClientBuilds || 0;
+      const results = [];
+      console.log('%c[SB-DIAG] forcing ' + n + ' client rebuilds…', 'font-weight:bold');
+
+      // Baseline on the current client.
+      let t0 = performance.now();
+      const baseOk = await _dbHealthPing();
+      const baseMs = Math.round(performance.now() - t0);
+      console.log('[SB-DIAG] baseline ping: ' + baseMs + 'ms · ' + (baseOk ? 'ok' : 'FAILED'));
+
+      for(let i = 1; i <= n; i++){
+        const built = await init();               // full rebuild, the leak path
+        t0 = performance.now();
+        const ok = await _dbHealthPing();
+        const ms = Math.round(performance.now() - t0);
+        results.push({ rebuild: i, built: !!built, ok, ms });
+        console.log('[SB-DIAG] rebuild ' + i + '/' + n + ' · ping ' + ms + 'ms · ' + (ok ? 'ok' : 'FAILED'));
+        if(!ok){ console.error('[SB-DIAG] ping failed after rebuild ' + i + ' — stopping'); break; }
+        await new Promise(r => setTimeout(r, 400));
+      }
+
+      const oks   = results.filter(r => r.ok);
+      const last  = oks.length ? oks[oks.length - 1].ms : null;
+      const worst = oks.length ? Math.max(...oks.map(r => r.ms)) : null;
+      const allOk = results.length === n && results.every(r => r.ok);
+      // A leak shows as sustained growth, not one slow sample. Compare the
+      // final ping against baseline with a generous allowance for noise.
+      const degraded = last != null && baseMs > 0 && last > Math.max(baseMs * 3, baseMs + 1500);
+      const verdict = allOk && !degraded ? 'PASS' : 'FAIL';
+
+      console.log('%c[SB-DIAG] ' + verdict, 'font-weight:bold; font-size:14px; color:' +
+        (verdict === 'PASS' ? '#16A34A' : '#DC2626'));
+      console.table(results);
+      console.log('[SB-DIAG] baseline ' + baseMs + 'ms → final ' + last + 'ms (worst ' + worst + 'ms) · ' +
+        'clients built this session: ' + startBuilds + ' → ' + (window.__sbClientBuilds || 0));
+      if(verdict === 'FAIL'){
+        console.warn('[SB-DIAG] Rebuilds are still degrading the connection. ' +
+          'Old clients are not being disposed cleanly — check stopAutoRefresh in init().');
+      }
+      return { verdict, baseMs, last, worst, results };
     },
     get isConnected(){ return _connected; },
     get heavyWriteDepth(){ return _heavyWriteDepth; },
