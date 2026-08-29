@@ -2770,9 +2770,14 @@
           </div>
           <div><label class="b-label">Deal ID</label><input id="b-deal-id" type="text" placeholder="e.g. AUR-2026-001 (auto-derived if blank)" class="b-input"/></div>
           <div><label class="b-label">Counterparty</label><input id="b-counterparty" type="text" placeholder="e.g. Aurora Holdings plc" class="b-input"/></div>
-          <div><label class="b-label">Legal Entity</label><input id="b-le" type="text" placeholder="e.g. Corporate Bank Ltd" class="b-input"/></div>
+          <!-- Legal Entity moved to its own section. It's now an allocation
+               across Investran entities rather than one free-text name, since
+               a deal can be owned by several. The input is kept hidden so the
+               ~20 places that read #b-le still resolve; it's no longer edited
+               here and no longer reaches DIU. -->
+          <input id="b-le" type="hidden" value=""/>
           <div><label class="b-label required">Currency</label>
-            <select id="b-currency" class="b-input"><option value="USD">USD</option><option value="GBP">GBP</option><option value="EUR">EUR</option><option value="CHF">CHF</option><option value="JPY">JPY</option></select>
+            <select id="b-currency" class="b-input" data-ccy-picker="1"><option value="USD">USD</option><option value="GBP">GBP</option><option value="EUR">EUR</option><option value="CHF">CHF</option><option value="JPY">JPY</option></select>
           </div>
           <div><label class="b-label required">Accounting Framework</label>
             <select id="b-framework" class="b-input"><option value="IFRS">IFRS</option><option value="USGAAP">US GAAP (CECL)</option><option value="ASPE">Canadian ASPE</option><option value="AASB">AASB (Australian)</option></select>
@@ -3123,10 +3128,22 @@
           Investran models them as separate records. <b>Autofill from deal</b> sets all three, then adjust.
         </div>
 
+        <!-- Deal name and Deal currency are NOT repeated here — they come from
+             Deal Setup. Two places to set the same value is two places to
+             disagree, and Investran would reject whichever was wrong. -->
         <div style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--n-500); margin-bottom:6px;">Deal</div>
+
+        <!-- Inherited values sit above the grid, not inside it — a full-width
+             note stretched across grid columns never lines up with the fields
+             either side of it. -->
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 11px; margin-bottom:10px;
+                    background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:6px;">
+          <i class="ti ti-arrow-down-left" style="font-size:14px; color:var(--n-400); flex-shrink:0;"></i>
+          <span style="font-size:10.5px; color:var(--n-500); flex-shrink:0;">From Deal Setup</span>
+          <span id="pp-deal-echo" style="font-size:11.5px; color:var(--n-900); font-weight:600;">—</span>
+        </div>
+
         <div class="b-field-grid" style="margin-bottom:14px;">
-          <div><label class="b-label">Deal name in Investran</label>
-            <input id="pp-deal-name" class="b-input" placeholder="blank = use this deal's name"/></div>
           <div><label class="b-label">Deal type</label>
             <select id="pp-deal-type" class="b-input">
               <option value="Direct Investment">Direct Investment</option>
@@ -3134,8 +3151,6 @@
             </select></div>
           <div><label class="b-label">Deal domain</label>
             <select id="pp-deal-domain" class="b-input"></select></div>
-          <div><label class="b-label">Deal currency</label>
-            <input id="pp-deal-ccy" class="b-input" placeholder="e.g. USD" maxlength="3" style="text-transform:uppercase;"/></div>
         </div>
 
         <div style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--n-500); margin-bottom:6px;">Issuer — the borrower</div>
@@ -3149,7 +3164,7 @@
           <div><label class="b-label">Linked organisation domain</label>
             <select id="pp-issuer-org-domain" class="b-input"></select></div>
           <div><label class="b-label">Issuer currency</label>
-            <input id="pp-issuer-ccy" class="b-input" placeholder="e.g. USD" maxlength="3" style="text-transform:uppercase;"/>
+            <select id="pp-issuer-ccy" class="b-input" data-ccy-picker="1"></select>
             <div class="text-[10px] text-gray-500 mt-1">The issuer's own reporting currency — not necessarily the deal currency.</div></div>
         </div>
 
@@ -3172,7 +3187,7 @@
             </datalist>
             <div class="text-[10px] text-gray-500 mt-1">Free text — the tenant's list may differ from the standard one.</div></div>
           <div><label class="b-label">Security currency</label>
-            <input id="pp-security-ccy" class="b-input" placeholder="e.g. USD" maxlength="3" style="text-transform:uppercase;"/></div>
+            <select id="pp-security-ccy" class="b-input" data-ccy-picker="1"></select></div>
         </div>
 
         <div id="pp-le-preview" style="margin-top:12px; padding:9px 12px; background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:6px; font-size:11px; color:var(--n-600);"></div>
@@ -15407,14 +15422,20 @@ function buildPortfolioPositionRows(inst){
     ? allocs.map(a => ({ name: a.leName, domain: a.leDomain || pp.dealDomain || '' }))
     : [{ name: baseLegalEntity, domain: '' }];   // fallback: whatever the deal carried
 
+  // Deal name and currency are single-sourced from Deal Setup. The position
+  // card deliberately doesn't carry them — one value, one place to change it.
+  const _deal = (typeof window !== 'undefined' && window.B && window.B.deal) || {};
+  const dealNameFromSetup = _deal.name || _deal.label || inst.deal || '';
+  const dealCcyFromSetup  = (_deal.currency || inst.currency || '').toUpperCase();
+
   for(const le of entities){
     for(const s of securities){
       rows.push({
         'Legal Entity':                       le.name || '',
-        'Deal':                               pp.dealName   || s.deal   || '',
+        'Deal':                               dealNameFromSetup || s.deal || '',
         'Deal Type':                          pp.dealType   || dealType || 'Direct Investment',
         'Deal Domain':                        pp.dealDomain || le.domain || '',
-        'Deal Currency':                      pp.dealCurrency || s.currency || '',
+        'Deal Currency':                      dealCcyFromSetup || s.currency || '',
         'Issuer':                             pp.issuer     || s.issuer || '',
         'Issuer Domain':                      pp.issuerDomain || le.domain || '',
         'Issuer Linked Organization':         pp.issuerLinkedOrg || pp.issuer || s.issuer || '',
@@ -35021,6 +35042,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     return window._leCache || [];
   }
   if(typeof window !== 'undefined') window._ensureLegalEntities = _ensureFundsCache;
+  // Guard so a re-render storm doesn't fire N concurrent loads.
+  let _leLoadInFlight = false;
 
   function renderAllocations(){
     const host = $b('allocations-container');
@@ -35054,14 +35077,36 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!list.length) return;
 
     const entities = window._leCache || [];
-    // Entities not yet synced — the picker would be empty and it wouldn't be
-    // obvious why, so say it once above the rows.
+
+    // An empty list means "not loaded yet", which is NOT the same as "these
+    // entities don't exist". Trigger a load and re-render rather than leaving
+    // the card in a state that misreports valid allocations as unknown.
     if(!entities.length){
       const note = document.createElement('div');
       note.setAttribute('data-fa-note', '1');
-      note.style.cssText = 'padding:8px 10px; background:#FFFBEB; border:1px solid #FCD34D; border-left:3px solid #F59E0B; border-radius:0 6px 6px 0; font-size:11px; color:#78350F;';
-      note.innerHTML = 'No legal entities loaded yet. Open <b>Tools → PCS Sync</b> and sync <b>Legal Entities</b> from Investran.';
+      note.style.cssText = 'padding:8px 10px; background:#EFF6FF; border:1px solid #BFDBFE; border-left:3px solid #3B82F6; border-radius:0 6px 6px 0; font-size:11px; color:#1E3A5F;';
+      note.innerHTML = '<i class="ti ti-loader-2" style="font-size:12px; vertical-align:-2px;"></i> Loading legal entities from Investran…';
       host.appendChild(note);
+
+      if(!_leLoadInFlight){
+        _leLoadInFlight = true;
+        _ensureFundsCache()
+          .then(list => {
+            _leLoadInFlight = false;
+            if(list && list.length){ renderAllocations(); return; }
+            // Empty. Three different reasons, three different messages —
+            // telling someone to run a sync when the real problem is the DB
+            // connection sends them down the wrong path.
+            const n = host.querySelector('[data-fa-note]');
+            if(!n) return;
+            const connected = !!(window.SB && window.SB.isConnected);
+            n.style.cssText = 'padding:8px 10px; background:#FFFBEB; border:1px solid #FCD34D; border-left:3px solid #F59E0B; border-radius:0 6px 6px 0; font-size:11px; color:#78350F;';
+            n.innerHTML = connected
+              ? 'No legal entities in the local cache. Open <b>Tools → PCS Sync</b> and sync <b>Legal Entities</b> from Investran.'
+              : 'Not connected to the database — can\'t load the entity list. Reconnect using the chip in the top bar, then reopen this deal.';
+          })
+          .catch(() => { _leLoadInFlight = false; });
+      }
     }
 
     list.forEach((a, idx) => {
@@ -35070,15 +35115,20 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       row.style.cssText = 'border:1px solid #fce7f3; border-radius:8px; padding:8px 10px; background:#FEF7FB; display:grid; grid-template-columns: minmax(260px,1.4fr) 90px 110px 110px 40px; gap:6px; align-items:center;';
       const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g,
         c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-      // Selected id may not be in the list if the entity was removed in
-      // Investran since. Keep it as an option so the row doesn't silently
-      // reset to blank and lose the allocation.
+      // Keep the selected entity as an option even when it isn't in the loaded
+      // list, so the row doesn't reset to blank and lose the allocation.
+      //
+      // Only label it "not in Investran" when we actually HAVE a list to
+      // check against. With an empty list we know nothing, and saying
+      // otherwise turns a loading state into a false accusation about valid
+      // data — which is exactly what it did to Monterra Capital Partners I.
       const known = entities.some(e => String(e.id) === String(a.fundId));
       const opts = entities.map(e =>
         `<option value="${esc(e.id)}" ${String(a.fundId) === String(e.id) ? 'selected' : ''}>${esc(e.name)}${e.domain ? ' · ' + esc(e.domain) : ''}${e.currency ? ' (' + esc(e.currency) + ')' : ''}</option>`
       ).join('');
       const orphan = (!known && a.fundId)
-        ? `<option value="${esc(a.fundId)}" selected>${esc(a.leName || a.fundId)} — not in Investran</option>` : '';
+        ? `<option value="${esc(a.fundId)}" selected>${esc(a.leName || a.fundId)}${entities.length ? ' — not in Investran' : ''}</option>`
+        : '';
       row.innerHTML = `
         <select data-fa-field="fundId" data-faidx="${idx}"
                 style="border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11.5px; background:white; font-weight:600;">
@@ -35145,23 +35195,74 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   }
 
   // ─── Investran position (PortfolioPosition) ───────────────────────────
+  // Deal name and deal currency are deliberately absent — they come from Deal
+  // Setup, and duplicating them here would let the two disagree.
   const _PP_FIELDS = {
-    'pp-deal-name':'dealName', 'pp-deal-type':'dealType', 'pp-deal-domain':'dealDomain',
-    'pp-deal-ccy':'dealCurrency', 'pp-issuer':'issuer', 'pp-issuer-domain':'issuerDomain',
+    'pp-deal-type':'dealType', 'pp-deal-domain':'dealDomain',
+    'pp-issuer':'issuer', 'pp-issuer-domain':'issuerDomain',
     'pp-issuer-org':'issuerLinkedOrg', 'pp-issuer-org-domain':'issuerLinkedOrgDomain',
     'pp-issuer-ccy':'issuerCurrency', 'pp-security':'security',
     'pp-security-type':'securityType', 'pp-security-ccy':'securityCurrency'
   };
 
+  // Currency options come from the Investran Currencies extract (RW report
+  // 36992, 193 rows), so a currency that can't resolve on import can't be
+  // chosen. Falls back to a short common list before the first sync.
+  const _CCY_FALLBACK = ['USD','EUR','GBP','AUD','CAD','CHF','JPY','NZD','SGD','HKD'];
+  function _ppFillCurrencies(){
+    let list = [];
+    try {
+      list = (window._ccyCache || [])
+        .map(c => ({ code: c.code, name: c.name }))
+        .filter(c => c.code);
+    } catch(_){}
+    if(!list.length) list = _CCY_FALLBACK.map(c => ({ code:c, name:'' }));
+    document.querySelectorAll('[data-ccy-picker]').forEach(el => {
+      const cur = el.value;
+      el.innerHTML = '<option value="">— select —</option>' +
+        list.map(c => '<option value="' + _htmlEsc(c.code) + '">' + _htmlEsc(c.code) +
+          (c.name ? ' · ' + _htmlEsc(c.name) : '') + '</option>').join('');
+      if(cur) el.value = cur;
+    });
+  }
+  // Load once from the synced reference data.
+  (function primeCurrencies(){
+    const go = () => {
+      if(!(window.SB && window.SB.fetchRefRows && window.SB.isConnected)) return false;
+      if(window._ccyCache) { _ppFillCurrencies(); return true; }
+      window.SB.fetchRefRows('currencies', { limit: 400 })
+        .then(rows => {
+          window._ccyCache = (rows || []).map(r => ({
+            code: r.code || (r.payload && r.payload.CurrencyISO) || '',
+            name: r.name || ''
+          })).filter(c => c.code);
+          console.log('[ccy] ' + window._ccyCache.length + ' currencies from Investran');
+          _ppFillCurrencies();
+        })
+        .catch(err => console.warn('[ccy] load failed, using fallback list:', err));
+      return true;
+    };
+    if(!go()){ let n = 0; const t = setInterval(() => { if(go() || ++n > 40) clearInterval(t); }, 500); }
+  })();
+
   // Domain pickers are populated from the entities synced from Investran, so
   // a value that can't resolve on import can't be chosen here either.
+  // HTML-escape. NOT the global escape() — that URL-encodes, turning
+  // "Investran Global" into "Investran%20Global" and "Dollar, US" into
+  // "Dollar%2C US" in the option text.
+  function _htmlEsc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
   function _ppFillDomains(){
     const domains = [...new Set((window._leCache || []).map(e => e.domain).filter(Boolean))].sort();
     ['pp-deal-domain','pp-issuer-domain','pp-issuer-org-domain'].forEach(id => {
       const el = $b(id); if(!el) return;
       const cur = el.value;
       el.innerHTML = '<option value="">— select —</option>' +
-        domains.map(d => '<option value="' + escape(d) + '">' + escape(d) + '</option>').join('');
+        domains.map(d => '<option value="' + _htmlEsc(d) + '">' + _htmlEsc(d) + '</option>').join('');
       if(cur) el.value = cur;
       else if(domains.includes('Investran Global')) el.value = 'Investran Global';
     });
@@ -35169,7 +35270,17 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
 
   window.__ppRender = function(){
     _ppFillDomains();
+    _ppFillCurrencies();
     const pp = (B.portfolioPosition = B.portfolioPosition || {});
+
+    // Echo what Deal Setup supplies, so it's obvious those values are coming
+    // from elsewhere rather than missing.
+    const echo = $b('pp-deal-echo');
+    if(echo){
+      const dn = (B.deal && (B.deal.name || B.deal.label)) || '';
+      const dc = (B.deal && B.deal.currency) || '';
+      echo.textContent = (dn || '(unnamed deal)') + (dc ? ' · ' + dc : '');
+    }
     Object.entries(_PP_FIELDS).forEach(([id, key]) => {
       const el = $b(id); if(el && pp[key] != null) el.value = pp[key];
     });
@@ -35188,7 +35299,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const allocs = (B.fundAllocations || []).filter(a => a && a.leName);
       box.innerHTML = allocs.length
         ? '<b>' + allocs.length + ' position row' + (allocs.length === 1 ? '' : 's') + '</b> — one per allocated legal entity: ' +
-          allocs.map(a => escape(a.leName)).join(' · ')
+          allocs.map(a => _htmlEsc(a.leName)).join(' · ')
         : '<span style="color:#B45309;">No legal entity allocated. Add one under <b>Legal entity &amp; allocations</b> — ' +
           'without it there is no entity to attach the position to.</span>';
     }
@@ -35202,10 +35313,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const d  = B.deal || {};
     const borrower = d.borrower || d.obligor || d.name || d.label || '';
     const ccy = (d.currency || 'USD').toUpperCase();
-    pp.dealName        = pp.dealName        || d.name || d.label || borrower;
+    // dealName and dealCurrency are not stored here — they're read from Deal
+    // Setup at export time.
     pp.dealType        = pp.dealType        || 'Direct Investment';
     pp.dealDomain      = pp.dealDomain      || 'Investran Global';
-    pp.dealCurrency    = pp.dealCurrency    || ccy;
     pp.issuer          = pp.issuer          || borrower;
     pp.issuerDomain    = pp.issuerDomain    || 'Investran Global';
     pp.issuerLinkedOrg = pp.issuerLinkedOrg || borrower;
@@ -35214,6 +35325,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     pp.security        = pp.security        || ((d.name || borrower) + ' Facility').trim();
     pp.securityType    = pp.securityType    || 'Loan';
     pp.securityCurrency= pp.securityCurrency|| ccy;
+    pp.issuerCurrency  = pp.issuerCurrency  || ccy;
     window.__ppRender();
     if(typeof toast === 'function') toast('Filled from the deal — review before sending', 3500, { kind:'info' });
   };
