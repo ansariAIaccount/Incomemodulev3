@@ -26,7 +26,10 @@ require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
 const multer  = require('multer');
-const FormData = require('form-data');
+// The `form-data` package is deliberately NOT used for the Investran upload —
+// its stream output is incompatible with Node's native fetch. forwardMultipart
+// uses globalThis.FormData instead. Import left out so nothing reaches for it
+// by habit; delete the dependency once nothing else needs it.
 const { randomUUID } = require('crypto');
 
 // PORT: cloud hosts (Render, Fly, Heroku, Railway) inject $PORT.
@@ -244,21 +247,56 @@ async function forwardJSON(method, path, body){
   return { status: res.status, ok: res.ok, data };
 }
 
+// Multipart upload. Two details from FIS's documented flow that were wrong
+// here and would have failed on the first call:
+//   · method is POST, not PUT
+//   · the form field is named "diuFile", not "file"
 async function forwardMultipart(path, fileBuffer, fileName, mime){
   if(!BASE_URL) throw new Error('INVESTRAN_BASE_URL not configured');
   const token = await getAccessToken();
   const url = BASE_URL + path;
-  const fd = new FormData();
-  fd.append('file', fileBuffer, { filename: fileName, contentType: mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  if(LOG_VERBOSE) console.log('[fwd] PUT', url, '(multipart,', fileBuffer.length, 'bytes)');
+
+  // Native FormData + Blob, NOT the `form-data` npm package.
+  //
+  // That package produces a Node stream. Node's built-in fetch (undici)
+  // doesn't consume it correctly — it sends the request without a usable
+  // body, and IIS/ASP.NET replies:
+  //   "Failed to read the request form. Unexpected end of Stream, the
+  //    content may have already been read by another component."
+  // Native FormData lets undici set the boundary and Content-Length itself.
+  //
+  // Do NOT set Content-Type here — undici must generate it with the boundary.
+  const fd = new globalThis.FormData();
+  const blob = new globalThis.Blob([fileBuffer], {
+    type: mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  fd.append('diuFile', blob, fileName);
+
+  if(LOG_VERBOSE) console.log('[fwd] POST', url, '(multipart diuFile,', fileBuffer.length, 'bytes)');
   const res = await fetch(url, {
-    method: 'PUT',
-    headers: Object.assign({ 'Authorization': 'Bearer ' + token }, fd.getHeaders(), tenantHeaders()),
+    method: 'POST',
+    headers: Object.assign({ 'Authorization': 'Bearer ' + token }, tenantHeaders()),
     body: fd
   });
   const txt = await res.text();
   let data; try { data = JSON.parse(txt); } catch(_){ data = { raw: txt }; }
   return { status: res.status, ok: res.ok, data };
+}
+
+// Several DIU endpoints return a BARE NUMBER rather than an object — job
+// creation returns 306, validate returns -154. Reading .Id off those yields
+// undefined, which silently broke the whole chain. Process ids are negative,
+// so a truthiness check isn't safe either.
+function idFrom(data){
+  if(typeof data === 'number') return data;
+  if(typeof data === 'string' && /^-?\d+$/.test(data.trim())) return parseInt(data, 10);
+  if(data && typeof data === 'object'){
+    for(const k of ['Id','id','ProcessId','JobId']){
+      if(data[k] != null) return data[k];
+    }
+    if(data.raw != null) return idFrom(data.raw);
+  }
+  return null;
 }
 
 // ──────── Routes ───────────────────────────────────────────────────
@@ -323,8 +361,42 @@ app.post('/api/diu/file', upload.single('file'), async (req, res) => {
     const r = await forwardMultipart(DIU_PATH + '/file',
       req.file.buffer, req.file.originalname || 'upload.xlsx', req.file.mimetype);
     if(!r.ok) return res.status(r.status).json({ ok:false, error: r.data });
-    const fileId = r.data && (r.data.Id != null ? r.data.Id : r.data.id);
-    res.json({ ok:true, fileId, file: r.data, sizeBytes: req.file.size });
+    const fileId = idFrom(r.data);
+    if(fileId == null){
+      return res.status(502).json({ ok:false, error:'no file id in upload response', raw: r.data });
+    }
+
+    // Investran virus-scans the upload. It comes back "NotScanned" and only
+    // becomes "Trusted" a moment later — creating a job against an unscanned
+    // file fails, so wait here rather than making every caller remember to.
+    // Skip with ?wait=false if you want the raw upload behaviour.
+    let scan = (r.data && (r.data.ScanStatus || r.data.scanStatus)) || 'NotScanned';
+    if(req.query.wait !== 'false'){
+      const deadline = Date.now() + 60000;
+      while(!/^trusted$/i.test(scan) && Date.now() < deadline){
+        if(/^(infected|failed|error|untrusted)$/i.test(scan)){
+          return res.status(422).json({ ok:false, fileId, scanStatus: scan,
+            error: 'file rejected by virus scan' });
+        }
+        await new Promise(r2 => setTimeout(r2, 1200));
+        const chk = await forwardJSON('GET', DIU_PATH + '/file/' + fileId, null);
+        scan = (chk.data && (chk.data.ScanStatus || chk.data.scanStatus)) || scan;
+      }
+      if(!/^trusted$/i.test(scan)){
+        return res.status(504).json({ ok:false, fileId, scanStatus: scan,
+          error: 'file did not reach Trusted within 60s — retry job creation later' });
+      }
+    }
+    res.json({ ok:true, fileId, scanStatus: scan, file: r.data, sizeBytes: req.file.size });
+  } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
+});
+
+// Scan status on demand, for callers that uploaded with ?wait=false.
+app.get('/api/diu/file/:fileId', async (req, res) => {
+  try {
+    const r = await forwardJSON('GET', DIU_PATH + '/file/' + req.params.fileId, null);
+    if(!r.ok) return res.status(r.status).json({ ok:false, error: r.data });
+    res.json({ ok:true, scanStatus: r.data && r.data.ScanStatus, file: r.data });
   } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
 });
 
@@ -341,45 +413,67 @@ app.post('/api/diu/jobs', async (req, res) => {
     const jobDto = {
       Name:       b.name || ('PCS-LoanModule-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'')),
       File:       b.File || { Id: b.fileId },
+      // Documented flow sends State on creation; without it the job isn't
+      // queued for processing.
+      State:      b.state || 'InProcess',
+      // -1 is Investran Global and is what the working example uses. The
+      // import=true domain list being empty does not block this.
       DomainId:   b.domainId != null ? b.domainId : -1,
-      FileOptions: b.fileOptions || { SkippedRows: 0 },
       ImportJobOptions: b.importJobOptions || {
-        SkipOnError:            false,
+        SkipOnError:            true,
         AllowUpdates:           true,
+        // Left false deliberately: letting the import mint new lookup values
+        // would create GL accounts and transaction types on the fly, which is
+        // exactly the silent-mess outcome the mapping work is meant to avoid.
         AddNewLookupValues:     false,
         IgnoreEmptyFields:      true,
         IgnoreCriticalWarnings: false
       }
     };
-    if(b.contactId != null) jobDto.ContactId = b.contactId;
-    if(Array.isArray(b.fileSheets)) jobDto.FileSheets = b.fileSheets;
+    if(b.fileOptions)              jobDto.FileOptions = b.fileOptions;
+    if(b.contactId != null)        jobDto.ContactId   = b.contactId;
+    if(Array.isArray(b.fileSheets))jobDto.FileSheets  = b.fileSheets;
 
-    // Template-derived jobs use a different endpoint + carry TemplateId.
+    // A DIU template defines the column mapping, so the template-derived
+    // endpoint is the normal path — a plain job has nothing to map against.
+    // Falls back to INVESTRAN_DIU_TEMPLATE_ID so every caller doesn't have to
+    // carry the id; pass templateId: null explicitly to force a plain job.
+    const envTemplate = process.env.INVESTRAN_DIU_TEMPLATE_ID
+      ? parseInt(process.env.INVESTRAN_DIU_TEMPLATE_ID, 10) : null;
+    const templateId = ('templateId' in b) ? b.templateId : envTemplate;
+
     let path = DIU_PATH + '/data-import-job';
-    if(b.templateId != null){
-      jobDto.TemplateId = b.templateId;
+    if(templateId != null){
+      jobDto.TemplateId = templateId;
       path = DIU_PATH + '/data-import-job-from-template';
     }
 
     const r = await forwardJSON('POST', path, jobDto);
-    if(!r.ok) return res.status(r.status).json({ ok:false, error: r.data });
-    const jobId = r.data && (r.data.Id != null ? r.data.Id : r.data.id);
-    res.json({ ok:true, jobId, job: r.data });
+    if(!r.ok) return res.status(r.status).json({ ok:false, error: r.data, sent: jobDto });
+    const jobId = idFrom(r.data);          // response is a bare number, e.g. 306
+    if(jobId == null){
+      return res.status(502).json({ ok:false, error:'no job id in response', raw: r.data });
+    }
+    res.json({ ok:true, jobId, templateId, job: r.data });
   } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
 });
 
 // ── 3 · Validate ──────────────────────────────────────────────────────
 // Schedules a validation process. Returns a processId to poll, NOT a
 // synchronous pass/fail — the old implementation assumed the latter.
+// Body is just { DataImportJobId } — "now" is the default. The ScheduleTime
+// this used to send isn't in the documented contract.
+// Response is a bare, NEGATIVE number (e.g. -154).
 app.post('/api/diu/jobs/:id/validate', async (req, res) => {
   try {
-    const body = {
-      DataImportJobId: parseInt(req.params.id, 10),
-      ScheduleTime:    (req.body && req.body.scheduleTime) || new Date().toISOString()
-    };
+    const body = { DataImportJobId: parseInt(req.params.id, 10) };
+    if(req.body && req.body.scheduleTime) body.ScheduleTime = req.body.scheduleTime;
     const r = await forwardJSON('POST', DIU_PATH + '/process-information/validate', body);
     if(!r.ok) return res.status(r.status).json({ ok:false, error: r.data });
-    const processId = r.data && (r.data.Id != null ? r.data.Id : r.data.ProcessId);
+    const processId = idFrom(r.data);
+    if(processId == null){
+      return res.status(502).json({ ok:false, error:'no process id in response', raw: r.data });
+    }
     res.json({ ok:true, processId, process: r.data });
   } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
 });
@@ -387,23 +481,35 @@ app.post('/api/diu/jobs/:id/validate', async (req, res) => {
 // ── 4 · Load (terminal — this is the post) ────────────────────────────
 app.post('/api/diu/jobs/:id/load', async (req, res) => {
   try {
-    const body = {
-      DataImportJobId: parseInt(req.params.id, 10),
-      ScheduleTime:    (req.body && req.body.scheduleTime) || new Date().toISOString()
-    };
+    const body = { DataImportJobId: parseInt(req.params.id, 10) };
+    if(req.body && req.body.scheduleTime) body.ScheduleTime = req.body.scheduleTime;
     const r = await forwardJSON('POST', DIU_PATH + '/process-information/load', body);
     if(!r.ok) return res.status(r.status).json({ ok:false, error: r.data });
-    const processId = r.data && (r.data.Id != null ? r.data.Id : r.data.ProcessId);
+    const processId = idFrom(r.data);
+    if(processId == null){
+      return res.status(502).json({ ok:false, error:'no process id in response', raw: r.data });
+    }
     res.json({ ok:true, processId, process: r.data });
   } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
 });
 
 // ── 5 · Process status / feedback / summary ───────────────────────────
+// Status lives in ProcessStatus ("Succeeded" / "Failed" / running). Lifted to
+// the top level so callers don't have to know the field name — the previous
+// poller looked for `Status` and would never have seen a terminal state.
 app.get('/api/diu/processes/:processId', async (req, res) => {
   try {
     const r = await forwardJSON('GET', DIU_PATH + '/process-information/' + req.params.processId, null);
     if(!r.ok) return res.status(r.status).json({ ok:false, error: r.data });
-    res.json({ ok:true, process: r.data });
+    const st = r.data && (r.data.ProcessStatus || r.data.Status || r.data.State) || null;
+    res.json({
+      ok: true,
+      status: st,
+      done: /^(succeeded|failed|error|cancelled|canceled)$/i.test(String(st || '')),
+      succeeded: /^succeeded$/i.test(String(st || '')),
+      message: (r.data && r.data.Message) || null,
+      process: r.data
+    });
   } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
 });
 

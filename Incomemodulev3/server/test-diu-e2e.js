@@ -90,22 +90,34 @@ function fail(step, detail){
   console.log('      import=true  → ' + importable.length + ' domain(s)');
   console.log('      import=false → ' + allDomains.length + ' domain(s)');
 
-  if(!importable.length){
-    console.log('');
-    allDomains.slice(0, 20).forEach(d =>
-      console.log('        · ' + String(d.Id != null ? d.Id : d.id).padStart(5) + '  ' + (d.Name || d.name || '')));
-    fail('no domain has import rights',
-      'The service account can SEE ' + allDomains.length + ' domains but can import into none.\n' +
-      'DIU job creation requires a DomainId from the import=true list, so nothing\n' +
-      'can be posted until that grant is made. This is a permissions change on the\n' +
-      'Investran side, not something the code can work around.\n\n' +
-      'Ask for: import rights for service account C-E1074557 on whichever of the\n' +
-      'domains above the loan GL should post into.');
-  }
+  // An empty import=true list is NOT a blocker. FIS's own working example
+  // passes DomainId -1 (Investran Global) directly, so the earlier hard stop
+  // here was wrong — it refused to try something that works.
+  let domainId = process.env.DIU_DOMAIN_ID != null ? +process.env.DIU_DOMAIN_ID
+               : (importable.length
+                   ? (importable[0].Id != null ? importable[0].Id : importable[0].id)
+                   : -1);
+  const named = allDomains.find(d => String(d.Id != null ? d.Id : d.id) === String(domainId));
+  console.log('      → using DomainId ' + domainId +
+    (named ? ' · ' + (named.Name || named.name) : '') +
+    (importable.length ? '' : '  (import list empty — using the documented default)'));
 
-  const domainId = importable[0].Id != null ? importable[0].Id : importable[0].id;
-  const domainNm = importable[0].Name || importable[0].name || '';
-  console.log('      ✓ using domain ' + domainId + ' · ' + domainNm);
+  // A DIU template defines the column mapping. Without one the job has
+  // nothing to map the workbook against, so make the omission explicit
+  // rather than letting it fail deep in validation.
+  // .env carries INVESTRAN_DIU_TEMPLATE_ID (the proxy's name for it); allow
+  // DIU_TEMPLATE_ID as a per-run override.
+  const templateId = process.env.DIU_TEMPLATE_ID ? +process.env.DIU_TEMPLATE_ID
+                   : process.env.INVESTRAN_DIU_TEMPLATE_ID ? +process.env.INVESTRAN_DIU_TEMPLATE_ID
+                   : null;
+  if(!templateId){
+    console.log('\n  ⚠ No DIU_TEMPLATE_ID set. The documented flow creates jobs from a');
+    console.log('    template, which is what maps our columns to Transaction fields.');
+    console.log('    Set it once the template exists in Investran:');
+    console.log('        DIU_TEMPLATE_ID=302 node test-diu-e2e.js <file.xlsx>');
+  } else {
+    console.log('      → template ' + templateId);
+  }
 
   // ─── 2 · Upload the workbook ─────────────────────────────────────────
   if(!FILE){
@@ -123,22 +135,27 @@ function fail(step, detail){
   fd.append('file', new Blob([buf], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   }), path.basename(abs));
+  // The proxy waits for the virus scan to reach Trusted before returning —
+  // a job created against an unscanned file is rejected.
   const up = await call('POST', PROXY + '/api/diu/file', { body: fd });
   if(up.status < 200 || up.status >= 300 || !up.json || !up.json.ok){
     fail('file upload', 'HTTP ' + up.status + '\n' + String(up.txt).slice(0, 500));
   }
   const fileId = up.json.fileId;
-  console.log('      ✓ fileId ' + fileId);
+  console.log('      ✓ fileId ' + fileId + ' · scan ' + (up.json.scanStatus || '?'));
 
   // ─── 3 · Create the job ──────────────────────────────────────────────
   console.log('\n  3 · Create import job');
+  const jobBody = {
+    fileId,
+    domainId,
+    state: 'InProcess',
+    name: 'PCS-LoanModule-TEST-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'')
+  };
+  if(templateId) jobBody.templateId = templateId;
   const job = await call('POST', PROXY + '/api/diu/jobs', {
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fileId,
-      domainId,
-      name: 'PCS-LoanModule-TEST-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'')
-    })
+    body: JSON.stringify(jobBody)
   });
   if(job.status < 200 || job.status >= 300 || !job.json || !job.json.ok){
     fail('job creation', 'HTTP ' + job.status + '\n' + String(up.txt && job.txt || job.txt).slice(0, 700));
@@ -158,16 +175,18 @@ function fail(step, detail){
   const processId = val.json.processId;
   console.log('      processId ' + processId);
 
-  let state = null;
+  // ProcessStatus, surfaced by the proxy as .status with a .done flag.
+  let state = null, ok = false;
   for(let i = 0; i < 60; i++){
     await sleep(i < 5 ? 1000 : 2500);
     const st = await call('GET', PROXY + '/api/diu/processes/' + processId);
-    const p = (st.json && (st.json.process || st.json)) || {};
-    state = p.Status || p.status || p.State || p.state;
+    state = (st.json && st.json.status) || null;
+    ok    = !!(st.json && st.json.succeeded);
     process.stdout.write('.');
-    if(/complet|succe|fail|error|cancel/i.test(String(state))) break;
+    if(st.json && st.json.done) break;
   }
-  console.log('\n      status: ' + state);
+  console.log('\n      ProcessStatus: ' + state + (ok ? '  ✓' : ''));
+  if(!ok) console.log('      (validation did not succeed — feedback below should say why)');
 
   // ─── 5 · Feedback ────────────────────────────────────────────────────
   console.log('\n  5 · Validation feedback');

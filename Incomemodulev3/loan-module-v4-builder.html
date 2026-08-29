@@ -1819,7 +1819,7 @@
     <i class="ti ti-file-certificate" aria-hidden="true"></i>Credit agreements
   </button>
   <button class="v4-sb-item" onclick="window.openManageFundsModal && window.openManageFundsModal()">
-    <i class="ti ti-wallet" aria-hidden="true"></i>Manage funds
+    <i class="ti ti-wallet" aria-hidden="true"></i>Manage legal entities
   </button>
   <!-- Admin-only. Hidden by default; window.__applyAdminVisibility() unhides
        it once SB.isAdmin === true (fires on auth state change + init). -->
@@ -2049,7 +2049,7 @@
     { id:'open-regulatory',  label:'Open regulatory reports', hint:'Form PF · AIFMD · FR Y-14Q',         icon:'ti-file-search',  fn:() => window.openRegulatoryModal && window.openRegulatoryModal() },
     { id:'open-financials',  label:'Open borrower financials', hint:'AI-extract statements',            icon:'ti-report-analytics', fn:() => window.openFinancialsModal && window.openFinancialsModal() },
     { id:'open-ca',          label:'Open credit agreements',hint:'Browse · AI-extract from PDF',         icon:'ti-file-certificate', fn:() => window.openCreditAgreementsListModal && window.openCreditAgreementsListModal() },
-    { id:'open-funds',       label:'Manage funds',          hint:'Create / edit fund allocations',       icon:'ti-wallet',       fn:() => window.openManageFundsModal && window.openManageFundsModal() },
+    { id:'open-funds',       label:'Manage legal entities',          hint:'Legal entities synced from Investran', icon:'ti-wallet',       fn:() => window.openManageFundsModal && window.openManageFundsModal() },
     { id:'open-waterfall',   label:'Open waterfall',        hint:'Cash distribution simulator (mezz)',   icon:'ti-hierarchy-2', fn:() => window.openWaterfallModal && window.openWaterfallModal() },
     { id:'open-rate-curves', label:'Open rate curves',      hint:'BBSY · SOFR · SONIA · €STR · EURIBOR · BBSW', icon:'ti-chart-line', fn:() => window.openRateFixingsModal && window.openRateFixingsModal() },
     { id:'open-borrowing-base', label:'Open borrowing base', hint:'FirstAg-style revolving BB facility', icon:'ti-scale', fn:() => window.openBorrowingBaseModal && window.openBorrowingBaseModal() },
@@ -2241,7 +2241,7 @@
 
       <!-- ═══ Tools master menu ═══
            Consolidates the everyday tool set (Portfolio · Regulatory ·
-           Borrower Financials · Credit Agreements · Manage funds) behind
+           Borrower Financials · Credit Agreements · Manage legal entities) behind
            one entry point. The two badge-carrying tools (Notices + Watchlist)
            stay as standalone chips because operators need their counts
            visible without opening a menu. -->
@@ -2249,7 +2249,7 @@
         <button id="tools-menu-btn" onclick="window.toggleToolsMenu && window.toggleToolsMenu(event)"
                 class="chip"
                 style="font-size:11px; cursor:pointer; background:linear-gradient(135deg,#EEF2FF 0%,#E0E7FF 100%); color:#3730A3; border:1px solid #A5B4FC; padding:3px 9px; display:inline-flex; align-items:center; gap:5px;"
-                title="Tools — Portfolio, Regulatory, Borrower Financials, Credit Agreements, Manage funds">
+                title="Tools — Portfolio, Regulatory, Borrower Financials, Credit Agreements, Manage legal entities">
           <span class="material-icons-outlined" style="font-size:13px;">apps</span>
           Tools
           <span class="material-icons-outlined" style="font-size:14px; margin-left:2px;">arrow_drop_down</span>
@@ -2298,7 +2298,7 @@
                   onmouseover="this.style.background='#F3F4F6'" onmouseout="this.style.background='transparent'">
             <span class="material-icons-outlined" style="font-size:18px; color:#0891b2;">account_balance_wallet</span>
             <div style="flex:1;">
-              <div style="font-weight:600;">Manage funds</div>
+              <div style="font-weight:600;">Manage legal entities</div>
               <div style="font-size:10.5px; color:#6B7280;">Create · edit fund allocations across deals</div>
             </div>
           </button>
@@ -3055,21 +3055,26 @@
       </div>
     </details>
 
-    <!-- ─── FUNDS & ALLOCATIONS (Multi-fund Phase 1) ─── -->
+    <!-- ─── LEGAL ENTITY & ALLOCATIONS ───
+         Ownership of the deal across Investran legal entities. This drives the
+         GL split: each journal is emitted once per entity, scaled to its
+         share, and carries that entity into the DIU Legal Entity column.
+         Allocations need not sum to 100% — the remainder is owned by a fund
+         administered elsewhere and is deliberately not posted. -->
     <details class="builder-section">
       <summary>
         <div class="builder-section-icon" style="background:linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%); color:#9d174d;"><span class="material-icons-outlined" style="font-size:20px;">account_balance</span></div>
         <div style="flex:1;">
-          <div class="builder-section-title">Funds &amp; Allocations
+          <div class="builder-section-title">Legal entity &amp; allocations
             <span id="allocations-count-chip" style="font-size:10px; font-weight:600; background:#fce7f3; color:#9d174d; padding:2px 8px; border-radius:10px; margin-left:6px;">0</span>
             <span id="allocations-sum-chip" style="font-size:10px; font-weight:600; background:#F1F5F9; color:#475569; padding:2px 8px; border-radius:10px; margin-left:4px;">0%</span>
           </div>
-          <div class="builder-section-subtitle">Split this deal across multiple PE funds. Drives fund-scoped Regulatory reports + fund filter on Portfolio + Watchlist.</div>
+          <div class="builder-section-subtitle">Ownership split across Investran legal entities. Journals post per entity at its share — anything unallocated is held elsewhere and isn't posted.</div>
         </div>
         <div style="display:flex; gap:6px;" onclick="event.stopPropagation()">
           <button onclick="window.openManageFundsModal && window.openManageFundsModal()"
-                  class="mat-btn outline !py-1 !px-2 text-[11px]" title="Create + edit + delete fund entities">
-            <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">tune</span> Manage funds
+                  class="mat-btn outline !py-1 !px-2 text-[11px]" title="Browse the legal entities synced from Investran">
+            <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">tune</span> Manage legal entities
           </button>
           <button id="btn-add-allocation" class="add-btn-pill" onclick="window.addFundAllocationRow && window.addFundAllocationRow(); event.stopPropagation()">
             <i class="ti ti-plus" aria-hidden="true"></i>Add allocation
@@ -3078,8 +3083,99 @@
       </summary>
       <div class="builder-section-body">
         <div id="allocations-container" style="display:grid; gap:8px;">
-          <div id="allocations-empty" class="text-[11px] text-gray-500 italic">No fund allocations. Click "Add allocation" to assign this deal to one or more funds (e.g. 60% PCS US Fund I, 40% PCS Cayman III). When empty, the deal is treated as 100% retained.</div>
+          <div id="allocations-empty" class="text-[11px] text-gray-500 italic">No allocations. Click "Add allocation" to assign this deal across Investran legal entities (e.g. 60% Monterra Capital Partners IV, 30% FIS Master Fund). When empty, journals post undivided under the deal's own legal entity.</div>
         </div>
+      </div>
+    </details>
+
+    <!-- ─── INVESTRAN POSITION (PortfolioPosition DIU) ───
+         Deal, issuer and security master data. This is the record Investran
+         needs to EXIST before a journal can reference it — the GL validation
+         failures on "[Field:Deal] ... was not found" are exactly this gap.
+
+         Legal Entity is not entered here. It comes from Legal entity &
+         allocations, so a deal split across three entities emits three
+         position rows. Storing it twice would let the two disagree. -->
+    <details class="builder-section" id="b-position-section">
+      <summary>
+        <div class="builder-section-icon" style="background:linear-gradient(135deg,#cffafe 0%,#a5f3fc 100%); color:#155e75;"><i class="ti ti-building-bank" style="font-size:20px;"></i></div>
+        <div style="flex:1;">
+          <div class="builder-section-title">Investran position
+            <span id="pp-status-chip" style="font-size:10px; font-weight:600; background:#F1F5F9; color:#475569; padding:2px 8px; border-radius:10px; margin-left:6px;">not set</span>
+          </div>
+          <div class="builder-section-subtitle">Deal · issuer · security records sent to Investran so journal entries can resolve them. One row per allocated legal entity.</div>
+        </div>
+        <div style="display:flex; gap:6px;" onclick="event.stopPropagation()">
+          <button onclick="window.__ppAutofill && window.__ppAutofill()"
+                  class="mat-btn outline !py-1 !px-2 text-[11px]" title="Fill from the deal — borrower name, currency and facility">
+            <i class="ti ti-wand" style="font-size:13px; vertical-align:-2px;"></i> Autofill from deal
+          </button>
+          <button onclick="window.__ppPreview && window.__ppPreview()"
+                  class="mat-btn outline !py-1 !px-2 text-[11px]">
+            <i class="ti ti-table" style="font-size:13px; vertical-align:-2px;"></i> Preview &amp; send
+          </button>
+        </div>
+      </summary>
+      <div class="builder-section-body">
+
+        <div style="font-size:10.5px; color:var(--n-500); margin-bottom:10px; line-height:1.5;">
+          For a bilateral loan the borrower is usually the same name as Deal, Issuer and Linked organisation —
+          Investran models them as separate records. <b>Autofill from deal</b> sets all three, then adjust.
+        </div>
+
+        <div style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--n-500); margin-bottom:6px;">Deal</div>
+        <div class="b-field-grid" style="margin-bottom:14px;">
+          <div><label class="b-label">Deal name in Investran</label>
+            <input id="pp-deal-name" class="b-input" placeholder="blank = use this deal's name"/></div>
+          <div><label class="b-label">Deal type</label>
+            <select id="pp-deal-type" class="b-input">
+              <option value="Direct Investment">Direct Investment</option>
+              <option value="Fund Investment">Fund Investment</option>
+            </select></div>
+          <div><label class="b-label">Deal domain</label>
+            <select id="pp-deal-domain" class="b-input"></select></div>
+          <div><label class="b-label">Deal currency</label>
+            <input id="pp-deal-ccy" class="b-input" placeholder="e.g. USD" maxlength="3" style="text-transform:uppercase;"/></div>
+        </div>
+
+        <div style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--n-500); margin-bottom:6px;">Issuer — the borrower</div>
+        <div class="b-field-grid" style="margin-bottom:14px;">
+          <div><label class="b-label">Issuer</label>
+            <input id="pp-issuer" class="b-input" placeholder="Borrower legal name"/></div>
+          <div><label class="b-label">Issuer domain</label>
+            <select id="pp-issuer-domain" class="b-input"></select></div>
+          <div><label class="b-label">Linked organisation</label>
+            <input id="pp-issuer-org" class="b-input" placeholder="usually the same as Issuer"/></div>
+          <div><label class="b-label">Linked organisation domain</label>
+            <select id="pp-issuer-org-domain" class="b-input"></select></div>
+          <div><label class="b-label">Issuer currency</label>
+            <input id="pp-issuer-ccy" class="b-input" placeholder="e.g. USD" maxlength="3" style="text-transform:uppercase;"/>
+            <div class="text-[10px] text-gray-500 mt-1">The issuer's own reporting currency — not necessarily the deal currency.</div></div>
+        </div>
+
+        <div style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--n-500); margin-bottom:6px;">Security — the loan instrument</div>
+        <div class="b-field-grid">
+          <div><label class="b-label">Security</label>
+            <input id="pp-security" class="b-input" placeholder="e.g. Acme Term Loan B"/></div>
+          <div><label class="b-label">Security type</label>
+            <input id="pp-security-type" class="b-input" list="pp-sectype-list" placeholder="Loan"/>
+            <datalist id="pp-sectype-list">
+              <option value="Loan"></option><option value="Bank Debt"></option>
+              <option value="Senior Debt"></option><option value="Subordinated Debt"></option>
+              <option value="Bridge Loan"></option><option value="Convertible Debt"></option>
+              <option value="Debt"></option><option value="Bond"></option>
+              <option value="Bond (Debt)"></option><option value="Government Debt"></option>
+              <option value="Swap Debt"></option><option value="Preferred Stock"></option>
+              <option value="Common Stock"></option><option value="Equity"></option>
+              <option value="Partnership Interest"></option><option value="Warrant"></option>
+              <option value="Real Estate"></option><option value="N/A"></option>
+            </datalist>
+            <div class="text-[10px] text-gray-500 mt-1">Free text — the tenant's list may differ from the standard one.</div></div>
+          <div><label class="b-label">Security currency</label>
+            <input id="pp-security-ccy" class="b-input" placeholder="e.g. USD" maxlength="3" style="text-transform:uppercase;"/></div>
+        </div>
+
+        <div id="pp-le-preview" style="margin-top:12px; padding:9px 12px; background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:6px; font-size:11px; color:var(--n-600);"></div>
       </div>
     </details>
 
@@ -3921,7 +4017,8 @@
           <span id="postback-status-chip" class="chip amber" style="font-size:9px; margin-left:auto;">HELD</span>
         </div>
         <select id="opt-postback-status" class="b-input" style="width:100%; padding:5px 8px; font-size:12px;"
-                onchange="try{ if(window.B&&window.B.deal){ window.B.deal.postbackStatus=this.value; } window.PCS_POSTBACK_STATUS=this.value; var c=document.getElementById('postback-status-chip'); if(c){ c.textContent=this.value.toUpperCase(); c.className='chip '+(this.value==='held'?'amber':this.value==='draft'?'gray':this.value==='approved'?'amber':'blue'); } }catch(_){}">
+                title="Held is the only status enabled — Investran's Batch Status list has no Draft or Approved."
+                onchange="try{ if(this.value!=='held'){ this.value='held'; } if(window.B&&window.B.deal){ window.B.deal.postbackStatus='held'; } window.PCS_POSTBACK_STATUS='held'; }catch(_){}">
           <option value="held" selected>Held — lands in Investran, not yet in the GL</option>
           <option value="draft"    disabled>Draft — not in Investran's status list</option>
           <option value="approved" disabled>Approved — not in Investran's status list</option>
@@ -3965,6 +4062,17 @@
           <button type="button" class="mat-btn outline" onclick="window.__diuPreviewDownload && window.__diuPreviewDownload()">
             <i class="ti ti-download" style="font-size:14px;"></i>Download .xlsx
           </button>
+          <!-- Validate runs the whole chain against Investran but stops short
+               of posting. Separating it from Send makes "check it" the cheap,
+               obvious action and "write to the ledger" the deliberate one. -->
+          <button type="button" id="btn-diu-validate" class="mat-btn outline"
+                  onclick="window.__diuSubmit && window.__diuSubmit('validate')">
+            <i class="ti ti-checkup-list" style="font-size:14px;"></i>Validate in Investran
+          </button>
+          <button type="button" id="btn-diu-send" class="mat-btn"
+                  onclick="window.__diuSubmit && window.__diuSubmit('load')">
+            <i class="ti ti-cloud-upload" style="font-size:14px;"></i>Send to Investran
+          </button>
           <button type="button" class="mat-btn outline" onclick="window.__diuPreviewClose && window.__diuPreviewClose()" aria-label="Close">
             <i class="ti ti-x" style="font-size:14px;"></i>
           </button>
@@ -3983,6 +4091,7 @@
         <div id="diu-prev-meta" style="font-size:11px; color:var(--n-600);">—</div>
       </div>
 
+      <div id="diu-prev-issues" style="display:none; padding:10px 18px 0;"></div>
       <div id="diu-prev-body" style="flex:1; overflow:auto; background:var(--surface-2,white);"></div>
 
       <div style="padding:9px 18px; border-top:0.5px solid var(--n-200); background:var(--n-50,#FAFAFA); font-size:10.5px; color:var(--n-500); display:flex; align-items:center; gap:8px;">
@@ -6105,8 +6214,8 @@
               <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
                 LE domain
               </label>
-              <input id="diucfg-le-domain" type="text" placeholder="NWF" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
-              <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Default: NWF</div>
+              <input id="diucfg-le-domain" type="text" placeholder="leave blank — comes from the legal entity" style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
+              <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Override only. Normally the domain comes from the allocated legal entity — e.g. Investran Global.</div>
             </div>
             <div>
               <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
@@ -6116,6 +6225,31 @@
               <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Default: No Allocation</div>
             </div>
           </div>
+          <!-- Two DIU templates, two different column layouts. Journals use the
+               Transaction template configured on the proxy; deal master data
+               uses the PortfolioPosition one, set here. -->
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
+            <div style="display:grid; gap:10px; grid-template-columns:1fr 1fr;">
+              <div>
+                <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
+                  Transaction template
+                </label>
+                <input type="text" value="308 · set on the proxy" readonly
+                       style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.03); color:#94A3B8; font-family:ui-monospace,monospace; font-size:11px;"/>
+                <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Journal entries · <code style="background:rgba(255,255,255,0.1); padding:1px 4px; border-radius:3px;">INVESTRAN_DIU_TEMPLATE_ID</code></div>
+              </div>
+              <div>
+                <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
+                  Position template
+                </label>
+                <input id="diucfg-position-template" type="text" inputmode="numeric" placeholder="e.g. 309"
+                       oninput="try{ localStorage.setItem('pcs_v3_diu_position_template', this.value.trim()); }catch(_){}"
+                       style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
+                <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Deal / issuer / security master data — 13 columns, sheet <b>PortfolioPosition</b>.</div>
+              </div>
+            </div>
+          </div>
+
           <!-- Import-rights blocker. Surfaced here because this is where someone
                configuring the outbound path would look when a job fails. -->
           <div id="inv-domain-warning" style="display:none; margin-top:12px; padding:10px 12px; background:rgba(180,83,9,0.18); border:1px solid #B45309; border-left:3px solid #F59E0B; border-radius:6px; font-size:11px; color:#FDE68A; line-height:1.55;"></div>
@@ -6551,10 +6685,13 @@
   </div>
 </div>
 
-<!-- ═══ Manage funds (Multi-fund Phase 1) ═══
-     CRUD for the fund entity. Funds are shared across teams (RLS: everyone
-     can READ; only owner + admin can UPDATE/DELETE). Domicile + regulator
-     scope drive Regulatory Reports scoping. -->
+<!-- ═══ Manage legal entities ═══
+     Read-only. Investran owns the entity master — these come from RW report
+     36989 via PCS Sync. There's deliberately no create/edit here: an entity
+     invented locally would have no Investran id, so any journal posted to it
+     would fail the DIU import on an unresolved lookup. To add an entity, add
+     it in Investran and re-sync.
+     Kept the manage-funds-* element ids so existing wiring resolves. -->
 <div id="manage-funds-modal" class="json-modal" style="display:none">
   <div class="json-modal-bd" onclick="window.closeManageFundsModal && window.closeManageFundsModal()"></div>
   <div class="json-modal-pn" style="width:min(1100px,96vw); max-height:92vh;">
@@ -6562,16 +6699,14 @@
       <div>
         <div class="font-semibold text-[14px] flex items-center gap-2">
           <span class="material-icons-outlined text-[18px]" style="color:#9D174D">account_balance</span>
-          Manage funds
+          Manage legal entities
         </div>
-        <div class="text-[11px] text-gray-500">Fund entities that hold this firm's loans. Domicile + regulator scope drive Form PF / AIFMD / Y-14Q scoping.</div>
+        <div class="text-[11px] text-gray-500">Entities synced from Investran. Deals are allocated across these, and each journal posts under the entity that owns it.</div>
       </div>
       <div class="flex items-center gap-2">
-        <button onclick="window.showNewFundForm && window.showNewFundForm()"
-                class="mat-btn primary !py-1 !px-3 text-[11px]">
-          <span class="material-icons-outlined text-[14px]" style="vertical-align:-2px;">add</span> New fund
-        </button>
-        <button onclick="window.refreshManageFunds && window.refreshManageFunds()"
+        <input id="le-search" placeholder="Search name or domain…" oninput="window.refreshManageFunds && window.refreshManageFunds()"
+               style="padding:4px 9px; border:1px solid var(--n-200,#E5E7EB); border-radius:6px; font-size:11.5px; width:210px;"/>
+        <button onclick="window.refreshManageFunds && window.refreshManageFunds(true)"
                 class="mat-btn outline !py-1 !px-2 text-[11px]"><span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">refresh</span> Reload</button>
         <button class="mat-btn outline !py-1 !px-2" onclick="window.closeManageFundsModal && window.closeManageFundsModal()" title="Close">
           <span class="material-icons-outlined text-[16px]">close</span>
@@ -6579,53 +6714,14 @@
       </div>
     </div>
     <div class="json-modal-b" style="padding:12px 16px;">
-      <div id="manage-funds-body" style="max-height:calc(92vh - 160px); overflow:auto;">
+      <div id="manage-funds-body" style="max-height:calc(92vh - 190px); overflow:auto;">
         <div style="padding:40px; text-align:center; color:#6B7280; font-size:12px;">Loading…</div>
-      </div>
-      <!-- New/Edit fund form — hidden by default, shown by showNewFundForm() -->
-      <div id="fund-edit-form" style="display:none; margin-top:12px; padding:12px; background:#FDF2F8; border:1px solid #F9A8D4; border-radius:6px;">
-        <div class="text-[12px] font-semibold text-pink-900 mb-2" id="fund-edit-form-title">New fund</div>
-        <input type="hidden" id="fund-edit-id" value=""/>
-        <div style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px;">
-          <div><label class="text-[10px] uppercase text-gray-600 block">Code *</label>
-            <input id="fund-edit-code" placeholder="PCS-US-4" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/></div>
-          <div style="grid-column: span 2;"><label class="text-[10px] uppercase text-gray-600 block">Name *</label>
-            <input id="fund-edit-name" placeholder="PCS US Direct Lending IV" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/></div>
-          <div><label class="text-[10px] uppercase text-gray-600 block">Domicile</label>
-            <select id="fund-edit-domicile" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full">
-              <option>US</option><option>EU</option><option>UK</option><option>AU</option>
-              <option>Cayman</option><option>Luxembourg</option><option>Ireland</option><option>Other</option>
-            </select></div>
-          <div><label class="text-[10px] uppercase text-gray-600 block">Base ccy</label>
-            <select id="fund-edit-ccy" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full">
-              <option>USD</option><option>EUR</option><option>GBP</option><option>AUD</option><option>CHF</option><option>JPY</option>
-            </select></div>
-          <div><label class="text-[10px] uppercase text-gray-600 block">NAV</label>
-            <input id="fund-edit-nav" type="number" placeholder="1000000000" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/></div>
-          <div style="grid-column: span 3;"><label class="text-[10px] uppercase text-gray-600 block">Regulator scope (multi)</label>
-            <div id="fund-edit-scope" style="display:flex; gap:6px; flex-wrap:wrap; padding:4px 0;">
-              <label style="font-size:11px;"><input type="checkbox" value="SEC"/> SEC</label>
-              <label style="font-size:11px;"><input type="checkbox" value="ESMA"/> ESMA</label>
-              <label style="font-size:11px;"><input type="checkbox" value="Fed"/> Fed</label>
-              <label style="font-size:11px;"><input type="checkbox" value="APRA"/> APRA</label>
-              <label style="font-size:11px;"><input type="checkbox" value="FCA"/> FCA</label>
-              <label style="font-size:11px;"><input type="checkbox" value="CIMA"/> CIMA</label>
-              <label style="font-size:11px;"><input type="checkbox" value="CSSF"/> CSSF</label>
-              <label style="font-size:11px;"><input type="checkbox" value="None"/> None</label>
-            </div>
-          </div>
-          <div style="grid-column: span 3;"><label class="text-[10px] uppercase text-gray-600 block">Notes</label>
-            <input id="fund-edit-notes" placeholder="e.g. Delaware LP · US-adviser · files Form PF" class="border border-gray-300 rounded px-2 py-1 text-[12px] w-full"/></div>
-        </div>
-        <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end;">
-          <button onclick="window.cancelFundEdit && window.cancelFundEdit()" class="mat-btn outline !py-1 !px-3 text-[11px]">Cancel</button>
-          <button onclick="window.saveFundEdit && window.saveFundEdit()" class="mat-btn primary !py-1 !px-3 text-[11px]">Save fund</button>
-        </div>
       </div>
       <div id="manage-funds-error" style="display:none; margin-top:10px; padding:10px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:6px; color:#7F1D1D; font-size:12px;"></div>
     </div>
     <div class="json-modal-f">
       <span id="manage-funds-summary" class="text-[11px] text-gray-600 mr-auto">—</span>
+      <button class="mat-btn outline" onclick="window.switchTab && window.switchTab('pcssync')">Open PCS Sync</button>
       <button class="mat-btn outline" onclick="window.closeManageFundsModal && window.closeManageFundsModal()">Close</button>
     </div>
   </div>
@@ -8983,7 +9079,9 @@ window.SB = (function(){
         batch_type:           j.batchType || null,
         batch_comments:       j.batchComments || null,
         transaction_comments: j.transactionComments || null,
-        le_domain:            j.leDomain || 'NWF'
+        // Persist what the journal actually carried. Defaulting to 'NWF' here
+        // wrote a meaningless domain into the audit trail for every JE row.
+        le_domain:            j.leDomain || null
       }));
       const batchSize = 200;
       for(let i = 0; i < rows.length; i += batchSize){
@@ -9292,16 +9390,52 @@ window.SB = (function(){
     else bind();
   })();
 
-  function _withDbTimeout(label, promise, ms){
+  // opts.critical — does a timeout here say anything about connection health?
+  //
+  // Default true for backwards compatibility, but it should be FALSE for
+  // anything that is merely slow rather than load-bearing. This distinction is
+  // the fix for the recurring "DB connection lost, hard refresh required" bug:
+  // three slow reference-data reads were tripping a 3-strike counter and
+  // condemning a connection that had just written 9,300 rows successfully.
+  // Slowness is not disconnection.
+  //
+  // The raced promise is also followed after the timeout fires. Previously we
+  // rejected at 8s and never learned whether the request completed at 8.5s —
+  // so "hung" and "slow" were indistinguishable, and every diagnosis of this
+  // bug was guesswork. Now a late completion is logged explicitly.
+  function _withDbTimeout(label, promise, ms, opts){
     ms = ms || DB_CALL_BUDGET_MS;
-    let timer;
+    const critical = !(opts && opts.critical === false);
+    let timer, timedOut = false;
+    const started = Date.now();
+
     const timeout = new Promise((_, rj) => {
-      timer = setTimeout(() => rj(new Error(label + ' · timed out after ' + Math.round(ms/1000) + 's — DB call did not return')), ms);
+      timer = setTimeout(() => {
+        timedOut = true;
+        rj(new Error(label + ' · timed out after ' + Math.round(ms/1000) + 's — DB call did not return'));
+      }, ms);
     });
+
+    // Keep watching the real request. If it lands late it was slow, not hung,
+    // and the connection was never the problem.
+    Promise.resolve(promise).then(
+      () => { if(timedOut){
+        console.warn('[SB] ' + label + ' actually COMPLETED after ' +
+          Math.round((Date.now() - started)/1000) + 's — it was slow, not hung. ' +
+          'The ' + Math.round(ms/1000) + 's budget is too tight for this call.');
+        _recordDbSuccess();     // undo the false strike
+      }},
+      () => {}
+    );
+
     return Promise.race([promise, timeout])
       .then(v => { _recordDbSuccess(); return v; })
       .catch(err => {
-        if(/timed out/i.test(err && err.message || '')) _recordDbTimeout(label);
+        if(/timed out/i.test(err && err.message || '')){
+          if(critical) _recordDbTimeout(label);
+          else console.warn('[SB] ' + label + ' timed out after ' + Math.round(ms/1000) +
+            's — not counted against connection health (non-critical read)');
+        }
         throw err;
       })
       .finally(() => clearTimeout(timer));
@@ -10260,10 +10394,13 @@ window.SB = (function(){
   // id/name/code/active for filtering.
   async function fetchRefDatasets(){
     if(!_client || !_connected || _authKicked) return [];
+    // Reference data is a cache of Investran master data. A slow read here
+    // delays a settings page; it says nothing about whether the app can reach
+    // the database, so it must not count toward the connection-lost budget.
     const { data, error } = await _withDbTimeout(
       'fetchRefDatasets',
       _client.from('pcs_ref_datasets').select('*').order('sort_order'),
-      8000
+      20000, { critical: false }
     );
     if(error){ console.error('[PCS-Sync] fetchRefDatasets:', error); return []; }
     return data || [];
@@ -10279,7 +10416,10 @@ window.SB = (function(){
       q = q.or('name.ilike.' + s + ',code.ilike.' + s);
     }
     q = q.order('name').limit(o.limit || 500);
-    const { data, error } = await _withDbTimeout('fetchRefRows', q, 10000);
+    // Same reasoning as fetchRefDatasets — cached Investran master data, and
+    // these rows carry JSONB payloads so a few hundred can genuinely take a
+    // while. Slow, not broken.
+    const { data, error } = await _withDbTimeout('fetchRefRows', q, 20000, { critical: false });
     if(error){ console.error('[PCS-Sync] fetchRefRows:', error); return []; }
     return data || [];
   }
@@ -10457,6 +10597,123 @@ window.SB = (function(){
     if(error) return { ok:false, reason: error.message };
     return { ok:true };
   }
+  // ─── Legal entities (from Investran, via PCS Sync) ───────────────────
+  // Read-only here — Investran owns the entity master. We only own how a
+  // deal is split across them. Cached per session because the list is small
+  // and changes rarely; PCS Sync is where it gets refreshed.
+  let _leCache = null;
+  async function fetchLegalEntities(force){
+    if(!force && _leCache) return _leCache;
+    if(!_client || !_connected) return [];
+    // Reuse fetchRefRows rather than issuing a second, near-identical query
+    // against pcs_ref_rows. The bespoke version this replaced timed out in the
+    // browser while the same SQL ran in 2ms server-side — one proven reader
+    // for this table removes that whole class of difference.
+    let data = [];
+    try {
+      data = await fetchRefRows('legal_entities', { limit: 1000 });
+    } catch(err){
+      console.error('[SB] fetchLegalEntities:', err && err.message ? err.message : err);
+      return _leCache || [];      // keep whatever we had rather than blanking the picker
+    }
+    _leCache = (data || [])
+      // "No Legal Entity" (-1) is Investran's null placeholder, not a real
+      // entity — allocating to it would post journals nowhere.
+      .filter(r => String(r.external_id) !== '-1')
+      .map(r => ({
+        id:       String(r.external_id),
+        name:     r.name,
+        currency: r.code || null,
+        domain:   (r.payload && (r.payload.DomainName || r.payload.Domain)) || null
+      }));
+    return _leCache;
+  }
+
+  // ─── Portfolio position (Investran deal / issuer / security master) ───
+  async function fetchPortfolioPosition(dealId){
+    if(!_client || !_connected || !dealId) return null;
+    const { data, error } = await _client
+      .from('deal_portfolio_position').select('*').eq('deal_id', dealId).maybeSingle();
+    if(error){ console.error('[SB] fetchPortfolioPosition:', error); return null; }
+    return data || null;
+  }
+
+  async function savePortfolioPosition(dealId, pp){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!dealId) return { ok:false, reason:'deal_id required' };
+    const row = {
+      deal_id:                  dealId,
+      deal_name:                pp.dealName          || null,
+      deal_type:                pp.dealType          || 'Direct Investment',
+      deal_domain:              pp.dealDomain        || null,
+      deal_currency:            pp.dealCurrency      || null,
+      issuer:                   pp.issuer            || null,
+      issuer_domain:            pp.issuerDomain      || null,
+      issuer_linked_org:        pp.issuerLinkedOrg   || null,
+      issuer_linked_org_domain: pp.issuerLinkedOrgDomain || null,
+      issuer_currency:          pp.issuerCurrency    || null,
+      security:                 pp.security          || null,
+      security_type:            pp.securityType      || null,
+      security_currency:        pp.securityCurrency  || null,
+      notes:                    pp.notes             || null,
+      created_by:               _currentUser ? _currentUser.id : null,
+      updated_at:               new Date().toISOString()
+    };
+    const { data, error } = await _client
+      .from('deal_portfolio_position')
+      .upsert(row, { onConflict: 'deal_id' })
+      .select().single();
+    if(error){ console.error('[SB] savePortfolioPosition:', error); return { ok:false, reason: error.message }; }
+    return { ok:true, position: data };
+  }
+
+  async function fetchLegalEntityAllocations(dealId){
+    if(!_client || !_connected || !dealId) return [];
+    const { data, error } = await _client
+      .from('deal_legal_entity_allocations')
+      .select('*')
+      .eq('deal_id', dealId)
+      .order('le_name');
+    if(error){ console.error('[SB] fetchLegalEntityAllocations:', error); return []; }
+    return data || [];
+  }
+
+  // Replace the whole allocation set for a deal. Delete-then-insert is safe
+  // here because the set is small and there's no downstream foreign key on
+  // these rows — unlike covenants, where that pattern orphaned ids.
+  async function replaceLegalEntityAllocations(dealId, allocs){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!dealId) return { ok:false, reason:'deal_id required' };
+    const list = (Array.isArray(allocs) ? allocs : []).filter(a => a && a.leId);
+    try {
+      const { error: delErr } = await _client
+        .from('deal_legal_entity_allocations').delete().eq('deal_id', dealId);
+      if(delErr) return { ok:false, reason: delErr.message };
+      if(!list.length) return { ok:true, count: 0 };
+
+      const rows = list.map(a => ({
+        deal_id:         dealId,
+        le_external_id:  String(a.leId),
+        le_name:         a.leName || '(unknown entity)',
+        le_domain:       a.leDomain || null,
+        le_currency:     a.leCurrency || null,
+        method:          a.method === 'absolute' ? 'absolute' : 'percentage',
+        allocation_pct:  a.method === 'absolute' ? null : (a.pct != null ? +a.pct : null),
+        absolute_amount: a.method === 'absolute' ? (a.amount != null ? +a.amount : null) : null,
+        effective_date:  a.effectiveDate || null,
+        notes:           a.notes || null,
+        created_by:      _currentUser ? _currentUser.id : null,
+        updated_at:      new Date().toISOString()
+      }));
+      const { error: insErr } = await _client
+        .from('deal_legal_entity_allocations').insert(rows);
+      if(insErr) return { ok:false, reason: insErr.message };
+      return { ok:true, count: rows.length };
+    } catch(err){
+      return { ok:false, reason: err && err.message ? err.message : String(err) };
+    }
+  }
+
   async function fetchFundAllocations(dealId){
     if(!_client || !_connected) return [];
     let q = _client.from('fund_allocations')
@@ -12143,26 +12400,66 @@ window.SB = (function(){
       // diff-based replace helper so we upsert kept rows and delete removed
       // rows. Safe on partially-invalid inputs — rows missing fundId are
       // silently skipped rather than erroring the whole save.
+      // Legal-entity allocations.
+      //
+      // These used to write to fund_allocations, whose fund_id is a foreign
+      // key into our local funds table. The picker now yields Investran legal
+      // entity ids ("101") — not UUIDs, and not present in funds — so every
+      // write failed the foreign key and was swallowed by the non-fatal
+      // branch. Allocations looked saved and weren't, which is why Legal
+      // Entity came through empty on 448 DIU rows.
       if(Array.isArray(B.fundAllocations)){
         const validAllocs = B.fundAllocations
-          .filter(a => a && a.fundId)   // silently drop unfilled add-rows
+          .filter(a => a && (a.leId || a.fundId))     // drop unfilled add-rows
           .map(a => ({
-            fund_id:         a.fundId,
-            allocation_pct:  a.allocationPct != null ? +a.allocationPct : null,
-            absolute_amount: a.absoluteAmount != null ? +a.absoluteAmount : null,
-            method:          a.method || 'pct',
-            effective_date:  a.effectiveDate || new Date().toISOString().slice(0,10),
-            notes:           a.notes || null
-          }));
-        const faRes = await replaceFundAllocationsForDeal(dealId, validAllocs);
+            leId:       a.leId       || a.fundId,
+            leName:     a.leName     || (a.fund && a.fund.name)     || null,
+            leDomain:   a.leDomain   || (a.fund && a.fund.domain)   || null,
+            leCurrency: a.leCurrency || (a.fund && a.fund.currency) || null,
+            method:     a.method === 'absolute' ? 'absolute' : 'percentage',
+            // Builder holds a fraction (0.6); the table stores percent.
+            pct:        a.allocationPct  != null ? +a.allocationPct * 100 : null,
+            amount:     a.absoluteAmount != null ? +a.absoluteAmount      : null,
+            effectiveDate: a.effectiveDate || new Date().toISOString().slice(0,10),
+            notes:      a.notes || null
+          }))
+          // No resolvable entity name means the row can't post — Legal Entity
+          // is mandatory in DIU — so refuse it here rather than storing
+          // something that fails at import.
+          .filter(a => {
+            if(a.leName) return true;
+            console.warn('[SB] saveDeal: dropping allocation with no entity name · leId=' + a.leId);
+            return false;
+          });
+
+        const faRes = await replaceLegalEntityAllocations(dealId, validAllocs);
         if(!faRes.ok){
-          // Non-fatal: log + surface as a counts.warning entry, but let the
-          // rest of the save complete. Users can retry via the card.
-          console.warn('[SB] saveDeal: fund allocations partial failure:', faRes);
-          counts.fundAllocationsWarning = faRes.errors ? faRes.errors.join('; ') : faRes.reason;
+          // Loud, not swallowed. Silent failure is what hid this bug: set
+          // ownership, save, and the GL then posts with no legal entity.
+          console.error('[SB] saveDeal: legal entity allocations FAILED:', faRes.reason);
+          counts.allocationsWarning = faRes.reason;
+          if(typeof toast === 'function'){
+            toast('Legal entity allocations did not save: ' + faRes.reason, 8000,
+                  { kind:'error', id:'sb:alloc-failed' });
+          }
         }
-        counts.fundAllocations = faRes.upserted || 0;
-        counts.fundAllocationsDeleted = faRes.deleted || 0;
+        counts.legalEntityAllocations = faRes.count || 0;
+      }
+
+      // Investran position (PortfolioPosition master data). Only written when
+      // the user has actually filled it in — an empty card shouldn't create a
+      // row that later looks like deliberate blank configuration.
+      if(B.portfolioPosition && (B.portfolioPosition.issuer || B.portfolioPosition.security)){
+        const ppRes = await savePortfolioPosition(dealId, B.portfolioPosition);
+        if(!ppRes.ok){
+          console.error('[SB] saveDeal: portfolio position FAILED:', ppRes.reason);
+          counts.positionWarning = ppRes.reason;
+          if(typeof toast === 'function'){
+            toast('Investran position did not save: ' + ppRes.reason, 7000, { kind:'error' });
+          }
+        } else {
+          counts.portfolioPosition = 1;
+        }
       }
 
       console.log('[SB] saveDeal complete:', dealCode, 'deal_id=', dealId, counts);
@@ -12285,7 +12582,7 @@ window.SB = (function(){
           'covenants(*, covenant_breach_log(*)), ' +
           // Multi-fund Phase 1 — nested allocations + fund metadata so the
           // Builder card can render without a second round-trip
-          'fund_allocations(*, funds(id, code, name, domicile, base_ccy, regulator_scope, nav))'
+          'deal_legal_entity_allocations(*), deal_portfolio_position(*)'
         )
         .eq('is_preset', false)
         .order('updated_at', { ascending: false });
@@ -12603,28 +12900,57 @@ window.SB = (function(){
           // Multi-fund Phase 1 — nested fund allocations for this deal.
           // Each row includes the nested `funds` object so the UI can render
           // fund code/name/domicile without a second lookup.
-          fundAllocations: (Array.isArray(row.fund_allocations) ? row.fund_allocations : [])
+          // Legal-entity allocations. Read from deal_legal_entity_allocations,
+          // which the select below joins in. Shape is kept as fundAllocations
+          // with a fundId so the existing builder card and the engine's split
+          // keep working unchanged — only the source table moved.
+          fundAllocations: (Array.isArray(row.deal_legal_entity_allocations)
+                              ? row.deal_legal_entity_allocations : [])
             .slice()
-            .sort((a,b) => (b.effective_date || '').localeCompare(a.effective_date || ''))
+            .sort((a,b) => String(a.le_name || '').localeCompare(String(b.le_name || '')))
             .map(a => ({
               id:              a.id,
-              fundId:          a.fund_id,
-              allocationPct:   a.allocation_pct != null ? +a.allocation_pct : null,
+              fundId:          a.le_external_id,      // Investran LegalEntityId
+              leId:            a.le_external_id,
+              leName:          a.le_name,
+              leDomain:        a.le_domain,
+              leCurrency:      a.le_currency,
+              // Stored as percent (0–100); the builder works in fractions.
+              allocationPct:   a.allocation_pct != null ? +a.allocation_pct / 100 : null,
               absoluteAmount:  a.absolute_amount != null ? +a.absolute_amount : null,
-              method:          a.method || 'pct',
+              method:          a.method === 'absolute' ? 'absolute' : 'pct',
               effectiveDate:   a.effective_date,
               notes:           a.notes,
-              // Denormalized fund metadata for immediate rendering
-              fund: a.funds ? {
-                id:              a.funds.id,
-                code:            a.funds.code,
-                name:            a.funds.name,
-                domicile:        a.funds.domicile,
-                baseCcy:         a.funds.base_ccy,
-                regulatorScope:  Array.isArray(a.funds.regulator_scope) ? a.funds.regulator_scope : [],
-                nav:             a.funds.nav != null ? +a.funds.nav : null
-              } : null
-            }))
+              fund: {
+                id:       a.le_external_id,
+                name:     a.le_name,
+                domain:   a.le_domain,
+                currency: a.le_currency
+              }
+            })),
+          // Investran position master data. PostgREST returns a 1:1 embed as
+          // either an object or a single-element array depending on how it
+          // infers the relationship, so handle both.
+          portfolioPosition: (function(){
+            const p = Array.isArray(row.deal_portfolio_position)
+              ? row.deal_portfolio_position[0] : row.deal_portfolio_position;
+            if(!p) return {};
+            return {
+              dealName:             p.deal_name,
+              dealType:             p.deal_type,
+              dealDomain:           p.deal_domain,
+              dealCurrency:         p.deal_currency,
+              issuer:               p.issuer,
+              issuerDomain:         p.issuer_domain,
+              issuerLinkedOrg:      p.issuer_linked_org,
+              issuerLinkedOrgDomain:p.issuer_linked_org_domain,
+              issuerCurrency:       p.issuer_currency,
+              security:             p.security,
+              securityType:         p.security_type,
+              securityCurrency:     p.security_currency,
+              notes:                p.notes
+            };
+          })()
         };
         return {
           key:         'db-' + row.deal_code,
@@ -13097,6 +13423,8 @@ window.SB = (function(){
     fetchCommitmentEvents, upsertCommitmentEvent, deleteCommitmentEvent,
     // Multi-fund (Tier 1 #2 Phase 1)
     fetchFunds, upsertFund, deleteFund,
+    fetchLegalEntities, fetchLegalEntityAllocations, replaceLegalEntityAllocations,
+    fetchPortfolioPosition, savePortfolioPosition,
     fetchFundAllocations, upsertFundAllocation, deleteFundAllocation,
     replaceFundAllocationsForDeal,
     // Notice email delivery (Phase 2A)
@@ -14843,38 +15171,85 @@ function renderChangeHandlingPanel(inst){
 // the field on our JE row objects; `key` is Investran's MappingKey, kept
 // for traceability against the metadata dump (server/meta-fields.txt).
 // ═══════════════════════════════════════════════════════════════════════
+// ─── DIU Transaction template ────────────────────────────────────────────
+// Column order and names taken verbatim from the "Transaction (2)" sheet of
+// PCS Data Import Utility_Loan Module Requirements_Data Dictionary PS.xlsx.
+// All 51 columns are emitted in that exact order, because the spec's first
+// acceptance criterion is "the exact target headers and expected field order
+// for the approved template version" — a reordered or trimmed header row is
+// rejected before any row is read.
+//
+// Two columns we previously sent are NOT in the template and are gone:
+//   Legal Entity Id        — entity is resolved by name + domain
+//   Transaction GL Reference — exists in .Fields, not in this template
+//
+// Types come from the .Fields sheet and are enforced in sanitiseRow:
+//   text   max  = character limit
+//   num    dec  = decimal places, lo/hi = inclusive range
+//   yesno  emitted as Yes / No, not true / false
+//   date   ISO yyyy-mm-dd
+// `req` marks the fields the workbook flags mandatory.
+// `cond` marks conditional fields — emitted as empty columns so the header
+// row still matches, populated only when the transaction type calls for them.
 const DIU_FIELD_MAP = [
-  // ── Batch-level (repeated on every row; DIU groups them) ──
-  { investran: 'Batch Index',            source: 'batchId',             key: 42877074 },
-  { investran: 'Batch Type',             source: 'batchType',           key: 53665956 },
-  { investran: 'Batch Status',           source: 'batchStatus',         key: 415971   },
-  { investran: 'Batch Comments',         source: 'batchComments',       key: 8438318  },
-  // ── Journal-entry level ──
-  { investran: 'JE Index',               source: 'jeIndex',             key: 5398427  },
-  { investran: 'JE Type',                source: 'glTransType',         key: 41520392 },
-  // ── Transaction (line) level ──
-  { investran: 'Transaction Index',      source: 'txIndex',             key: 6145542  },
-  { investran: 'Transaction Type',       source: 'transactionType',     key: 58514221 },
-  { investran: 'Effective Date',         source: 'effectiveDate',       key: 43301856 },
-  { investran: 'GL Date',                source: 'glDate',              key: 1261907  },
-  { investran: 'Account',                source: 'account',             key: 4127489  },
-  { investran: 'Is Debit',               source: 'isDebit',             key: 4541146  },
-  { investran: 'Amount (LE)',            source: 'amountLE',            key: 62617862 },
-  { investran: 'Amount (Local)',         source: 'amountLocal',         key: 32085614 },
-  { investran: 'FX Rate',                source: 'fx',                  key: 43591717 },
-  { investran: 'Transaction Currency',   source: 'currency',            key: 59687869 },
-  { investran: 'Legal Entity',           source: 'legalEntity',         key: 30608065 },
-  { investran: 'Legal Entity Id',        source: 'leid',                key: 65281639 },
-  { investran: 'Legal Entity Domain',    source: 'leDomain',            key: 24836961 },
-  { investran: 'Deal',                   source: 'deal',                key: 50365283 },
-  { investran: 'Issuer',                 source: 'deal',                key: 8159193  },
-  { investran: 'Position',               source: 'position',            key: 28303748 },
-  { investran: 'Security',               source: 'position',            key: 37967795 },
-  { investran: 'Income Security',        source: 'incomeSecurity',      key: 26363605 },
-  { investran: 'Allocation Rule',        source: 'allocationRule',      key: 12063795 },
-  { investran: 'Transaction Comments',   source: 'transactionComments', key: 34583944 },
-  { investran: 'Transaction GL Reference', source: 'glReference',       key: 22151667 }
+  { investran: 'Legal Entity',            source: 'legalEntity',         type:'text',  max:100, req:true },
+  { investran: 'Legal Entity Domain',     source: 'leDomain',            type:'text',  max:100, req:true },
+  { investran: 'Batch Index',             source: 'batchId',             type:'num',   dec:0, lo:0, hi:9999999,    req:true },
+  { investran: 'JE Index',                source: 'jeIndex',             type:'num',   dec:0, lo:0, hi:9999999,    req:true },
+  { investran: 'Transaction Index',       source: 'txIndex',             type:'num',   dec:0, lo:0, hi:99999,      req:true },
+  { investran: 'Batch Comments',          source: 'batchComments',       type:'text',  max:200, req:true },
+  { investran: 'Batch Reference',         source: 'batchReference',      type:'text',  max:100 },
+  { investran: 'Batch Status',            source: 'batchStatus',         type:'text',  max:50,  req:true },
+  { investran: 'Batch Type',              source: 'batchType',           type:'text',  max:50 },
+  { investran: 'JE Type',                 source: 'glTransType',         type:'text',  max:50 },
+  { investran: 'GL Date',                 source: 'glDate',              type:'date',  req:true },
+  { investran: 'Effective Date',          source: 'effectiveDate',       type:'date',  req:true },
+  { investran: 'Account',                 source: 'account',             type:'text',  max:50,  req:true },
+  { investran: 'Transaction Type',        source: 'transactionType',     type:'text',  max:100, req:true },
+  { investran: 'Deal',                    source: 'deal',                type:'text',  max:100, req:true },
+  { investran: 'Deal Domain',             source: 'dealDomain',          type:'text',  max:100, req:true },
+  { investran: 'Position',                source: 'position',            type:'text',  max:100, cond:true },
+  { investran: 'Issuer',                  source: 'issuer',              type:'text',  max:100, cond:true },
+  { investran: 'Issuer Domain',           source: 'issuerDomain',        type:'text',  max:100, cond:true },
+  { investran: 'Security',                source: 'security',            type:'text',  max:100, cond:true },
+  { investran: 'Lot',                     source: 'lot',                 type:'text',  max:50,  cond:true },
+  { investran: 'Income Security',         source: 'incomeSecurity',      type:'text',  max:100, cond:true },
+  { investran: 'PIK Income Security',     source: 'pikIncomeSecurity',   type:'text',  max:100, cond:true },
+  { investran: 'Is Debit',                source: 'isDebit',             type:'yesno', req:true },
+  { investran: 'Transaction Currency',    source: 'currency',            type:'text',  max:10,  req:true },
+  { investran: 'Price Per Share',         source: 'pricePerShare',       type:'num',   dec:2, lo:0, hi:999999,     cond:true },
+  { investran: 'Quantity',                source: 'quantity',            type:'num',   dec:0, lo:0, hi:9999999999, cond:true },
+  { investran: 'Amount (Local)',          source: 'amountLocal',         type:'num',   dec:2, lo:0, hi:9999999999, cond:true },
+  { investran: 'Amount (LE)',             source: 'amountLE',            type:'num',   dec:2, lo:0, hi:9999999999, cond:true },
+  { investran: 'FX Rate',                 source: 'fx',                  type:'num',   dec:7, lo:0, hi:9999,       cond:true },
+  { investran: 'Allocation Rule',         source: 'allocationRule',      type:'text',  max:100, req:true },
+  { investran: 'Transaction Comments',    source: 'transactionComments', type:'text',  max:200 },
+  { investran: 'Vehicle',                 source: 'vehicle',             type:'text',  max:100, cond:true },
+  { investran: 'Vehicle Domain',          source: 'vehicleDomain',       type:'text',  max:100, cond:true },
+  { investran: 'Investor',                source: 'investor',            type:'text',  max:100, cond:true },
+  { investran: 'Investor Domain',         source: 'investorDomain',      type:'text',  max:100, cond:true },
+  { investran: 'Investor Tranche',        source: 'investorTranche',     type:'text',  max:10,  cond:true },
+  { investran: 'Investor Quantity',       source: 'investorQuantity',    type:'num',   dec:0, lo:0, hi:9999999999, cond:true },
+  { investran: 'Investor Amount (Local)', source: 'investorAmountLocal', type:'num',   dec:2, lo:0, hi:9999999999, cond:true },
+  { investran: 'Investor Amount (LE)',    source: 'investorAmountLE',    type:'num',   dec:2, lo:0, hi:9999999999, cond:true },
+  { investran: 'Investor Reference 1',    source: 'investorRef1',        type:'text',  max:50,  cond:true },
+  { investran: 'Investor Reference 2',    source: 'investorRef2',        type:'text',  max:50,  cond:true },
+  { investran: 'Transaction - UDFs <UDF_1>', source: 'udf1', type:'text', max:50 },
+  { investran: 'Transaction - UDFs <UDF_2>', source: 'udf2', type:'text', max:50 },
+  { investran: 'Transaction - UDFs <UDF_3>', source: 'udf3', type:'text', max:50 },
+  { investran: 'Transaction - UDFs <UDF_4>', source: 'udf4', type:'text', max:50 },
+  { investran: 'Transaction - UDFs <UDF_5>', source: 'udf5', type:'text', max:50 },
+  { investran: 'Transaction - UDFs <UDF_6>', source: 'udf6', type:'text', max:50 },
+  { investran: 'Transaction - UDFs <UDF_7>', source: 'udf7', type:'text', max:50 },
+  { investran: 'Transaction - UDFs <UDF_8>', source: 'udf8', type:'text', max:50 },
+  { investran: 'Transaction - UDFs <UDF_9>', source: 'udf9', type:'text', max:50 }
 ];
+const DIU_FIELD_BY_HEADER = DIU_FIELD_MAP.reduce((a,f) => { a[f.investran] = f; return a; }, {});
+// Sheet name the DIU template binds to. Confirmed as "Transactions" when
+// template 308 was created — NOT "Transaction (2)", which is what the data
+// dictionary workbook calls its sheet. DIU binds sheet to entity by name, so
+// a mismatch here means the import finds nothing to map.
+const DIU_SHEET_NAME = 'Transactions';
 const DIU_HEADERS = DIU_FIELD_MAP.map(f => f.investran);
 // Header → source-field lookup, derived from the map above so the two can
 // never drift apart.
@@ -15018,34 +15393,69 @@ function buildPortfolioPositionRows(inst){
       currency:  ccy
     });
   }
-  for(const s of securities){
-    rows.push({
-      'Legal Entity ID':                    baseLEID,
-      'Legal Entity':                       baseLegalEntity,
-      'Legal Entity Domain':                baseDomain,
-      'Deal':                               s.deal,
-      'Deal Type':                          dealType,
-      'Deal Domain':                        baseDomain,
-      'Deal Currency':                      s.currency,
-      'Issuer':                             s.issuer,
-      'Issuer Domain':                      baseDomain,
-      'Issuer Linked Organization':         s.issuer,
-      'Issuer Linked Organization Domain':  baseDomain,
-      'Issuer Currency':                    s.currency,
-      'Security':                           s.security,
-      'Security Type':                      s.secType,
-      'Security Currency':                  s.currency
-    });
+  // The Investran position card is authoritative where the user has filled it
+  // in; the derivations above are only a fallback for deals that predate it.
+  const pp = (typeof window !== 'undefined' && window.B && window.B.portfolioPosition) || {};
+
+  // One row per allocated legal entity × security. Legal Entity comes from the
+  // allocations rather than the instrument, so a deal split 60/40 registers a
+  // position under both entities — matching how the GL splits.
+  const allocs = (typeof window !== 'undefined' && window.B && Array.isArray(window.B.fundAllocations))
+    ? window.B.fundAllocations.filter(a => a && a.leName)
+    : [];
+  const entities = allocs.length
+    ? allocs.map(a => ({ name: a.leName, domain: a.leDomain || pp.dealDomain || '' }))
+    : [{ name: baseLegalEntity, domain: '' }];   // fallback: whatever the deal carried
+
+  for(const le of entities){
+    for(const s of securities){
+      rows.push({
+        'Legal Entity':                       le.name || '',
+        'Deal':                               pp.dealName   || s.deal   || '',
+        'Deal Type':                          pp.dealType   || dealType || 'Direct Investment',
+        'Deal Domain':                        pp.dealDomain || le.domain || '',
+        'Deal Currency':                      pp.dealCurrency || s.currency || '',
+        'Issuer':                             pp.issuer     || s.issuer || '',
+        'Issuer Domain':                      pp.issuerDomain || le.domain || '',
+        'Issuer Linked Organization':         pp.issuerLinkedOrg || pp.issuer || s.issuer || '',
+        'Issuer Linked Organization Domain':  pp.issuerLinkedOrgDomain || le.domain || '',
+        'Issuer Currency':                    pp.issuerCurrency || s.currency || '',
+        // Leading spaces are deliberate — see PORTFOLIO_POSITION_COLS.
+        ' Security':                          pp.security     || s.security || '',
+        ' Security Type':                     pp.securityType || s.secType  || 'Loan',
+        ' Security Currency':                 pp.securityCurrency || s.currency || ''
+      });
+    }
   }
   return rows;
 }
 
+// PortfolioPosition template — 13 columns, taken verbatim from the supplied
+// workbook's header row.
+//
+// The last three carry a LEADING SPACE (" Security", " Security Type",
+// " Security Currency"). That is not a typo in this file: it's what the
+// template's header row contains, and DIU matches on the literal string.
+// Trimming them would look tidier and silently fail to bind.
+//
+// Replaces an earlier 15-column guess that included Legal Entity ID and Legal
+// Entity Domain — neither exists in the real template.
 const PORTFOLIO_POSITION_COLS = [
-  'Legal Entity ID','Legal Entity','Legal Entity Domain',
-  'Deal','Deal Type','Deal Domain','Deal Currency',
-  'Issuer','Issuer Domain','Issuer Linked Organization','Issuer Linked Organization Domain','Issuer Currency',
-  'Security','Security Type','Security Currency'
+  'Legal Entity',
+  'Deal',
+  'Deal Type',
+  'Deal Domain',
+  'Deal Currency',
+  'Issuer',
+  'Issuer Domain',
+  'Issuer Linked Organization',
+  'Issuer Linked Organization Domain',
+  'Issuer Currency',
+  ' Security',
+  ' Security Type',
+  ' Security Currency'
 ];
+const PP_SHEET_NAME = 'PortfolioPosition';
 
 // Build the DIU workbook and return its parts.
 //
@@ -15095,17 +15505,66 @@ function __diuBuildInner(inst){
   //   useFieldMap=false — PortfolioPosition rows: row keys already match the
   //                       column headers, so skip the mapping (otherwise
   //                       Security would redirect to row.position, blank).
-  const sanitiseRow = (row, headers, useFieldMap) => {
+  // Violations collected across the whole build so the preview can report
+  // them. Cleared per build by __diuBuildInner.
+  const _diuIssues = (window.__diuIssues = []);
+
+  const sanitiseRow = (row, headers, useFieldMap, rowNo) => {
     const out = {};
     for(const h of headers){
-      const v = useFieldMap ? getDIUValue(row, h) : row[h];
-      if(v == null) { out[h] = ''; continue; }
-      if(typeof v === 'number' && CSV_MONEY_FIELDS.has(h)){
-        out[h] = +v.toFixed(2);                 // keep numeric type for XLSX
-      } else if(typeof v === 'number'){
-        out[h] = v;
-      } else {
-        out[h] = sanitiseForCSV(v);
+      let v = useFieldMap ? getDIUValue(row, h) : row[h];
+      const spec = useFieldMap ? DIU_FIELD_BY_HEADER[h] : null;
+
+      if(!spec){
+        // PortfolioPosition sheet — no per-field metadata, pass through.
+        out[h] = v == null ? '' : (typeof v === 'number' ? v : sanitiseForCSV(v));
+        continue;
+      }
+
+      const note = (msg) => _diuIssues.push({ row: rowNo, col: h, msg });
+
+      if(v == null || v === ''){
+        if(spec.req) note('required field is empty');
+        out[h] = '';
+        continue;
+      }
+
+      switch(spec.type){
+        case 'yesno':
+          // Investran wants Yes / No. Booleans and the strings the engine
+          // emits both land here.
+          out[h] = (v === true || /^(yes|true|1|d|debit)$/i.test(String(v).trim())) ? 'Yes' : 'No';
+          break;
+
+        case 'date': {
+          const s = String(v).slice(0, 10);
+          if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) note('not an ISO date: "' + v + '"');
+          out[h] = s;
+          break;
+        }
+
+        case 'num': {
+          let n = +v;
+          if(!isFinite(n)){ note('not numeric: "' + v + '"'); out[h] = ''; break; }
+          // The template ranges start at 0 — amounts are magnitudes and
+          // direction is carried by Is Debit. A negative here means the sign
+          // convention is wrong upstream, so flag it rather than quietly
+          // taking the absolute value and hiding a real bug.
+          if(n < 0){ note('negative value ' + n + ' — direction belongs in Is Debit'); n = Math.abs(n); }
+          n = +n.toFixed(spec.dec != null ? spec.dec : 2);
+          if(spec.hi != null && n > spec.hi) note('exceeds maximum ' + spec.hi.toLocaleString() + ' (' + n + ')');
+          out[h] = n;
+          break;
+        }
+
+        default: {          // text
+          let s = sanitiseForCSV(v);
+          if(spec.max && s.length > spec.max){
+            note('truncated from ' + s.length + ' to ' + spec.max + ' characters');
+            s = s.slice(0, spec.max);
+          }
+          out[h] = s;
+        }
       }
     }
     return out;
@@ -15143,22 +15602,104 @@ function __diuBuildInner(inst){
                  || 'held';
   const _batchStatus = ({ held: 'Held', posted: 'Posted' })[_postback] || 'Held';
   const _ccy = inst.currency || (window.B && window.B.deal && window.B.deal.currency) || 'USD';
+
+  // Deal Domain is mandatory in the template and had no source at all. Prefer
+  // the domain of the Investran deal record; fall back to the legal entity's
+  // domain, which in this tenant is the same value for most records. If
+  // neither resolves the row is emitted blank and flagged, rather than
+  // inventing a domain that would fail the lookup anyway.
+  const _dealDomain = (function(){
+    const dealName = inst.deal || (window.B && window.B.deal && window.B.deal.name) || '';
+    try {
+      const deals = (window._pcsDealsCache || []);
+      const hit = deals.find(d => d && String(d.name || '').toLowerCase() === String(dealName).toLowerCase());
+      if(hit && hit.domain) return hit.domain;
+    } catch(_){}
+    const alloc = (window.B && Array.isArray(window.B.fundAllocations) && window.B.fundAllocations[0]) || null;
+    return (alloc && alloc.leDomain) || inst.leDomain || '';
+  })();
+
+  // Batch Comments is mandatory (max 200) and the engine doesn't emit it.
+  const _batchComments = ('PCS Loan Module · ' + (inst.deal || inst.id || 'deal') +
+                          ' · ' + dateStamp).slice(0, 200);
+
+  // Legal Entity Domain must be a real Investran domain. The engine carries a
+  // legacy default of "NWF", which doesn't exist on this tenant and produced:
+  //   "Domain name [NWF] does not have import entitlements for entity type
+  //    [LegalEntity]"
+  // Only domains present in the synced list are allowed through; anything else
+  // is dropped so the failure reads as a missing required field rather than a
+  // confusing entitlements error about a domain nobody configured.
+  const _knownDomains = (function(){
+    try {
+      const s = new Set();
+      (window._leCache || []).forEach(e => { if(e.domain) s.add(e.domain); });
+      return s;
+    } catch(_){ return new Set(); }
+  })();
+  const _cleanDomain = d => (d && (_knownDomains.size === 0 || _knownDomains.has(d))) ? d : '';
+
   const stampedJournals = M.acctJournals.map(j => Object.assign({}, j, {
-    batchId:     glDateToBatchId.get(j.glDate || j.effectiveDate || dateStamp),
-    batchStatus: j.batchStatus || _batchStatus,
-    currency:    j.currency || _ccy,
-    glReference: j.glReference || (inst.id + '-JE' + (j.jeIndex != null ? j.jeIndex : ''))
+    batchId:       glDateToBatchId.get(j.glDate || j.effectiveDate || dateStamp),
+    // Always override. `j.batchStatus || _batchStatus` let the engine's own
+    // value win, and the engine emits "Posted" — which Investran rejects:
+    //   "The value Posted is not contained in the list of possible values:
+    //    [Held, Draft, Exported, Deleted]"
+    // The post-back status is a delivery decision, not something a journal
+    // row gets to assert, so it's set here unconditionally.
+    batchStatus:   _batchStatus,
+    batchComments: j.batchComments || _batchComments,
+    batchReference:j.batchReference|| (inst.id || ''),
+    currency:      j.currency      || _ccy,
+    leDomain:      _cleanDomain(j.leDomain),
+    dealDomain:    _cleanDomain(j.dealDomain || _dealDomain),
+
+    // JE Type is a JOURNAL-level attribute, not a row-level one. Every row
+    // sharing a JE Index must carry the same value, and DIU rejects the batch
+    // when they differ:
+    //   "Property [name] has been set to [X] by [Transactions!J2];
+    //    value [Y] in [Transactions!J3] will be ignored"
+    // The engine emits a different description per line, so blanking it is
+    // correct — the field is optional, and Investran derives the type from
+    // the transaction types on the lines.
+    glTransType:   '',
+
+    // Position, Security, Issuer and Income Security are conditional. Sending
+    // a partial value makes Investran demand the whole hierarchy:
+    //   "[Entity:Position] Required field [Deal] is missing"
+    //   "[Entity:IncomeSecurity] Required field [Security] is missing"
+    // Loan GL doesn't use security-level processing, so they stay empty.
+    position:        '',
+    security:        '',
+    issuer:          '',
+    issuerDomain:    '',
+    incomeSecurity:  '',
+    pikIncomeSecurity: '',
+    lot:             '',
+
+    allocationRule:j.allocationRule|| 'No Allocation',
+    // Not in the 51-column template, but retained on the row for our own
+    // traceability — sanitiseRow drops anything without a template column.
+    glReference:   j.glReference   || (inst.id + '-JE' + (j.jeIndex != null ? j.jeIndex : ''))
   }));
-  const glRows  = stampedJournals.map(j => sanitiseRow(j, DIU_HEADERS, /*useFieldMap=*/true));
+  _diuIssues.length = 0;
+  const glRows  = stampedJournals.map((j, i) => sanitiseRow(j, DIU_HEADERS, /*useFieldMap=*/true, i + 1));
+  if(_diuIssues.length){
+    console.warn('[DIU] ' + _diuIssues.length + ' template violation(s) — see the preview for detail');
+  }
   console.log('[DIU] step: built glRows =', glRows.length);
   const ppRows  = buildPortfolioPositionRows(inst).map(r => sanitiseRow(r, PORTFOLIO_POSITION_COLS, /*useFieldMap=*/false));
   console.log('[DIU] step: built ppRows =', ppRows.length);
   // Use SheetJS (already loaded for Excel parsing) to build the workbook.
   const wb = XLSX.utils.book_new();
   const wsGL = XLSX.utils.json_to_sheet(glRows, { header: DIU_HEADERS });
-  XLSX.utils.book_append_sheet(wb, wsGL, 'GL');
+  // Sheet name matches the template's "Transaction (2)". DIU binds sheet to
+  // entity, so a sheet called "GL" may not map to Transaction at all. Not yet
+  // confirmed against the tenant — if the import can't find the sheet, this
+  // is the first thing to check.
+  XLSX.utils.book_append_sheet(wb, wsGL, DIU_SHEET_NAME);
   const wsPP = XLSX.utils.json_to_sheet(ppRows, { header: PORTFOLIO_POSITION_COLS });
-  XLSX.utils.book_append_sheet(wb, wsPP, 'PortfolioPosition');
+  XLSX.utils.book_append_sheet(wb, wsPP, PP_SHEET_NAME);
   console.log('[DIU] step: workbook assembled with 2 sheets');
   // Auto-size columns roughly by header text length. Be defensive about cell
   // shape — Object.keys(ws) includes '!ref'/'!cols'/'!merges' meta which we
@@ -15281,6 +15822,30 @@ window.__diuPreviewRender = function(sheet){
     rows.forEach(r => lookupCols.forEach(c => {
       if(r[c] === '' || r[c] == null){ blanks++; blankCols.add(c); }
     }));
+    // Template violations from sanitiseRow — required-but-empty, over-length,
+    // out-of-range, negative amounts. These are the rows DIU would reject.
+    const issues = (isGL && Array.isArray(window.__diuIssues)) ? window.__diuIssues : [];
+    const issueBox = document.getElementById('diu-prev-issues');
+    if(issueBox){
+      if(!issues.length){ issueBox.style.display = 'none'; }
+      else {
+        const byCol = {};
+        issues.forEach(i => { (byCol[i.col + ' — ' + i.msg.replace(/"[^"]*"/g,'…')] ||= []).push(i.row); });
+        const lines = Object.entries(byCol).slice(0, 8).map(([k, rws]) =>
+          '<div>· ' + _pcsEscLite(k) + ' <span style="color:var(--n-500);">(' + rws.length +
+          ' row' + (rws.length === 1 ? '' : 's') + ', first at ' + rws[0] + ')</span></div>');
+        issueBox.style.display = 'block';
+        issueBox.innerHTML =
+          '<div style="background:#FEF2F2; border:0.5px solid #FCA5A5; border-left:3px solid #DC2626; border-radius:0 6px 6px 0; padding:9px 13px; font-size:11.5px; color:#7F1D1D; line-height:1.6;">' +
+            '<b>' + issues.length + ' template violation' + (issues.length === 1 ? '' : 's') +
+            '</b> — these rows would be rejected by DIU.' +
+            '<div style="margin-top:5px;">' + lines.join('') +
+            (Object.keys(byCol).length > 8 ? '<div style="color:var(--n-500);">… ' + (Object.keys(byCol).length - 8) + ' more kinds</div>' : '') +
+            '</div>' +
+          '</div>';
+      }
+    }
+
     meta.innerHTML =
       '<span style="color:var(--n-900); font-weight:600;">' + rows.length + '</span> rows · ' +
       '<span style="color:var(--n-900); font-weight:600;">' + headers.length + '</span> columns' +
@@ -15345,6 +15910,259 @@ window.__diuPreviewClose = function(){
   const m = document.getElementById('diu-preview-modal');
   if(m) m.style.display = 'none';
 };
+
+// ─── Submit to Investran, in-browser ──────────────────────────────────────
+// Runs the same chain the terminal test does — upload, scan wait, job from
+// template, validate, poll — but from the workbook already in memory. No
+// download, no file handling.
+//
+// mode 'validate' stops after validation. mode 'load' continues to the load
+// step, which is the only call that writes to the ledger, and asks first.
+window.__diuSubmit = async function(mode){
+  const proxy = (function(){
+    try { const v = (localStorage.getItem('pcs_v3_diu_proxy_url')||'').trim(); if(v) return v.replace(/\/$/,''); } catch(_){}
+    const el = document.getElementById('diucfg-proxy-url');
+    return el && el.value ? el.value.trim().replace(/\/$/,'') : null;
+  })();
+  if(!proxy){
+    toast('Set the proxy URL in Settings → Investran Integration → Connection', 5000, { kind:'error' });
+    return;
+  }
+  if(!_diuPreview){
+    toast('Open the preview first so there is a workbook to send', 4000, { kind:'info' });
+    return;
+  }
+
+  // Posting writes to the tenant's ledger. Say what and where, then ask.
+  if(mode === 'load'){
+    const n = _diuPreview.glRows.length;
+    const ok = confirm(
+      'Post ' + n + ' journal row' + (n === 1 ? '' : 's') + ' to Investran?\n\n' +
+      'Tenant : goldenliveuat\n' +
+      'Batch  : ' + _diuPreview.batchCount + ' · status ' + _diuPreview.batchStatus + '\n' +
+      'Deal   : ' + (_diuPreview.inst && _diuPreview.inst.deal || '—') + '\n\n' +
+      'This writes to Investran. Batches arrive as ' + _diuPreview.batchStatus +
+      ', so nothing reaches the general ledger until approved there.'
+    );
+    if(!ok) return;
+  }
+
+  const btnV = document.getElementById('btn-diu-validate');
+  const btnS = document.getElementById('btn-diu-send');
+  const busy = b => { if(b){ b.disabled = true; b.style.opacity = '0.55'; } };
+  const free = b => { if(b){ b.disabled = false; b.style.opacity = ''; } };
+  busy(btnV); busy(btnS);
+
+  const box = document.getElementById('diu-prev-issues');
+  const step = (msg, kind) => {
+    if(!box) return;
+    box.style.display = 'block';
+    const c = kind === 'error' ? ['#FEF2F2','#FCA5A5','#DC2626','#7F1D1D']
+            : kind === 'ok'    ? ['#F0FDF4','#86EFAC','#16A34A','#14532D']
+                               : ['#EFF6FF','#BFDBFE','#3B82F6','#1E3A5F'];
+    box.innerHTML =
+      '<div style="background:' + c[0] + '; border:0.5px solid ' + c[1] + '; border-left:3px solid ' + c[2] +
+      '; border-radius:0 6px 6px 0; padding:9px 13px; font-size:11.5px; color:' + c[3] + '; line-height:1.6;">' +
+      msg + '</div>';
+  };
+
+  try {
+    // 1 · Build the file in memory from the already-previewed workbook, so
+    //     what's sent is exactly what was shown.
+    step('<b>Building workbook…</b>');
+    const out  = XLSX.write(_diuPreview.wb, { bookType:'xlsx', type:'array' });
+    const blob = new Blob([out], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const fd   = new FormData();
+    fd.append('file', blob, _diuPreview.filename);
+
+    // 2 · Upload. The proxy waits for the virus scan to clear.
+    step('<b>Uploading…</b> ' + Math.round(blob.size/1024) + ' KB · waiting for Investran\'s virus scan');
+    const up = await (await fetch(proxy + '/api/diu/file', { method:'POST', body: fd })).json();
+    if(!up.ok) throw new Error('Upload failed — ' + JSON.stringify(up.error).slice(0,300));
+
+    // 3 · Job from template.
+    step('<b>Creating import job…</b> file ' + up.fileId + ' · scan ' + up.scanStatus);
+    const job = await (await fetch(proxy + '/api/diu/jobs', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({
+        fileId: up.fileId,
+        state: 'InProcess',
+        name: (_diuPreview.kind === 'position' ? 'PCS-Position-' : 'PCS-LoanModule-') +
+              (_diuPreview.inst && _diuPreview.inst.id || 'deal') +
+              '-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'')
+      },
+      // Positions use a different template — different columns entirely. Sent
+      // explicitly so the proxy doesn't fall back to the Transaction default.
+      _diuPreview.kind === 'position'
+        ? { templateId: (function(){
+              try { const v = localStorage.getItem('pcs_v3_diu_position_template'); if(v) return +v; } catch(_){}
+              return null;
+            })() }
+        : {}))
+    })).json();
+    if(!job.ok) throw new Error('Job creation failed — ' + JSON.stringify(job.error).slice(0,300));
+
+    // 4 · Validate, then poll.
+    step('<b>Validating…</b> job ' + job.jobId + ' · template ' + (job.templateId || '—'));
+    const val = await (await fetch(proxy + '/api/diu/jobs/' + job.jobId + '/validate', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+    })).json();
+    if(!val.ok) throw new Error('Validate failed — ' + JSON.stringify(val.error).slice(0,300));
+
+    const poll = async (pid, label) => {
+      for(let i = 0; i < 60; i++){
+        await new Promise(r => setTimeout(r, i < 5 ? 1000 : 2500));
+        const st = await (await fetch(proxy + '/api/diu/processes/' + pid)).json();
+        if(st.done) return st;
+        step('<b>' + label + '…</b> ' + (st.status || 'running') + ' · ' + ((i+1)*2) + 's');
+      }
+      return { status:'timeout', done:false, succeeded:false };
+    };
+    const vres = await poll(val.processId, 'Validating');
+
+    if(!vres.succeeded){
+      const fb = await (await fetch(proxy + '/api/diu/processes/' + val.processId + '/feedback')).json();
+      __diuRenderFeedback(fb, val.processId, vres.status);
+      free(btnV); free(btnS);
+      return;
+    }
+
+    if(mode !== 'load'){
+      step('<i class="ti ti-circle-check"></i> <b>Validation passed.</b> Job ' + job.jobId +
+           ' is ready. Use <b>Send to Investran</b> to post it.', 'ok');
+      free(btnV); free(btnS);
+      return;
+    }
+
+    // 5 · Load — the only step that writes.
+    step('<b>Posting to Investran…</b>');
+    const ld = await (await fetch(proxy + '/api/diu/jobs/' + job.jobId + '/load', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+    })).json();
+    if(!ld.ok) throw new Error('Load failed — ' + JSON.stringify(ld.error).slice(0,300));
+    const lres = await poll(ld.processId, 'Posting');
+
+    if(lres.succeeded){
+      step('<i class="ti ti-circle-check"></i> <b>Posted.</b> ' + _diuPreview.glRows.length +
+           ' rows · job ' + job.jobId + ' · batch status ' + _diuPreview.batchStatus +
+           '. Approve in Investran to reach the general ledger.', 'ok');
+      toast('Posted ' + _diuPreview.glRows.length + ' JE rows to Investran', 6000, { kind:'success' });
+    } else {
+      const fb = await (await fetch(proxy + '/api/diu/processes/' + ld.processId + '/feedback')).json();
+      __diuRenderFeedback(fb, ld.processId, lres.status);
+    }
+  } catch(err){
+    console.error('[DIU submit]', err);
+    step('<i class="ti ti-alert-triangle"></i> ' + _pcsEscLite(err.message || String(err)), 'error');
+    toast('DIU submission failed — see the panel', 6000, { kind:'error' });
+  } finally {
+    free(btnV); free(btnS);
+  }
+};
+
+// ─── Portfolio position preview + send ────────────────────────────────────
+// Reuses the DIU preview modal, swapping in a position-only workbook. Uses its
+// own template id, because the column mapping is completely different from the
+// Transaction template.
+window.__ppPreview = function(){
+  const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+  if(!inst){ toast('Load a deal first', 3000, { kind:'info' }); return; }
+  if(typeof XLSX === 'undefined'){ toast('XLSX not loaded — refresh', 4000, { kind:'error' }); return; }
+
+  const rows = buildPortfolioPositionRows(inst);
+  if(!rows.length){
+    toast('Nothing to send — add a legal entity allocation first', 5000, { kind:'info' });
+    return;
+  }
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows, { header: PORTFOLIO_POSITION_COLS });
+  ws['!cols'] = PORTFOLIO_POSITION_COLS.map(h => ({ wch: Math.min(34, Math.max(14, h.length + 4)) }));
+  XLSX.utils.book_append_sheet(wb, ws, PP_SHEET_NAME);
+
+  _diuPreview = {
+    wb,
+    glRows:  rows,                       // preview renders whatever sits here
+    ppRows:  [],
+    inst,
+    filename: 'investran-position-' + (inst.id || 'deal') + '-' +
+              new Date().toISOString().slice(0,10) + '.xlsx',
+    batchCount: 1,
+    batchStatus: '—',
+    kind: 'position'                     // routes __diuSubmit to the position template
+  };
+  window.__diuIssues = [];
+  const m = document.getElementById('diu-preview-modal');
+  if(m) m.style.display = 'flex';
+  __diuPreviewRenderPosition(rows);
+};
+
+function __diuPreviewRenderPosition(rows){
+  document.querySelectorAll('.diu-prev-tab').forEach(b => { b.style.display = 'none'; });
+  const meta = document.getElementById('diu-prev-meta');
+  const req  = ['Legal Entity','Deal','Deal Domain','Issuer',' Security'];
+  let blanks = 0; const blankCols = new Set();
+  rows.forEach(r => req.forEach(c => { if(!r[c]){ blanks++; blankCols.add(c.trim()); } }));
+  if(meta){
+    meta.innerHTML =
+      '<span style="color:var(--n-900); font-weight:600;">' + rows.length + '</span> position row' +
+      (rows.length === 1 ? '' : 's') + ' · <span style="color:var(--n-900); font-weight:600;">13</span> columns' +
+      (blanks
+        ? ' · <span style="color:#B45309;"><i class="ti ti-alert-triangle" style="font-size:12px; vertical-align:-2px;"></i> ' +
+          blanks + ' blank in ' + Array.from(blankCols).join(', ') + '</span>'
+        : ' · <span style="color:#16A34A;"><i class="ti ti-circle-check" style="font-size:12px; vertical-align:-2px;"></i> complete</span>');
+  }
+  const body = document.getElementById('diu-prev-body');
+  if(!body) return;
+  body.innerHTML =
+    '<table style="border-collapse:collapse; font-size:11px; white-space:nowrap;">' +
+      '<thead><tr>' +
+        '<th style="position:sticky; top:0; left:0; z-index:3; background:var(--n-100,#F3F4F6); padding:6px 8px; border:0.5px solid var(--n-200); font-size:9.5px; color:var(--n-500);">#</th>' +
+        PORTFOLIO_POSITION_COLS.map(h =>
+          '<th style="position:sticky; top:0; z-index:2; background:var(--n-100,#F3F4F6); padding:6px 10px; border:0.5px solid var(--n-200); text-align:left; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-600);">' +
+          _pcsEscLite(h.trim()) + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      rows.map((r, i) =>
+        '<tr><td style="position:sticky; left:0; background:var(--n-50,#FAFAFA); padding:5px 8px; border:0.5px solid var(--n-200); color:var(--n-400);">' + (i+1) + '</td>' +
+        PORTFOLIO_POSITION_COLS.map(h => {
+          const v = r[h];
+          return '<td style="padding:5px 10px; border:0.5px solid var(--n-200);' +
+                 (v ? '' : ' background:#FFFBEB;') + '">' + _pcsEscLite(v || '') + '</td>';
+        }).join('') + '</tr>').join('') +
+    '</tbody></table>';
+}
+
+// Group Investran's feedback the way the terminal test does — by message
+// shape — so 1,600 lines read as a handful of causes.
+function __diuRenderFeedback(fb, processId, status){
+  const box = document.getElementById('diu-prev-issues');
+  if(!box) return;
+  const rows = (fb && (fb.feedback || fb.rows || fb.data)) || fb || [];
+  const list = Array.isArray(rows) ? rows : [];
+  const buckets = {};
+  list.forEach(r => {
+    const m = String(r.Message || r.message || r.Description || JSON.stringify(r));
+    // Collapse the varying identifiers so like errors group together.
+    const key = m.replace(/\[(Id|Index|Row\w*):[^\]]*\]/g, '')
+                 .replace(/Value:[^;\]]*/g, 'Value:…')
+                 .replace(/Transaction \d+/g, 'Transaction')
+                 .trim();
+    (buckets[key] ||= []).push(m);
+  });
+  const entries = Object.entries(buckets).sort((a,b) => b[1].length - a[1].length);
+  box.style.display = 'block';
+  box.innerHTML =
+    '<div style="background:#FEF2F2; border:0.5px solid #FCA5A5; border-left:3px solid #DC2626; border-radius:0 6px 6px 0; padding:10px 14px; font-size:11.5px; color:#7F1D1D; line-height:1.6;">' +
+      '<b>Investran rejected this batch</b> — ' + status + ' · process ' + processId + ' · ' +
+      list.length + ' message' + (list.length === 1 ? '' : 's') + ', ' + entries.length + ' distinct cause' +
+      (entries.length === 1 ? '' : 's') + '. Nothing was posted.' +
+      '<div style="margin-top:6px; max-height:220px; overflow:auto;">' +
+        entries.slice(0, 20).map(([k, v]) =>
+          '<div style="margin-bottom:3px;">· ' + _pcsEscLite(k).slice(0, 200) +
+          ' <span style="color:#B91C1C;">×' + v.length + '</span></div>').join('') +
+        (entries.length > 20 ? '<div>… ' + (entries.length - 20) + ' more</div>' : '') +
+      '</div>' +
+    '</div>';
+}
 
 // Local escaper — this IIFE doesn't share scope with the PCS Sync helpers.
 function _pcsEscLite(s){
@@ -16238,6 +17056,8 @@ window.openDBConfigModal = function(){
     }
     const pathEl = document.getElementById('rwcfg-path');
     if(pathEl){ pathEl.value = '/ReportWizard/v1'; pathEl.readOnly = true; pathEl.style.opacity = '0.7'; }
+    const posT = document.getElementById('diucfg-position-template');
+    if(posT){ try { posT.value = localStorage.getItem('pcs_v3_diu_position_template') || ''; } catch(_){} }
   })();
 
   // Update the per-type UI when the dropdown changes.
@@ -19154,7 +19974,10 @@ function applyAASBExtrasToJEs(journals, inst, summary){
           deal: inst.deal, position: inst.position, incomeSecurity: inst.incomeSecurity,
           allocationRule: 'No Allocation', batchType: 'Loan Calculator',
           batchComments: 'APRA APS 220 ECL prudential floor top-up',
-          fx: 1, leDomain: 'NWF', amountLE: gap, amountLocal: gap, originalAmount: gap
+          // Inherit the instrument's domain rather than hardcoding one. This
+          // used to say 'NWF' — a leftover from an earlier client engagement,
+          // not a real domain on any tenant we post to.
+          fx: 1, leDomain: inst.leDomain || '', amountLE: gap, amountLocal: gap, originalAmount: gap
         };
         out.push(Object.assign({}, base, {
           txIndex: 1,
@@ -19199,7 +20022,8 @@ function applyAASBExtrasToJEs(journals, inst, summary){
         deal: inst.deal, position: inst.position, incomeSecurity: inst.incomeSecurity,
         allocationRule: 'No Allocation', batchType: 'Loan Calculator',
         batchComments: 'AASB / ITAA franking credit gross-up',
-        fx: 1, leDomain: 'NWF', amountLE: grossUp, amountLocal: grossUp, originalAmount: grossUp
+        // See the APRA block above — inherit, don't hardcode.
+        fx: 1, leDomain: inst.leDomain || '', amountLE: grossUp, amountLocal: grossUp, originalAmount: grossUp
       };
       memoRows.push(Object.assign({}, base, {
         txIndex: 1,
@@ -19504,6 +20328,12 @@ function runAccountingImpl(){
   if(typeof applyAASBExtrasToJEs === 'function'){
     try { M.acctJournals = applyAASBExtrasToJEs(M.acctJournals, inst, M.summary); }
     catch(err){ console.error('AASB overlay failed:', err); }
+  }
+  // ─── Legal-entity ownership split ────────────────────────────────────
+  // Applied last, so every earlier adjustment is already in the amounts.
+  if(typeof splitJEsByLegalEntity === 'function'){
+    try { M.acctJournals = splitJEsByLegalEntity(M.acctJournals, inst); }
+    catch(err){ console.error('legal-entity split failed:', err); }
   }
   // Surface the participation banner in Stage 2 so the user sees what scale
   // their JEs are at. Updated on every run.
@@ -20710,6 +21540,7 @@ function _portfolioBuilderDefToInst(def){
     prepaymentPenaltySchedule: B.prepaymentPenaltySchedule,
     covenants: B.covenants, lifecycleEvents: B.lifecycleEvents,
     fundAllocations: B.fundAllocations,
+    portfolioPosition: B.portfolioPosition,
     _participationPct: B._participationPct, _builderScale: B._builderScale, _viewMode: B._viewMode
   };
   try {
@@ -20726,6 +21557,7 @@ function _portfolioBuilderDefToInst(def){
     B.covenants                = Array.isArray(def.covenants)          ? def.covenants          : [];
     B.lifecycleEvents          = Array.isArray(def.lifecycleEvents)    ? def.lifecycleEvents    : [];
     B.fundAllocations          = Array.isArray(def.fundAllocations)    ? def.fundAllocations    : [];
+    B.portfolioPosition        = def.portfolioPosition || {};
     // Optional participation metadata
     if(def._participationPct != null) B._participationPct = def._participationPct;
     if(def._builderScale     != null) B._builderScale     = def._builderScale;
@@ -20987,7 +21819,7 @@ window.exportPortfolioCsv = function(){
 };
 
 // ═════════════════════════════════════════════════════════════════════
-// Manage funds modal (Multi-fund Phase 1)
+// Manage legal entities modal (Multi-fund Phase 1)
 // ═════════════════════════════════════════════════════════════════════
 window.openManageFundsModal = async function(){
   const el = document.getElementById('manage-funds-modal');
@@ -20998,54 +21830,76 @@ window.openManageFundsModal = async function(){
 window.closeManageFundsModal = function(){
   const el = document.getElementById('manage-funds-modal');
   if(el) el.style.display = 'none';
-  window.cancelFundEdit();
+  // cancelFundEdit belonged to the old create/edit form, which is gone now
+  // that entities are read-only. Guarded so an older cached page doesn't throw.
+  if(typeof window.cancelFundEdit === 'function') window.cancelFundEdit();
 };
 
-window.refreshManageFunds = async function(){
+window.refreshManageFunds = async function(force){
   const body = document.getElementById('manage-funds-body');
-  const err = document.getElementById('manage-funds-error');
-  const sum = document.getElementById('manage-funds-summary');
-  err.style.display = 'none';
-  body.innerHTML = '<div style="padding:30px; text-align:center; color:#6B7280; font-size:12px;">Loading funds…</div>';
-  if(!window.SB || !window.SB.fetchFunds){
-    err.style.display = ''; err.textContent = 'DB connection not ready. Sign in first.'; body.innerHTML = ''; return;
+  const err  = document.getElementById('manage-funds-error');
+  const sum  = document.getElementById('manage-funds-summary');
+  if(!body) return;
+  if(err) err.style.display = 'none';
+  if(!window.SB || !window.SB.fetchLegalEntities){
+    if(err){ err.style.display = ''; err.textContent = 'DB connection not ready. Sign in first.'; }
+    body.innerHTML = ''; return;
   }
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   try {
-    const funds = await window.SB.fetchFunds();
-    window._fundsCache = funds;
-    if(!funds.length){
-      body.innerHTML = '<div style="padding:30px; text-align:center; color:#6B7280; font-size:12px;">No funds yet. Click "New fund" to create one.</div>';
-      sum.textContent = '0 funds';
+    if(force || !window._leCache){
+      body.innerHTML = '<div style="padding:30px; text-align:center; color:#6B7280; font-size:12px;">Loading legal entities…</div>';
+      window._leCache = await window.SB.fetchLegalEntities(!!force);
+    }
+    const all = window._leCache || [];
+
+    // Nothing synced yet is a specific, fixable state — say what to do about
+    // it rather than showing an empty table.
+    if(!all.length){
+      body.innerHTML =
+        '<div style="padding:34px; text-align:center; color:#6B7280; font-size:12px; line-height:1.6;">' +
+          '<div style="font-weight:600; color:var(--n-900,#111); margin-bottom:6px;">No legal entities loaded</div>' +
+          'Legal entities come from Investran, not from this app.<br>' +
+          'Open <b>Tools → PCS Sync</b> and sync the <b>Legal Entities</b> dataset.' +
+        '</div>';
+      if(sum) sum.textContent = 'not synced';
       return;
     }
-    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    body.innerHTML = '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+
+    const q = ((document.getElementById('le-search') || {}).value || '').trim().toLowerCase();
+    const list = q ? all.filter(e =>
+      (e.name + ' ' + (e.domain || '') + ' ' + e.id).toLowerCase().indexOf(q) !== -1) : all;
+
+    body.innerHTML =
+      '<div style="font-size:11px; color:#6B7280; margin-bottom:8px;">' +
+        'Read-only — Investran owns these records. An entity created here would have no Investran id, ' +
+        'so journals posted to it would fail the DIU import. Add entities in Investran, then re-sync.' +
+      '</div>' +
+      '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
       '<thead style="background:#F1F5F9; position:sticky; top:0;"><tr>' +
-        ['Code','Name','Domicile','Ccy','Regulators','NAV','Actions']
+        ['LE id','Legal entity','Domain','Ccy']
           .map(h => '<th style="text-align:left; padding:6px 10px; font-size:10px; text-transform:uppercase; color:#475569;">' + h + '</th>').join('') +
       '</tr></thead><tbody>' +
-      funds.map(f => {
-        const scope = Array.isArray(f.regulator_scope) ? f.regulator_scope.join(', ') : '';
-        return '<tr style="border-top:1px solid #E5E7EB;">' +
-          '<td style="padding:6px 10px; font-family:monospace; font-size:11px; font-weight:600;">' + esc(f.code) + '</td>' +
-          '<td style="padding:6px 10px; font-weight:600;">' + esc(f.name) + '</td>' +
-          '<td style="padding:6px 10px;">' + esc(f.domicile) + '</td>' +
-          '<td style="padding:6px 10px;">' + esc(f.base_ccy) + '</td>' +
-          '<td style="padding:6px 10px; font-size:11px;">' + esc(scope) + '</td>' +
-          '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;">' + (f.nav ? (+f.nav).toLocaleString(undefined,{maximumFractionDigits:0}) : '—') + '</td>' +
-          '<td style="padding:6px 10px;">' +
-            '<button onclick="window.editFund(' + JSON.stringify(f.id) + ')" style="padding:2px 8px; margin-right:4px; border:1px solid #C7D2FE; background:#EEF2FF; color:#3730A3; border-radius:4px; font-size:10.5px; cursor:pointer;">Edit</button>' +
-            '<button onclick="window.deleteFundConfirm(' + JSON.stringify(f.id) + ', ' + JSON.stringify(f.name) + ')" style="padding:2px 8px; border:1px solid #FCA5A5; background:white; color:#B91C1C; border-radius:4px; font-size:10.5px; cursor:pointer;">Delete</button>' +
-          '</td>' +
-        '</tr>';
-      }).join('') +
+      list.map(e =>
+        '<tr style="border-top:1px solid #E5E7EB;">' +
+          '<td style="padding:6px 10px; font-family:ui-monospace,monospace; font-size:11px; color:#6B7280;">' + esc(e.id) + '</td>' +
+          '<td style="padding:6px 10px; font-weight:600;">' + esc(e.name) + '</td>' +
+          '<td style="padding:6px 10px; font-size:11px; color:#4B5563;">' + esc(e.domain || '—') + '</td>' +
+          '<td style="padding:6px 10px;">' + esc(e.currency || '—') + '</td>' +
+        '</tr>').join('') +
       '</tbody></table>';
-    sum.textContent = funds.length + ' fund' + (funds.length===1?'':'s');
-    // Also refresh allocation card since the fund picker options changed
+
+    if(sum){
+      sum.textContent = (q ? list.length + ' of ' + all.length : all.length) +
+        ' legal entit' + ((q ? list.length : all.length) === 1 ? 'y' : 'ies') + ' from Investran';
+    }
     if(typeof window.renderAllocations === 'function') window.renderAllocations();
+    if(typeof window.__ppRender === 'function') window.__ppRender();
   } catch(e){
-    console.error('[funds] refresh failed:', e);
-    body.innerHTML = ''; err.style.display = ''; err.textContent = 'Failed to load funds: ' + e.message;
+    console.error('[legal entities] refresh failed:', e);
+    body.innerHTML = '';
+    if(err){ err.style.display = ''; err.textContent = 'Failed to load legal entities: ' + (e.message || e); }
   }
 };
 
@@ -21941,6 +22795,132 @@ async function _populateFundDropdown(selectId){
     funds.map(f => '<option value="' + f.id + '">' + f.code + ' — ' + f.name + '</option>').join('');
   if(prev && funds.some(f => f.id === prev)) el.value = prev;
 }
+
+// ─── Legal-entity ownership split ──────────────────────────────────────
+// Emits one set of journal rows per allocated legal entity, each line scaled
+// by that entity's share of the deal.
+//
+// Two properties matter and are enforced below:
+//
+//   1. Each per-entity journal balances on its own. Scaling every line of a
+//      journal by the same factor preserves DR = CR, so a 60% posting is a
+//      valid double entry, not a broken one. Rounding is then corrected by
+//      largest remainder so the 2dp amounts still tie exactly — naive
+//      rounding of each line independently can leave a cent of imbalance.
+//
+//   2. An under-100% allocation is legitimate and is NOT topped up. Per
+//      Ferhat: the unallocated share belongs to a fund administered on
+//      another system, so posting it here would be double-counting. 60/30
+//      posts 90% of the loan and deliberately drops the remaining 10%.
+//
+// With no allocations the journals pass through untouched, carrying whatever
+// legal entity the deal already had.
+function splitJEsByLegalEntity(journals, inst){
+  if(!Array.isArray(journals) || !journals.length) return journals;
+  // Allocations live on the builder object (B.fundAllocations) and are
+  // mirrored onto the instrument on load. Read both — which one is populated
+  // depends on whether the deal came from the DB or was built in-session.
+  const raw = (inst && Array.isArray(inst.legalEntityAllocations) && inst.legalEntityAllocations.length)
+      ? inst.legalEntityAllocations
+    : (inst && Array.isArray(inst.fundAllocations) && inst.fundAllocations.length)
+      ? inst.fundAllocations
+    : (typeof window !== 'undefined' && window.B && Array.isArray(window.B.fundAllocations))
+      ? window.B.fundAllocations
+      : [];
+  const allocs = raw.map(a => ({
+    leId:       a.leId       || a.fundId || null,
+    leName:     a.leName     || (a.fund && a.fund.name)     || null,
+    leDomain:   a.leDomain   || (a.fund && a.fund.domain)   || null,
+    leCurrency: a.leCurrency || (a.fund && a.fund.currency) || null,
+    method:     a.method === 'absolute' ? 'absolute' : 'percentage',
+    // Builder stores the fraction (0.6 = 60%); the engine wants percent.
+    pct:        a.allocationPct != null ? (+a.allocationPct * 100)
+              : (a.pct != null ? +a.pct : null),
+    amount:     a.absoluteAmount != null ? +a.absoluteAmount
+              : (a.amount != null ? +a.amount : null)
+  })).filter(a => a.leId && a.leName);
+  if(!allocs.length) return journals;
+
+  // Resolve each allocation to a fraction of the whole. Absolute amounts are
+  // expressed against the facility limit, so they need a denominator; without
+  // one we can't convert and say so rather than guessing.
+  const facility = +(inst.facilityLimit || inst.commitment || inst.faceValue || 0) || 0;
+  const shares = [];
+  for(const a of allocs){
+    let frac = null;
+    if(a.method === 'absolute'){
+      if(facility > 0 && a.amount != null) frac = (+a.amount) / facility;
+      else console.warn('[LE split] cannot convert absolute allocation for ' +
+        a.leName + ' — no facility amount to divide by; entity skipped');
+    } else if(a.pct != null){
+      frac = (+a.pct) / 100;
+    }
+    if(frac == null || !isFinite(frac) || frac <= 0) continue;
+    shares.push({ ...a, frac });
+  }
+  if(!shares.length) return journals;
+
+  const total = shares.reduce((s, x) => s + x.frac, 0);
+  console.log('[LE split] ' + shares.length + ' entity/entities · ' +
+    (total * 100).toFixed(2) + '% of the deal posted' +
+    (total < 0.9999 ? ' · ' + ((1 - total) * 100).toFixed(2) + '% held elsewhere, not posted' : ''));
+
+  const MONEY = ['amountLE', 'amountLocal', 'originalAmount', 'quantity'];
+  const out = [];
+
+  // Group by journal so rounding can be balanced within each one.
+  const byJE = new Map();
+  journals.forEach((j, i) => {
+    const k = (j.jeIndex != null ? j.jeIndex : (j.glDate || '') + '|' + (j.transactionType || '') + '|' + i);
+    if(!byJE.has(k)) byJE.set(k, []);
+    byJE.get(k).push(j);
+  });
+
+  shares.forEach((sh, si) => {
+    byJE.forEach(rows => {
+      const scaled = rows.map(j => {
+        const copy = Object.assign({}, j);
+        MONEY.forEach(f => {
+          if(typeof j[f] === 'number') copy[f] = +((j[f] * sh.frac).toFixed(2));
+        });
+        // Stamp the entity. These feed the DIU Legal Entity and Legal Entity
+        // Domain columns, which were previously going out blank.
+        copy.legalEntity   = sh.leName;
+        copy.leDomain      = sh.leDomain || j.leDomain || '';
+        copy.leid          = sh.leId;
+        copy._lePct        = +(sh.frac * 100).toFixed(4);
+        // Keep JE indexes unique per entity, otherwise DIU would treat the
+        // 60% and 40% versions of a journal as the same entry.
+        if(copy.jeIndex != null) copy.jeIndex = (si + 1) * 1000000 + (+copy.jeIndex || 0);
+        copy.transactionComments = (j.transactionComments || '') +
+          ' · ' + sh.leName + ' ' + (+(sh.frac * 100).toFixed(2)) + '%';
+        return copy;
+      });
+
+      // Rounding repair — push any cent of drift onto the largest line on the
+      // heavier side, so debits and credits still agree exactly.
+      ['amountLE', 'amountLocal'].forEach(f => {
+        const dr = scaled.filter(r => r.isDebit === true || r.isDebit === 'Yes' || r.isDebit === 'true');
+        const cr = scaled.filter(r => !(r.isDebit === true || r.isDebit === 'Yes' || r.isDebit === 'true'));
+        if(!dr.length || !cr.length) return;
+        const sum = a => a.reduce((s, r) => s + ((typeof r[f] === 'number') ? r[f] : 0), 0);
+        const diff = +(sum(dr) - sum(cr)).toFixed(2);
+        if(Math.abs(diff) >= 0.01 && Math.abs(diff) < 1){
+          const side = diff > 0 ? cr : dr;          // top up the lighter side
+          const biggest = side.reduce((m, r) =>
+            (typeof r[f] === 'number' && (!m || r[f] > m[f])) ? r : m, null);
+          if(biggest) biggest[f] = +(biggest[f] + Math.abs(diff)).toFixed(2);
+        }
+      });
+
+      out.push(...scaled);
+    });
+  });
+
+  console.log('[LE split] ' + journals.length + ' → ' + out.length + ' JE rows');
+  return out;
+}
+if(typeof window !== 'undefined') window.splitJEsByLegalEntity = splitJEsByLegalEntity;
 
 // Filter [{key,name,inst,...}] by fund id — returns only deals with at
 // least one allocation to the given fund. `null` fundId = no filter.
@@ -34029,15 +35009,18 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // For newly-added rows via the picker, `fund` is populated at add time.
 
   // In-memory cache of all available funds — populated from SB.fetchFunds().
-  // Refreshed on modal open and after Manage funds edits.
+  // Refreshed on modal open and after Manage legal entities edits.
   window._fundsCache = [];
+  // Legal entities come from Investran via PCS Sync. Kept in _leCache so the
+  // Manage legal entities modal and the allocation picker share one list.
   async function _ensureFundsCache(){
-    if(!window._fundsCache.length && window.SB && window.SB.fetchFunds){
-      try { window._fundsCache = await window.SB.fetchFunds(); }
-      catch(err){ console.warn('[funds] fetchFunds failed:', err); }
+    if(!(window._leCache && window._leCache.length) && window.SB && window.SB.fetchLegalEntities){
+      try { window._leCache = await window.SB.fetchLegalEntities(); }
+      catch(err){ console.warn('[legal entities] fetch failed:', err); }
     }
-    return window._fundsCache;
+    return window._leCache || [];
   }
+  if(typeof window !== 'undefined') window._ensureLegalEntities = _ensureFundsCache;
 
   function renderAllocations(){
     const host = $b('allocations-container');
@@ -34047,44 +35030,69 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!host) return;
     const list = (B.fundAllocations = B.fundAllocations || []);
     if(chip) chip.textContent = list.length;
-    // Sum% — green if 100%, amber if <100%, red if >100%
+
+    // Sum. Under 100% is legitimate here — the rest of the deal is owned by a
+    // fund on another system and won't be posted — so it reads as neutral
+    // information, not a warning. Over 100% is a genuine error.
     const totalPct = list.reduce((s, a) => s + (+a.allocationPct || 0), 0);
     if(sumChip){
-      sumChip.textContent = (totalPct * 100).toFixed(1) + '%';
-      const bg = Math.abs(totalPct - 1) < 0.0001 ? '#DCFCE7'
-               : totalPct > 1.0001 ? '#FEE2E2' : '#FEF3C7';
-      const fg = Math.abs(totalPct - 1) < 0.0001 ? '#166534'
-               : totalPct > 1.0001 ? '#991B1B' : '#92400E';
-      sumChip.style.background = bg;
-      sumChip.style.color = fg;
+      const pct = totalPct * 100;
+      sumChip.textContent = pct.toFixed(1) + '%';
+      const over  = pct > 100.01;
+      const exact = Math.abs(pct - 100) < 0.01;
+      sumChip.style.background = over ? '#FEE2E2' : exact ? '#DCFCE7' : '#F1F5F9';
+      sumChip.style.color      = over ? '#991B1B' : exact ? '#166534' : '#475569';
+      sumChip.title = over
+        ? 'Over-allocated — allocations total more than the deal'
+        : exact ? 'Fully allocated'
+        : (100 - pct).toFixed(1) + '% is held outside this system and will not be posted';
     }
+
     [...host.querySelectorAll('[data-fa-row]')].forEach(n => n.remove());
+    [...host.querySelectorAll('[data-fa-note]')].forEach(n => n.remove());
     if(empty) empty.style.display = list.length ? 'none' : '';
     if(!list.length) return;
-    const funds = window._fundsCache || [];
+
+    const entities = window._leCache || [];
+    // Entities not yet synced — the picker would be empty and it wouldn't be
+    // obvious why, so say it once above the rows.
+    if(!entities.length){
+      const note = document.createElement('div');
+      note.setAttribute('data-fa-note', '1');
+      note.style.cssText = 'padding:8px 10px; background:#FFFBEB; border:1px solid #FCD34D; border-left:3px solid #F59E0B; border-radius:0 6px 6px 0; font-size:11px; color:#78350F;';
+      note.innerHTML = 'No legal entities loaded yet. Open <b>Tools → PCS Sync</b> and sync <b>Legal Entities</b> from Investran.';
+      host.appendChild(note);
+    }
+
     list.forEach((a, idx) => {
       const row = document.createElement('div');
       row.setAttribute('data-fa-row', idx);
-      row.style.cssText = 'border:1px solid #fce7f3; border-radius:8px; padding:8px 10px; background:#FEF7FB; display:grid; grid-template-columns: minmax(220px,1.2fr) 90px 100px 110px 40px; gap:6px; align-items:center;';
-      const fundOptions = funds.map(f =>
-        `<option value="${f.id}" ${a.fundId === f.id ? 'selected' : ''}>${f.code} — ${f.name} (${f.domicile})</option>`
+      row.style.cssText = 'border:1px solid #fce7f3; border-radius:8px; padding:8px 10px; background:#FEF7FB; display:grid; grid-template-columns: minmax(260px,1.4fr) 90px 110px 110px 40px; gap:6px; align-items:center;';
+      const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      // Selected id may not be in the list if the entity was removed in
+      // Investran since. Keep it as an option so the row doesn't silently
+      // reset to blank and lose the allocation.
+      const known = entities.some(e => String(e.id) === String(a.fundId));
+      const opts = entities.map(e =>
+        `<option value="${esc(e.id)}" ${String(a.fundId) === String(e.id) ? 'selected' : ''}>${esc(e.name)}${e.domain ? ' · ' + esc(e.domain) : ''}${e.currency ? ' (' + esc(e.currency) + ')' : ''}</option>`
       ).join('');
+      const orphan = (!known && a.fundId)
+        ? `<option value="${esc(a.fundId)}" selected>${esc(a.leName || a.fundId)} — not in Investran</option>` : '';
       row.innerHTML = `
         <select data-fa-field="fundId" data-faidx="${idx}"
                 style="border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11.5px; background:white; font-weight:600;">
-          <option value="">— Select fund —</option>
-          ${fundOptions}
+          <option value="">— Select legal entity —</option>
+          ${orphan}${opts}
         </select>
         <input data-fa-field="allocationPct" data-faidx="${idx}" type="number" step="0.01" min="0" max="100"
-               value="${a.allocationPct != null ? (a.allocationPct * 100) : ''}" placeholder="%"
+               value="${a.allocationPct != null ? +(a.allocationPct * 100).toFixed(4) : ''}" placeholder="%"
                style="width:100%; border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11.5px; background:white; text-align:right;"
-               title="Allocation percentage (0–100)"/>
+               title="Share of the deal owned by this entity (0–100)"/>
         <select data-fa-field="method" data-faidx="${idx}"
                 style="border:1px solid #d1d5db; border-radius:4px; padding:4px 6px; font-size:11px; background:white;">
-          <option value="pct" ${a.method==='pct'?'selected':''}>%</option>
-          <option value="absolute" ${a.method==='absolute'?'selected':''}>Absolute</option>
-          <option value="pro_rata" ${a.method==='pro_rata'?'selected':''}>Pro-rata</option>
-          <option value="side_letter" ${a.method==='side_letter'?'selected':''}>Side letter</option>
+          <option value="pct" ${a.method==='pct'||!a.method?'selected':''}>Percentage</option>
+          <option value="absolute" ${a.method==='absolute'?'selected':''}>Fixed amount</option>
         </select>
         <input data-fa-field="effectiveDate" data-faidx="${idx}" type="date"
                value="${a.effectiveDate || new Date().toISOString().slice(0,10)}"
@@ -34105,8 +35113,16 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           a.allocationPct = (v === '' || v == null) ? null : (+v) / 100;
         } else if(f === 'fundId'){
           a.fundId = v;
-          // Refresh denormalized fund metadata
-          a.fund = (window._fundsCache || []).find(x => x.id === v) || null;
+          // Denormalise the entity onto the allocation. The engine reads
+          // leName / leDomain when splitting journals, and keeping a copy
+          // means a posted journal stays readable even if Investran later
+          // renames the entity.
+          const e = (window._leCache || []).find(x => String(x.id) === String(v)) || null;
+          a.fund       = e;
+          a.leId       = e ? e.id       : v;
+          a.leName     = e ? e.name     : null;
+          a.leDomain   = e ? e.domain   : null;
+          a.leCurrency = e ? e.currency : null;
         } else {
           a[f] = v;
         }
@@ -34128,16 +35144,143 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     });
   }
 
+  // ─── Investran position (PortfolioPosition) ───────────────────────────
+  const _PP_FIELDS = {
+    'pp-deal-name':'dealName', 'pp-deal-type':'dealType', 'pp-deal-domain':'dealDomain',
+    'pp-deal-ccy':'dealCurrency', 'pp-issuer':'issuer', 'pp-issuer-domain':'issuerDomain',
+    'pp-issuer-org':'issuerLinkedOrg', 'pp-issuer-org-domain':'issuerLinkedOrgDomain',
+    'pp-issuer-ccy':'issuerCurrency', 'pp-security':'security',
+    'pp-security-type':'securityType', 'pp-security-ccy':'securityCurrency'
+  };
+
+  // Domain pickers are populated from the entities synced from Investran, so
+  // a value that can't resolve on import can't be chosen here either.
+  function _ppFillDomains(){
+    const domains = [...new Set((window._leCache || []).map(e => e.domain).filter(Boolean))].sort();
+    ['pp-deal-domain','pp-issuer-domain','pp-issuer-org-domain'].forEach(id => {
+      const el = $b(id); if(!el) return;
+      const cur = el.value;
+      el.innerHTML = '<option value="">— select —</option>' +
+        domains.map(d => '<option value="' + escape(d) + '">' + escape(d) + '</option>').join('');
+      if(cur) el.value = cur;
+      else if(domains.includes('Investran Global')) el.value = 'Investran Global';
+    });
+  }
+
+  window.__ppRender = function(){
+    _ppFillDomains();
+    const pp = (B.portfolioPosition = B.portfolioPosition || {});
+    Object.entries(_PP_FIELDS).forEach(([id, key]) => {
+      const el = $b(id); if(el && pp[key] != null) el.value = pp[key];
+    });
+
+    // Chip + the line explaining how many rows this will produce, since the
+    // count comes from allocations rather than anything on this card.
+    const chip = $b('pp-status-chip');
+    const ready = !!(pp.issuer && pp.security);
+    if(chip){
+      chip.textContent = ready ? 'ready' : 'not set';
+      chip.style.background = ready ? '#DCFCE7' : '#F1F5F9';
+      chip.style.color      = ready ? '#166534' : '#475569';
+    }
+    const box = $b('pp-le-preview');
+    if(box){
+      const allocs = (B.fundAllocations || []).filter(a => a && a.leName);
+      box.innerHTML = allocs.length
+        ? '<b>' + allocs.length + ' position row' + (allocs.length === 1 ? '' : 's') + '</b> — one per allocated legal entity: ' +
+          allocs.map(a => escape(a.leName)).join(' · ')
+        : '<span style="color:#B45309;">No legal entity allocated. Add one under <b>Legal entity &amp; allocations</b> — ' +
+          'without it there is no entity to attach the position to.</span>';
+    }
+  };
+
+  // Fill from what the deal already knows. Investran keeps Deal, Issuer and
+  // Linked organisation as separate records; on a bilateral loan they're the
+  // same borrower, so seed all three and let the user split them if needed.
+  window.__ppAutofill = function(){
+    const pp = (B.portfolioPosition = B.portfolioPosition || {});
+    const d  = B.deal || {};
+    const borrower = d.borrower || d.obligor || d.name || d.label || '';
+    const ccy = (d.currency || 'USD').toUpperCase();
+    pp.dealName        = pp.dealName        || d.name || d.label || borrower;
+    pp.dealType        = pp.dealType        || 'Direct Investment';
+    pp.dealDomain      = pp.dealDomain      || 'Investran Global';
+    pp.dealCurrency    = pp.dealCurrency    || ccy;
+    pp.issuer          = pp.issuer          || borrower;
+    pp.issuerDomain    = pp.issuerDomain    || 'Investran Global';
+    pp.issuerLinkedOrg = pp.issuerLinkedOrg || borrower;
+    pp.issuerLinkedOrgDomain = pp.issuerLinkedOrgDomain || 'Investran Global';
+    pp.issuerCurrency  = pp.issuerCurrency  || ccy;
+    pp.security        = pp.security        || ((d.name || borrower) + ' Facility').trim();
+    pp.securityType    = pp.securityType    || 'Loan';
+    pp.securityCurrency= pp.securityCurrency|| ccy;
+    window.__ppRender();
+    if(typeof toast === 'function') toast('Filled from the deal — review before sending', 3500, { kind:'info' });
+  };
+
+  (function wirePP(){
+    Object.entries(_PP_FIELDS).forEach(([id, key]) => {
+      const el = $b(id); if(!el) return;
+      el.oninput = el.onchange = () => {
+        B.portfolioPosition = B.portfolioPosition || {};
+        B.portfolioPosition[key] = (el.value || '').trim();
+        if(/ccy$/.test(id)) B.portfolioPosition[key] = B.portfolioPosition[key].toUpperCase();
+        const chip = $b('pp-status-chip');
+        if(chip){
+          const ready = !!(B.portfolioPosition.issuer && B.portfolioPosition.security);
+          chip.textContent = ready ? 'ready' : 'not set';
+          chip.style.background = ready ? '#DCFCE7' : '#F1F5F9';
+          chip.style.color      = ready ? '#166534' : '#475569';
+        }
+        if(window.AutoSave && window.AutoSave.isEnabled && window.AutoSave.isEnabled()) window.AutoSave.schedule();
+      };
+    });
+  })();
+
   window.addFundAllocationRow = async function(){
     await _ensureFundsCache();
     B.fundAllocations = B.fundAllocations || [];
     B.fundAllocations.push({
       fundId: null, allocationPct: null, method: 'pct',
+      leId: null, leName: null, leDomain: null, leCurrency: null,
       effectiveDate: new Date().toISOString().slice(0,10), notes: null, fund: null
     });
     renderAllocations();
   };
   window.renderAllocations = renderAllocations;
+
+  // Load the entity list on first render of an existing deal too — otherwise
+  // the picker on a loaded deal shows only "Select legal entity" until the
+  // user opens the Manage legal entities modal.
+  //
+  // Also primes the Deals cache, which the DIU build reads synchronously to
+  // resolve the mandatory Deal Domain column. Without this the lookup finds
+  // nothing and every row falls back to the legal entity's domain.
+  (function primeInvestranRefData(){
+    const go = () => {
+      if(!(window.SB && window.SB.fetchLegalEntities && window.SB.isConnected)) return false;
+      _ensureFundsCache().then(() => {
+        if(Array.isArray(B.fundAllocations) && B.fundAllocations.length) renderAllocations();
+      });
+      if(window.SB.fetchRefRows && !window._pcsDealsCache){
+        window.SB.fetchRefRows('deals')
+          .then(rows => {
+            window._pcsDealsCache = (rows || []).map(r => ({
+              id:     r.external_id,
+              name:   r.name,
+              domain: (r.payload && (r.payload.DomainName || r.payload.Domain)) || null
+            }));
+            console.log('[DIU] deals cache primed · ' + window._pcsDealsCache.length + ' deals');
+          })
+          .catch(err => console.warn('[DIU] deals cache failed:', err));
+      }
+      return true;
+    };
+    if(!go()){
+      let n = 0;
+      const t = setInterval(() => { if(go() || ++n > 40) clearInterval(t); }, 500);
+    }
+  })();
 
   // ─── Render forward cashflow table ──────────────────────────────────
   let lastCashflows = [];
