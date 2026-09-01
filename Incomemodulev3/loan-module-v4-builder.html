@@ -11985,6 +11985,11 @@ window.SB = (function(){
       const ccy = B.deal.currency || 'USD';
       const stamp = new Date().toISOString();
       console.log('[SB] saveDeal start:', dealCode, 'framework=', framework, 'tranches=', (B.tranches||[]).length, 'fees=', (B.fees||[]).length);
+      // Published so heavy background reads can stand aside while a save runs.
+      // saveDeal issues a long chain of writes; a concurrent bulk read
+      // competes for the same small connection pool and pushes unrelated
+      // calls (notices, reference data) past their timeouts.
+      window.__sbWriteInFlight = (window.__sbWriteInFlight || 0) + 1;
 
       // Resolve team_id from team_code if present on the deal (from preset
       // hydration). Falls back to NULL if unknown.
@@ -12649,6 +12654,10 @@ window.SB = (function(){
     } catch(err) {
       console.error('[SB] saveDeal failed:', err);
       return { ok:false, reason: err && err.message ? err.message : String(err) };
+    } finally {
+      // Always decrement, including on the error path — a leaked counter
+      // would make background reads defer forever.
+      window.__sbWriteInFlight = Math.max(0, (window.__sbWriteInFlight || 1) - 1);
     }
     })();
     // ─── Rollback partial newly-created deals ─────────────────────
@@ -36042,12 +36051,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(typeof loadTreatmentForm === 'function') loadTreatmentForm();
     // Enable the Run Accounting button + mark Stage 1 done / Stage 2 active
     enableRunAccountingButton(inst);
-    // Pull back the last saved run for this deal. Fire-and-forget so deal
-    // loading is never blocked on it; no-ops when journals are already in
-    // memory, so switching tabs within a session costs nothing.
-    if(typeof window.__restoreLastAccountingRun === 'function'){
-      setTimeout(() => { window.__restoreLastAccountingRun(); }, 400);
-    }
+    // NOTE: deliberately NOT restoring the last accounting run here.
+    //
+    // Deal load is already the busiest moment for the connection pool —
+    // saveDeal's write burst and the preset-switch auto-run both land in the
+    // same window. Adding a 448-row journal read on top starved the pool and
+    // timed out the notices refresh at 15s. The restore is triggered when the
+    // Accounting tab is opened instead, by which point the writes have
+    // drained. See __restoreLastAccountingRun / v4NavClick('stage-2').
     return inst;
   }
 
@@ -36134,8 +36145,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       // testing it with typeof === 'function', silently reports "ready" and
       // defeats the whole wait.
       const sbReady = !!(window.SB && typeof SB.fetchLatestRunForDeal === 'function' && SB.isConnected);
+      // Stand aside while a save is running. This read pulls hundreds of JE
+      // rows; running it against saveDeal's write chain starves the pool and
+      // times out unrelated calls. Waiting costs a few hundred ms.
+      const writing = (window.__sbWriteInFlight || 0) > 0;
       const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
-      if(sbReady && inst) return inst;
+      if(sbReady && inst && !writing) return inst;
       await new Promise(r => setTimeout(r, 300));
     }
     return null;
