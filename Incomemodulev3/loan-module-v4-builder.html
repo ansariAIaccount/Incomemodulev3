@@ -2971,10 +2971,18 @@
     <details class="builder-section" open>
       <summary>
         <div class="builder-section-icon icon-emerald"><span class="material-icons-outlined" style="font-size:20px;">account_balance</span></div>
-        <div><div class="builder-section-title">Facility Setup</div><div class="builder-section-subtitle">Total commitment, availability period, day count convention, holiday calendar</div></div>
+        <div><div class="builder-section-title">Facility Setup</div><div class="builder-section-subtitle">Facility name, total commitment, availability period, day count convention, holiday calendar</div></div>
       </summary>
       <div class="builder-section-body">
         <div class="b-field-grid">
+          <!-- Facility Name — the documented name of the facility itself, which
+               is often not the internal deal name (deal "Project Harrier" can
+               carry the "HMG Term Facility"). Optional; reporting falls back to
+               the deal name when blank. -->
+          <div>
+            <label class="b-label" title="Documented facility name as it appears in the credit agreement. Leave blank to fall back to the deal name.">Facility Name</label>
+            <input id="b-facility-name" type="text" class="b-input" placeholder="e.g. HMG Term Facility" maxlength="120"/>
+          </div>
           <div>
             <label class="b-label required">Total Commitment</label>
             <!-- Text input with live thousands-separator formatting (2026-08-19).
@@ -3001,8 +3009,8 @@
             <select id="b-facility-type" class="b-input" onchange="(function(sel){var bb=document.getElementById('b-bb-section');if(bb){var isBB=sel.value==='revolvingBorrowingBase';bb.style.display=isBB?'':'none';bb.open=isBB;if(isBB && typeof window.__renderBBSubPanels==='function')window.__renderBBSubPanels();}})(this)"><option value="termLoan">Term Loan</option><option value="revolver">Revolving Credit Facility</option><option value="delayedDraw">Delayed-Draw Term Loan</option><option value="revolvingBorrowingBase">Revolving Borrowing Base (livestock / commodities)</option></select>
           </div>
           <div>
-            <label class="b-label" title="How often the daily-accrued interest is posted to the GL as a journal entry. Daily accrual itself never changes — this only controls posting frequency.">Interest Accrual Period</label>
-            <select id="b-interest-accrual-freq" class="b-input" title="How often the daily-accrued interest is posted to the GL as a JE. Same for all tranches on this deal.">
+            <label class="b-label" title="Default posting cadence for daily-accrued interest. Any interest component can override it on the Tranches card. Daily accrual itself never changes — this only controls posting frequency.">Interest Accrual Period (default)</label>
+            <select id="b-interest-accrual-freq" class="b-input" title="Applies to every interest component that is left on 'Facility default'. Set a different cadence per component on the Tranches card.">
               <option value="weekly">Weekly</option>
               <option value="monthly" selected>Monthly</option>
               <option value="quarterly">Quarterly</option>
@@ -3817,12 +3825,21 @@
         <i class="ti ti-calendar-time" style="font-size:12px; color:var(--n-500);"></i>
         Period:
         <select id="cf-period-picker" class="b-input" style="padding:2px 6px; font-size:10.5px; min-width:110px;" onchange="if(typeof window.__onCfPeriodChange==='function') window.__onCfPeriodChange(this.value)">
+          <option value="daily">Daily</option>
           <option value="weekly">Weekly</option>
           <option value="monthly">Monthly</option>
           <option value="quarterly">Quarterly</option>
           <option value="semiAnnual">Semi-annual</option>
           <option value="annual">Annual</option>
         </select>
+      </label>
+      <!-- Daily window anchor — only meaningful at daily granularity, so it
+           stays hidden otherwise. Defaults to the deal settle date. -->
+      <label id="cf-daily-from-wrap" style="display:none; align-items:center; gap:5px; font-size:10.5px; color:var(--n-600);"
+             title="Daily view shows a rolling window from this date. Running totals remain life-to-date.">
+        From:
+        <input id="cf-daily-from" type="date" class="b-input" style="padding:2px 6px; font-size:10.5px; min-width:130px;"
+               onchange="if(typeof window.__onCfDailyFromChange==='function') window.__onCfDailyFromChange(this.value)"/>
       </label>
       <button onclick="window.openRateFixingsModal && window.openRateFixingsModal()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Shortcut to workspace Rate curves (also in the sidebar).">
         <i class="ti ti-chart-line" style="font-size:12px;"></i>Rate curves
@@ -5393,7 +5410,16 @@
       white-space: nowrap;
     }
     /* Credit lines indent their account name — standard JE convention */
-    #acct-inline-je-host table.je-table td.acct-credit { padding-left: 38px; }
+    /* The credit-line indent is gone. It was a print-ledger convention, but
+       with Debit and Credit as separate money columns the side is already
+       unambiguous, and the indent left account names misaligned down the
+       column. */
+    #acct-inline-je-host table.je-table td.acct-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10.5px;
+      color: var(--n-500);
+      white-space: nowrap;
+    }
     #acct-inline-je-host table.je-table tr.je-total td {
       border-top: 1px solid var(--n-400);
       border-bottom: none;
@@ -9062,7 +9088,19 @@ window.SB = (function(){
           dealName:    inst.deal,
           legalEntity: inst.legalEntity || inst.le,
           currency:    inst.currency,
-          summary:     summary ? { totalCashAccrual: summary.totalCashAccrual, totalDefaultInterest: summary.totalDefaultInterest } : null
+          // Persist the fields the Stage 2 KPI strip needs, not just two of
+          // them. Restoring a run without these left the Interest / Fees /
+          // PIK / EIR cards blank until the user re-ran accounting, which
+          // defeated the point of restoring at all.
+          summary:     summary ? {
+            totalCashAccrual:     summary.totalCashAccrual,
+            totalDefaultInterest: summary.totalDefaultInterest,
+            totalFees:            summary.totalFees,
+            totalPikAccrual:      summary.totalPikAccrual,
+            totalEIRAccretion:    summary.totalEIRAccretion,
+            closingECLAllowance:  summary.closingECLAllowance,
+            eclStage:             (inst.ifrs && inst.ifrs.ecLStage) || null
+          } : null
         }
       };
       const { data: runRow, error: runErr } = await _client.from('accounting_runs').insert(runInsert).select().single();
@@ -10176,6 +10214,109 @@ window.SB = (function(){
       if(jeErr){ console.error('[SB] fetchJournalEntriesForDeal (jes):', jeErr); return []; }
       return jes || [];
     } catch(err){ console.error('[SB] fetchJournalEntriesForDeal threw:', err); return []; }
+  }
+
+  // ------------------------------------------------------------
+  // fetchLatestRunForDeal() — the persisted accounting run in full,
+  // mapped back to the in-memory journal shape.
+  //
+  // Runs and their JE rows have always been written to the DB; nothing ever
+  // read them back into M.acctJournals, so a browser refresh made a completed
+  // run look like it had never happened and the user was told to re-run
+  // cashflows and accounting. This is the missing half of that round trip.
+  // ------------------------------------------------------------
+  // Resolve the deals-table UUID for a v2 instrument, using the same
+  // preset_key / deal_code lookup saveAccountingRun writes against — so a run
+  // is always read back with the key it was stored under.
+  async function _resolveDealId(inst){
+    if(!_client || !_connected || !inst) return null;
+    // Try each candidate key in turn rather than one or() over all of them.
+    // PostgREST's or() takes a comma-separated string, so a value containing
+    // a comma, space or parenthesis — "Ferhat Float Example" — corrupts the
+    // filter. Separate eq() calls are quoted properly by the client.
+    const keys = [inst._presetKey, inst.id, inst.deal, inst.dealCode]
+      .filter(k => k != null && String(k).trim() !== '');
+    for(const key of keys){
+      for(const col of ['preset_key', 'deal_code', 'name']){
+        try {
+          const { data, error } = await _client
+            .from('deals').select('id').eq(col, key).limit(1);
+          if(error) continue;
+          if(data && data.length){
+            console.log('[SB] _resolveDealId: matched', col, '=', key, '→', data[0].id);
+            return data[0].id;
+          }
+        } catch(_){ /* try the next column */ }
+      }
+    }
+    console.log('[SB] _resolveDealId: no deals row for any of', keys);
+    return null;
+  }
+
+  async function fetchLatestRunForDeal(dealId){
+    // Accept either a UUID or the instrument itself, so callers don't each
+    // have to re-implement the lookup.
+    if(dealId && typeof dealId === 'object') dealId = await _resolveDealId(dealId);
+    if(!_client || !_connected || _authKicked || !dealId) return null;
+    try {
+      const { data: runs, error: runErr } = await _client
+        .from('accounting_runs')
+        .select('id, run_id, run_at, status, framework_used, je_rows_count, balanced, summary_jsonb')
+        .eq('deal_id', dealId)
+        .order('run_at', { ascending: false })
+        .limit(1);
+      if(runErr){ console.error('[SB] fetchLatestRunForDeal (run):', runErr); return null; }
+      if(!runs || !runs.length) return null;
+      const run = runs[0];
+      const { data: jes, error: jeErr } = await _client
+        .from('journal_entries')
+        .select('je_index, tx_index, effective_date, gl_date, legal_entity, leid, batch_id, ' +
+                'deal_label, position_label, income_security, transaction_type, account_code, ' +
+                'gl_account_name, gl_trans_type, is_debit, amount_original, amount_le, ' +
+                'amount_local, fx_rate, allocation_rule, batch_type, batch_comments, ' +
+                'transaction_comments, le_domain, is_gl_gap, gl_gap_note')
+        .eq('run_id', run.id)
+        .order('je_index', { ascending: true })
+        .order('tx_index', { ascending: true });
+      if(jeErr){ console.error('[SB] fetchLatestRunForDeal (jes):', jeErr); return null; }
+      // Map snake_case columns back onto the camelCase shape the renderers,
+      // the DIU builder and the reconciler all expect.
+      const journals = (jes || []).map(r => ({
+        jeIndex:             r.je_index,
+        txIndex:             r.tx_index,
+        effectiveDate:       r.effective_date,
+        glDate:              r.gl_date,
+        legalEntity:         r.legal_entity,
+        leid:                r.leid,
+        batchId:             r.batch_id,
+        deal:                r.deal_label,
+        position:            r.position_label,
+        incomeSecurity:      r.income_security,
+        transactionType:     r.transaction_type,
+        account:             r.account_code,
+        glAccountName:       r.gl_account_name,
+        glTransType:         r.gl_trans_type,
+        isDebit:             !!r.is_debit,
+        originalAmount:      +r.amount_original || 0,
+        amountLE:            +r.amount_le || 0,
+        amountLocal:         +r.amount_local || 0,
+        fx:                  +r.fx_rate || 1,
+        allocationRule:      r.allocation_rule,
+        batchType:           r.batch_type,
+        batchComments:       r.batch_comments,
+        transactionComments: r.transaction_comments,
+        leDomain:            r.le_domain,
+        // Preserve the GL-gap flags so restored rows still show the GAP chip
+        // and don't look cleaner than the run actually was.
+        glGap:               !!r.is_gl_gap,
+        glGapNote:           r.gl_gap_note,
+        _restored:           true    // provenance: read back, not just computed
+      }));
+      return { run, journals };
+    } catch(err){
+      console.error('[SB] fetchLatestRunForDeal threw:', err);
+      return null;
+    }
   }
 
   // Batch variant — takes an array of dealIds and returns { [dealId]: jes[] }.
@@ -11927,6 +12068,7 @@ window.SB = (function(){
       const facPayload = {
         deal_id:          dealId,
         commitment:       +(B.facility && B.facility.commitment) || 0,
+        facility_name:    ((B.facility && B.facility.name) || '').trim() || null,
         availability_end: (B.facility && B.facility.availEnd) || null,
         day_basis:        safeEnum('day_basis', B.facility && B.facility.dayBasis),
         holiday_calendar: safeEnum('holiday',   B.facility && B.facility.holiday),
@@ -11959,6 +12101,10 @@ window.SB = (function(){
           currency:        t.currency || ccy,
           face_value:      +t.face || 0,
           drawn_initially: +t.drawnInitially || 0,
+          // NULL = follow the deal settlement date. The UI shows settle as a
+          // display fallback, so an untouched field must NOT be persisted as
+          // a hard date — otherwise changing settle would stop moving it.
+          drawn_initially_date: t.drawnInitiallyDate || null,
           is_pik_toggle:   !!t.isPikToggle,
           // ─── Mezz support: per-tranche investor attribution + PIK
           // capitalisation cadence + coupon-servicing split.
@@ -12013,6 +12159,24 @@ window.SB = (function(){
           counts.paydowns += rows.length;
         }
 
+        // 4b-bis. interest payments — cash interest actually paid. Distinct
+        // from accrual: the engine computes accrual, but payment is a fact
+        // that must be asserted (booked event or received from cash mgmt).
+        const ipays = Array.isArray(t.interestPayments) ? t.interestPayments : [];
+        if(ipays.length){
+          const rows = ipays.map((p, i) => ({
+            tranche_id: trancheId,
+            payment_no: i + 1,
+            pay_date:   p.date,
+            amount:     +p.amount || 0,
+            source:     (p.source === 'cashmgmt' ? 'cashmgmt' : 'event'),
+            reference:  p.reference || null,
+            note:       p.note || null
+          }));
+          const { error: ipErr } = await _client.from('interest_payments').insert(rows);
+          if(ipErr){ console.error('[SB] saveDeal: interest_payments:', ipErr); return { ok:false, reason: ipErr.message }; }
+        }
+
         // 4c. interest components + terms + spreads + ratchet tiers
         const ics = Array.isArray(t.interestComponents) ? t.interestComponents : [];
         for(let ci = 0; ci < ics.length; ci++){
@@ -12023,6 +12187,9 @@ window.SB = (function(){
             name:                 ic.name || ('Component ' + (ci+1)),
             base_index:           safeEnum('base_index', ic.baseIndex),
             base_value:           +ic.baseValue || 0,
+            // NULL = inherit the facility default. Empty string from the
+            // <select> must become NULL, not '', or the CHECK rejects it.
+            accrual_freq:         ic.accrualFreq || null,
             esg_adjustment_bps:   +ic.esgAdjustmentBps || 0,
             ratchet_kpi:          safeEnum('ratchet_kpi', ic.ratchet && ic.ratchet.kpi),
             // Rate floor / cap in bps — engine reads coupon.floor/cap
@@ -12583,7 +12750,7 @@ window.SB = (function(){
             'interest_components(*, ' +
               'interest_terms(*), interest_spreads(*), ratchet_tiers(*), rfr_fixings(*)' +
             '), ' +
-            'drawdowns(*), paydowns(*)' +
+            'drawdowns(*), paydowns(*), interest_payments(*)' +
           '), ' +
           'fees(*), ' +
           'aasb_extras(*), ' +
@@ -12655,6 +12822,7 @@ window.SB = (function(){
             extensionNoticeMonths:       row.extension_notice_months        != null ? +row.extension_notice_months        : null
           },
           facility: row.facility ? {
+            name:        row.facility.facility_name || '',
             commitment:  +row.facility.commitment || 0,
             availEnd:    row.facility.availability_end || '',
             dayBasis:    row.facility.day_basis,
@@ -12664,13 +12832,14 @@ window.SB = (function(){
             // Interest accrual JE posting frequency lives on the deal row (not the
             // facility sub-table) so ALL tranches share the same cadence.
             interestAccrualFreq: row.interest_accrual_freq || 'monthly'
-          } : { commitment: 0, availEnd: '', dayBasis:'ACT/360', holiday:'none', repayment:'AtMaturity', type:'termLoan', interestAccrualFreq:'monthly' },
+          } : { name:'', commitment: 0, availEnd: '', dayBasis:'ACT/360', holiday:'none', repayment:'AtMaturity', type:'termLoan', interestAccrualFreq:'monthly' },
           tranches: sort(row.tranches, 'tranche_no').map((t, ti) => ({
             id:               t.id || ('TRN_' + (ti+1)),
             name:             t.name,
             currency:         t.currency,
             face:             +t.face_value      || 0,
             drawnInitially:   +t.drawn_initially || 0,
+            drawnInitiallyDate: t.drawn_initially_date || '',
             isPikToggle:      !!t.is_pik_toggle,
             // ─── Mezz support round-trip: investor + PIK cadence + cash-coupon split.
             investorName:              t.investor_name             || null,
@@ -12682,6 +12851,10 @@ window.SB = (function(){
             drawdowns:        sort(t.drawdowns, 'drawdown_no').map(d => ({
               date: d.draw_date, amount: +d.amount || 0, reason: d.reason || ''
             })),
+            interestPayments: sort(t.interest_payments, 'payment_no').map(p => ({
+              date: p.pay_date, amount: +p.amount || 0,
+              source: p.source || 'event', reference: p.reference || '', note: p.note || ''
+            })),
             repayments:       sort(t.paydowns, 'paydown_no').map(p => ({
               date: p.paydown_date, amount: +p.amount || 0, kind: p.kind || 'scheduled', trigger: p.trigger || null, reason: p.reason || ''
             })),
@@ -12690,6 +12863,7 @@ window.SB = (function(){
               name:                ic.name,
               baseIndex:           ic.base_index,
               baseValue:           +ic.base_value || 0,
+              accrualFreq:         ic.accrual_freq || '',
               esgAdjustmentBps:    +ic.esg_adjustment_bps || 0,
               floorBps:            +ic.floor_bps || 0,
               capBps:              +ic.cap_bps   || 0,
@@ -13324,7 +13498,7 @@ window.SB = (function(){
   function auth_isSignedIn(){ return !!_currentUser; }
 
   return {
-    init, listPresets, saveAccountingRun, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals, syncBreachLog,
+    init, listPresets, saveAccountingRun, fetchLatestRunForDeal, saveTreatmentOverride, saveSession, listSessions, loadSession, saveDeal, deleteDeal, saveSchedule, fetchUserDeals, syncBreachLog,
     // ─── Connection resilience helpers (V4 fix, 2026-08) ───────────────
     // withHeavyWrite(fn) pauses the background health ping for the duration
     // of a bulk insert so a legitimately-busy connection pool isn't mistaken
@@ -20729,13 +20903,11 @@ window.__renderInlineJETable = function(){
     r.fund || r.entity || r.legalEntity ||
     (inst && (inst.legalEntity || inst.entity)) ||
     (window.B && window.B.deal && (window.B.deal.le || window.B.deal.name)) || '—';
-  // Account display — "141000 · Loan Receivable" reads best for accountants
-  const acctLabel = (r) => {
-    const name = r.glAccountName || r.accountName || '';
-    const code = r.account || '';
-    if(name && code) return name + ' <span style="color:var(--n-400); font-family:ui-monospace,monospace; font-size:10.5px;">' + code + '</span>';
-    return name || code || '—';
-  };
+  // Account code and name are separate columns. Previously the code was
+  // appended inline after the name, which left it ragged — the code's start
+  // position moved with the length of every account name.
+  const acctCode = (r) => r.account || '';
+  const acctName = (r) => r.glAccountName || r.accountName || '';
   // Total DR/CR balance check
   let totDr = 0, totCr = 0;
   rows.forEach(r => { if(r.isDebit) totDr += (+r.amountLE || 0); else totCr += (+r.amountLE || 0); });
@@ -20749,7 +20921,8 @@ window.__renderInlineJETable = function(){
 
   const TH = '<thead><tr>' +
     '<th style="width:96px;">Date</th>' +
-    '<th>Account</th>' +
+    '<th style="width:92px;">Account</th>' +
+    '<th>Account name</th>' +
     '<th class="num" style="width:130px;">Debit</th>' +
     '<th class="num" style="width:130px;">Credit</th>' +
     '<th style="width:130px;">Fund</th>' +
@@ -20764,7 +20937,8 @@ window.__renderInlineJETable = function(){
         '<tbody>' + rows.map(r => (
           '<tr>' +
             '<td>' + fmtJeDate(r.effectiveDate) + '</td>' +
-            '<td class="' + (r.isDebit ? '' : 'acct-credit') + '">' + acctLabel(r) + '</td>' +
+            '<td class="acct-code">' + (acctCode(r) || '—') + '</td>' +
+            '<td>' + (acctName(r) || '—') + '</td>' +
             '<td class="num">' + (r.isDebit ? fmtAmt(r.amountLE) : '') + '</td>' +
             '<td class="num">' + (!r.isDebit ? fmtAmt(r.amountLE) : '') + '</td>' +
             '<td style="color:var(--n-600);">' + fundLabel(r) + '</td>' +
@@ -20772,7 +20946,7 @@ window.__renderInlineJETable = function(){
           '</tr>'
         )).join('') +
         '<tr class="je-total">' +
-          '<td></td><td>Total</td>' +
+          '<td></td><td></td><td>Total</td>' +
           '<td class="num">' + fmtAmt(totDr) + '</td>' +
           '<td class="num">' + fmtAmt(totCr) + '</td>' +
           '<td></td><td></td>' +
@@ -20818,7 +20992,8 @@ window.__renderInlineJETable = function(){
         '<tbody>' + grpRows.map(r => (
           '<tr>' +
             '<td>' + fmtJeDate(r.effectiveDate) + '</td>' +
-            '<td class="' + (r.isDebit ? '' : 'acct-credit') + '">' + acctLabel(r) + '</td>' +
+            '<td class="acct-code">' + (acctCode(r) || '—') + '</td>' +
+            '<td>' + (acctName(r) || '—') + '</td>' +
             '<td class="num">' + (r.isDebit ? fmtAmt(r.amountLE) : '') + '</td>' +
             '<td class="num">' + (!r.isDebit ? fmtAmt(r.amountLE) : '') + '</td>' +
             '<td style="color:var(--n-600);">' + fundLabel(r) + '</td>' +
@@ -20826,7 +21001,7 @@ window.__renderInlineJETable = function(){
           '</tr>'
         )).join('') +
         '<tr class="je-total">' +
-          '<td></td><td>Total</td>' +
+          '<td></td><td></td><td>Total</td>' +
           '<td class="num">' + fmtAmt(dr) + '</td>' +
           '<td class="num">' + fmtAmt(cr) + '</td>' +
           '<td></td><td></td>' +
@@ -27339,7 +27514,7 @@ window.startNewBlankDeal = function(){
     const prevKey = window.B._presetKey || null;
     window.B.deal = { name:'', dealId:'', counterparty:'', le:'', currency:'USD',
                       framework:'IFRS', settle:'', maturity:'' };
-    window.B.facility = { commitment: 0, availEnd:'', dayBasis:'ACT/360',
+    window.B.facility = { name:'', commitment: 0, availEnd:'', dayBasis:'ACT/360',
                           holiday:'none', repayment:'AtMaturity', type:'termLoan' };
     window.B.tranches = [];
     window.B.fees = [];
@@ -33357,7 +33532,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   const B = {
     deal: { name:'', dealId:'', counterparty:'', le:'', currency:'USD',
             framework:'IFRS', settle:'', maturity:'' },
-    facility: { commitment: 0, availEnd:'', dayBasis:'ACT/360',
+    facility: { name:'', commitment: 0, availEnd:'', dayBasis:'ACT/360',
                 holiday:'none', repayment:'AtMaturity', type:'termLoan' },
     tranches: [],
     fees: [],
@@ -33508,7 +33683,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           <span class="material-icons-outlined text-[16px]" style="color:#4338ca">layers</span>
           <input data-t-field="name" data-tidx="${idx}" type="text" value="${escapeHtml(t.name)}" placeholder="Tranche name"
                  class="border border-indigo-300 rounded px-2 py-1 text-[12px] bg-white font-bold w-48"/>
-          <span class="chip blue text-[10px]">${t.id}</span>
+          <!-- Internal tranche id deliberately not shown — it is a UUID with no
+               meaning to the user and it crowded the tranche name. Still
+               available in the DOM for support/debugging. -->
+          <span class="hidden" data-tranche-id="${t.id}"></span>
           <button data-t-action="remove" data-tidx="${idx}" class="mat-btn outline !py-0.5 !px-2 text-[10px] ml-auto">
             <span class="material-icons-outlined text-[12px]">delete</span>Remove
           </button>
@@ -33519,6 +33697,17 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
               ${['USD','GBP','EUR','CHF','JPY','AUD'].map(c => `<option ${t.currency===c?'selected':''} value="${c}">${c}</option>`).join('')}
             </select>
           </div>
+          <!-- Initial drawdown date. Blank in state means "follow the deal
+               settlement date", which is the normal case — face value and
+               first draw land together. The input still SHOWS the settle date
+               so the field never looks empty, and because it is only a display
+               fallback it keeps tracking settle if the user changes it.
+               Once the user picks a date the stored value takes over, and it
+               can be edited afterwards from Lifecycle events. -->
+          <div><label class="text-[10px] uppercase text-gray-600 block" title="Defaults to the deal settlement date. Change it here or later from Lifecycle events.">Initial Drawdown Date</label>
+            <input data-t-field="drawnInitiallyDate" data-tidx="${idx}" type="date"
+                   value="${t.drawnInitiallyDate || B.deal.settle || ''}"
+                   class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
           <div><label class="text-[10px] uppercase text-gray-600 block">Face Value <span style="color:#DC2626; font-weight:900;">*</span></label>
             <!-- Text input with live thousands-separator formatting (2026-08-19).
                  data-fmt-num="1" marker makes wireTrancheInputs strip commas
@@ -33676,6 +33865,17 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           <label class="text-[10px] text-gray-600">Base value</label>
           <input data-ic-field="baseValue" data-tidx="${tidx}" data-icidx="${ici}" type="number" step="0.0001" value="${ic.baseValue || 0}"
                  class="border border-gray-300 rounded px-2 py-0.5 text-[11px] bg-white w-24"/>
+          <!-- Accrual frequency lives here, not on the facility, because a
+               deal can run a fixed leg accruing semi-annually alongside a
+               SONIA leg accruing monthly. Blank inherits the facility-level
+               default so existing deals are unaffected. Daily calculation is
+               unchanged either way — this only controls how the daily
+               accruals are grouped when posted. -->
+          <label class="text-[10px] text-gray-600" title="How often this component's daily accruals are grouped and posted. Inherits the Facility Setup default when left on Facility default.">Accrual</label>
+          <select data-ic-field="accrualFreq" data-tidx="${tidx}" data-icidx="${ici}" class="border border-gray-300 rounded px-2 py-0.5 text-[11px] bg-white">
+            ${[['','Facility default'],['weekly','Weekly'],['monthly','Monthly'],['quarterly','Quarterly'],['semi-annual','Semi-annual'],['annual','Annual'],['at-maturity','At maturity']]
+              .map(([v,l]) => `<option ${ (ic.accrualFreq || '') === v ? 'selected' : '' } value="${v}">${l}</option>`).join('')}
+          </select>
           <button data-t-action="rmIC" data-tidx="${tidx}" data-icidx="${ici}" class="ml-auto text-red-600 underline text-[10px]">remove</button>
         </div>
         <!-- Terms -->
@@ -34497,12 +34697,27 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // dropdown; the choice persists in localStorage under `cf-period-months`
   // so switching tabs / decks doesn't reset.
   const CF_FREQ_MAP = {
+    // Daily is a troubleshooting granularity, not a reporting cadence — it
+    // exists so a user can tie our numbers back to a client's daily
+    // spreadsheet row by row. Interest is ALWAYS accrued daily internally
+    // whatever is picked here; the picker only controls how those days are
+    // bucketed for display.
+    daily:       { months: null, days: 1,  label:'Daily' },
     weekly:      { months: null, weeks: 1, label:'Weekly' },
     monthly:     { months: 1,    label:'Monthly' },
     quarterly:   { months: 3,    label:'Quarterly' },
     semiAnnual:  { months: 6,    label:'Semi-annual' },
     annual:      { months: 12,   label:'Annual' }
   };
+  // Safety valve. A 50-year facility at daily granularity is ~18,000 rows;
+  // each one runs computePeriod over every tranche, component and fee. The
+  // cap stops a pathological deal from locking the tab, and the render path
+  // reports when it bites rather than silently showing a short schedule.
+  const CF_MAX_DAILY_PERIODS = 20000;
+  // How many days the daily table shows at once. Cumulative "to date"
+  // columns are still computed across the WHOLE life and then sliced, so the
+  // running totals in the visible window are true totals, not window totals.
+  const CF_DAILY_WINDOW_DAYS = 92;
   function _defaultCashflowFreq(){
     // Auto-default based on the deal shape.
     //   • 7-day interest tenor  → weekly       (FirstAg style)
@@ -34530,6 +34745,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     } catch(_){}
     return 'quarterly';
   }
+  // Anchor date for the daily window. Order of preference: what the user
+  // typed, then a persisted choice, then the deal settle date. Clamped into
+  // the schedule so a stale date from a previous deal can't blank the table.
+  function _resolveDailyFrom(rows){
+    // Deliberately no localStorage fallback here — a date persisted while
+    // looking at another deal would silently anchor this one somewhere
+    // arbitrary. The input is seeded per deal by __cfSyncDailyControls.
+    let v = '';
+    const el = $b('cf-daily-from');
+    if(el && el.value) v = el.value;
+    if(!v) v = (B.deal && B.deal.settle) || '';
+    if(rows && rows.length){
+      const first = rows[0].start, last = rows[rows.length - 1].start;
+      if(!v || v < first) v = first;
+      if(v > last) v = last;
+    }
+    return v;
+  }
   function _resolveCashflowFreq(){
     // Read user's picker choice or fall back to the auto-default.
     const pick = $b('cf-period-picker');
@@ -34543,10 +34776,35 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!t0 || !B.deal.maturity){ return []; }
     const freqKey = _resolveCashflowFreq();
     const spec = CF_FREQ_MAP[freqKey] || CF_FREQ_MAP.quarterly;
-    const periods = spec.weeks
-      ? enumeratePeriodsWeekly(B.deal.settle, B.deal.maturity, spec.weeks)
-      : enumeratePeriods(B.deal.settle, B.deal.maturity, spec.months);
+    const periods = spec.days
+      ? enumeratePeriodsDaily(B.deal.settle, B.deal.maturity)
+      : spec.weeks
+        ? enumeratePeriodsWeekly(B.deal.settle, B.deal.maturity, spec.weeks)
+        : enumeratePeriods(B.deal.settle, B.deal.maturity, spec.months);
     return periods.map((p, i) => computePeriod(p, i));
+  }
+
+  // One row per calendar day, settle → maturity. Deliberately enumerates the
+  // full life rather than a window: the "to date" columns are running totals,
+  // so slicing before the enrichment pass would restart them at zero and show
+  // window totals dressed up as life-to-date. The render path slices AFTER
+  // enrichment instead.
+  function enumeratePeriodsDaily(start, end){
+    const s = new Date(start);
+    const e = new Date(end);
+    const out = [];
+    let cur = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+    while(cur < e && out.length < CF_MAX_DAILY_PERIODS){
+      const nxt = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+      const periodEnd = (nxt > e) ? e : nxt;
+      out.push({ start: toISO(cur), end: toISO(periodEnd) });
+      cur = periodEnd;
+    }
+    if(out.length >= CF_MAX_DAILY_PERIODS){
+      console.warn('[cf] daily enumeration capped at ' + CF_MAX_DAILY_PERIODS +
+        ' rows — schedule truncated before maturity ' + end);
+    }
+    return out;
   }
 
   function enumeratePeriodsWeekly(start, end, weeks){
@@ -34595,19 +34853,28 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // Treat the deal settlement date as the start of the first period for
     // detecting "initial draws". Anything dated EXACTLY at settle counts as
     // an initial draw in period 0 only.
-    const isFirstPeriod = periodIdx === 0;
+    // (Initial draws are now placed by their own date rather than by period
+    // index — see initDrawDate below — so this flag is no longer consulted.)
 
     B.tranches.forEach((t, ti) => {
       // Period-specific drawdowns: include initial draw on first period,
       // plus any scheduled drawdowns dated within [p.start, p.end).
       const inPeriodDrawdowns = t.drawdowns.filter(d =>
         d.date && d.date >= p.start && d.date < p.end);
-      const periodDrawdownAmt = (isFirstPeriod ? (t.drawnInitially || 0) : 0)
+      // The initial draw is now dated. Blank falls back to settlement, which
+      // is what every existing deal implicitly assumed — so behaviour is
+      // unchanged unless someone sets a date. It lands in whichever period
+      // contains that date rather than always in period 0.
+      const initDrawDate = t.drawnInitiallyDate || B.deal.settle || '';
+      const initDrawAmt  = (t.drawnInitially || 0);
+      const initDrawHere = initDrawAmt > 0.005 && initDrawDate &&
+                           initDrawDate >= p.start && initDrawDate < p.end;
+      const periodDrawdownAmt = (initDrawHere ? initDrawAmt : 0)
                               + inPeriodDrawdowns.reduce((s, d) => s + (d.amount || 0), 0);
       if(periodDrawdownAmt > 0.005){
         totalDrawdowns += periodDrawdownAmt;
-        if(isFirstPeriod && (t.drawnInitially || 0) > 0){
-          drawdownsBreakdown.push({ trancheName: t.name, date: B.deal.settle, amount: t.drawnInitially, label:'Initial draw' });
+        if(initDrawHere){
+          drawdownsBreakdown.push({ trancheName: t.name, date: initDrawDate, amount: initDrawAmt, label:'Initial draw' });
         }
         inPeriodDrawdowns.forEach(d => drawdownsBreakdown.push({
           trancheName: t.name, date: d.date, amount: d.amount || 0, label:'Scheduled draw'
@@ -34625,7 +34892,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       }
 
       // Determine drawn balance for this period (initial + all drawdowns up to start)
-      const drawnBalance = (t.drawnInitially || 0) + t.drawdowns
+      // Only count the initial draw once its date has arrived — otherwise a
+      // deferred first draw would still accrue interest from settlement.
+      const initDrawn = (initDrawDate && initDrawDate <= p.start) ? initDrawAmt : 0;
+      const drawnBalance = initDrawn + t.drawdowns
         .filter(d => d.date && d.date <= p.start)
         .reduce((s, d) => s + (d.amount || 0), 0)
         - (t.repayments || [])
@@ -35436,6 +35706,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.deal.framework   = $b('b-framework')?.value || 'IFRS';
     B.deal.settle      = $b('b-settle')?.value || '';
     B.deal.maturity    = $b('b-maturity')?.value || '';
+    // Facility name is optional — blank means "use the deal name" downstream,
+    // so store '' rather than falling back here (the fallback belongs at the
+    // point of use, not at capture, or an edit to the deal name would stop
+    // propagating).
+    B.facility.name         = ($b('b-facility-name')?.value || '').trim();
     B.facility.commitment   = parseFloat($b('b-commitment')?.value) || 0;
     B.facility.availEnd     = $b('b-avail-end')?.value || '';
     B.facility.dayBasis     = $b('b-day-basis')?.value || 'ACT/360';
@@ -35767,8 +36042,189 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(typeof loadTreatmentForm === 'function') loadTreatmentForm();
     // Enable the Run Accounting button + mark Stage 1 done / Stage 2 active
     enableRunAccountingButton(inst);
+    // Pull back the last saved run for this deal. Fire-and-forget so deal
+    // loading is never blocked on it; no-ops when journals are already in
+    // memory, so switching tabs within a session costs nothing.
+    if(typeof window.__restoreLastAccountingRun === 'function'){
+      setTimeout(() => { window.__restoreLastAccountingRun(); }, 400);
+    }
     return inst;
   }
+
+  // ─── Restore the last accounting run after a page reload ────────────
+  // Runs and their JE rows are persisted on every run, but nothing read them
+  // back — so a refresh emptied M.acctJournals and the Accounting tab acted
+  // as though the deal had never been run. This closes that loop: if we have
+  // no journals in memory but the deal has a saved run, load it.
+  //
+  // In-memory always wins. A run the user has just executed reflects the
+  // current builder state; a stored run may predate unsaved edits, so we must
+  // never overwrite live results with the database copy.
+  let _restoreInFlight = null;
+  let _restoreBusy = false;
+  // Repaint the Stage 2 KPI strip from a restored run. Mirrors the strip
+  // runAccountingImpl() builds, but sourced from the stored summary instead
+  // of a live compute — the point of restoring is not to re-run the engine.
+  //
+  // Receivables is the one card derived rather than stored: it is net DR less
+  // CR on account 113000, which the restored JE rows carry exactly, so it is
+  // a read of the posted data rather than a re-derivation of it.
+  function _paintRestoredKPIs(res, stored){
+    const host = document.getElementById('acct-kpis');
+    if(!host) return;
+    const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    const ccy = (inst && inst.currency) || (window.B && window.B.deal && window.B.deal.currency) || 'GBP';
+    const money = v => (v == null || isNaN(+v))
+      ? '—'
+      : (typeof fmtMoney === 'function' ? fmtMoney(+v, ccy) : String(v));
+    let dr = 0, cr = 0;
+    (M.acctJournals || []).forEach(j => {
+      if(j.account !== '113000') return;
+      if(j.isDebit) dr += (+j.amountLE || 0); else cr += (+j.amountLE || 0);
+    });
+    const s = stored || {};
+    // Runs saved before the summary was widened only carry two fields. Show a
+    // dash for the rest rather than a misleading zero, and say why.
+    const partial = !!stored && (s.totalFees == null && s.totalPikAccrual == null);
+    const cards = [
+      { label:'Interest (life)',        value: money(s.totalCashAccrual) },
+      { label:'Fees (life)',            value: money(s.totalFees) },
+      { label:'PIK (life)',             value: money(s.totalPikAccrual) },
+      { label:'EIR Accretion',          value: money(s.totalEIRAccretion) },
+      { label:'Receivables (113000)',   value: money(Math.abs(dr - cr)),
+        sub: 'DR ' + money(dr) + ' − CR ' + money(cr) },
+      { label:'ECL Allowance (145000)', value: money(s.closingECLAllowance),
+        sub: s.eclStage ? ('Stage ' + s.eclStage + ' lifetime') : '' }
+    ];
+    host.innerHTML = cards.map(k =>
+      '<div class="kpi"><div class="label">' + k.label + '</div>' +
+      '<div class="value text-[14px]">' + k.value + '</div>' +
+      (k.sub ? '<div class="sub text-[10px] text-gray-500">' + k.sub + '</div>' : '') +
+      '</div>'
+    ).join('');
+    host.classList.remove('hidden');
+    host.style.removeProperty('display');
+    if(partial){
+      console.log('[acct] restored run predates the widened summary — Fees / PIK / EIR ' +
+                  'show as “—” until this deal is run again.');
+    }
+  }
+  // Wait until both the DB client and an active instrument exist. Straight
+  // after a hard refresh the user can click through to Accounting before
+  // supabase-js has connected, and the first version of this fired on a fixed
+  // 60ms timer — a race it lost, silently, leaving the tab blank. Poll to a
+  // deadline instead of guessing a delay.
+  async function _waitForRestorePrereqs(timeoutMs){
+    const deadline = Date.now() + (timeoutMs || 12000);
+    let triedRegister = false;
+    while(Date.now() < deadline){
+      // Not every deal-load path registers the v2 instrument — the picker
+      // modal can leave B populated with no entry in INSTRUMENTS, which is
+      // why going straight to Accounting after a refresh found nothing to
+      // restore. Recover once from B rather than waiting for the user to
+      // visit Cashflow, which is what was silently doing this for us.
+      if(!triedRegister && typeof currentInstrument === 'function' && !currentInstrument()
+         && window.B && window.B.deal && window.B.deal.name
+         && typeof window.registerBuilderInstrument === 'function'){
+        triedRegister = true;
+        console.log('[acct] no active instrument — registering from the loaded deal');
+        try { window.registerBuilderInstrument(); } catch(e){ console.warn('[acct] register failed:', e); }
+      }
+      // SB.isConnected is a getter PROPERTY, not a method — calling it, or
+      // testing it with typeof === 'function', silently reports "ready" and
+      // defeats the whole wait.
+      const sbReady = !!(window.SB && typeof SB.fetchLatestRunForDeal === 'function' && SB.isConnected);
+      const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+      if(sbReady && inst) return inst;
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return null;
+  }
+  window.__restoreLastAccountingRun = async function(force){
+    try {
+      if(typeof M === 'undefined' || !M){ console.log('[acct] restore skipped — no M'); return false; }
+      if(!force && Array.isArray(M.acctJournals) && M.acctJournals.length){
+        console.log('[acct] restore skipped — ' + M.acctJournals.length + ' journals already in memory');
+        return false;
+      }
+      // Collapse concurrent callers (tab click + deal load) onto one attempt.
+      // The busy flag is set BEFORE the wait, not after: the wait can itself
+      // call registerBuilderInstrument, whose tail calls back into here, and
+      // a guard that only covers the fetch would let that recurse.
+      if(_restoreInFlight || _restoreBusy) return _restoreInFlight || false;
+      _restoreBusy = true;
+      const inst = await _waitForRestorePrereqs().finally(() => { _restoreBusy = false; });
+      if(!inst){
+        console.warn('[acct] restore gave up — DB client or active instrument never became ready');
+        return false;
+      }
+      // Another caller may have won the race while we were waiting.
+      if(!force && Array.isArray(M.acctJournals) && M.acctJournals.length) return false;
+      _restoreInFlight = (async () => {
+        const res = await SB.fetchLatestRunForDeal(inst);
+        if(!res || !Array.isArray(res.journals) || !res.journals.length) return false;
+        M.acctJournals = res.journals;
+        M.restoredRun  = {
+          id: res.run.id, runId: res.run.run_id, runAt: res.run.run_at,
+          status: res.run.status, framework: res.run.framework_used,
+          balanced: res.run.balanced
+        };
+        // Renderers key off M.acctJournals, so a straight re-render is enough.
+        if(typeof window.__renderInlineJETable === 'function') window.__renderInlineJETable();
+        // …but the Stage 2 sub-tab controller decides what is VISIBLE, and it
+        // last ran during init when there were no journals. That left the big
+        // dashed "Ready to run accounting" panel on screen and the run panels
+        // hidden — which is what "the tab is blank" actually was. Re-run it
+        // for the active sub-tab so the restored data is shown.
+        try {
+          const activeSub = document.querySelector('.s2-subtab-btn[data-active="true"]');
+          const target = (activeSub && activeSub.dataset && activeSub.dataset.s2sub) || 'run';
+          if(typeof window.switchStage2Sub === 'function') window.switchStage2Sub(target);
+        } catch(e){ console.warn('[acct] sub-tab refresh failed:', e); }
+        // Belt and braces — hide the empty state directly in case the sub-tab
+        // controller has not been wired yet on this page load.
+        const _empty = document.getElementById('s2-empty-state');
+        if(_empty) _empty.style.display = 'none';
+        // Stage strip: mark the accounting step done rather than pending.
+        try {
+          if(typeof setStage === 'function'){ setStage('stage-2', 'done'); setStage('stage-3', 'active'); }
+        } catch(_){}
+        // KPI strip — rebuilt from the stored summary. Receivables is derived
+        // from the restored JE rows themselves (account 113000 DR less CR),
+        // which is exactly how the live run computes it.
+        try {
+          const stored = (res.run.summary_jsonb && res.run.summary_jsonb.summary) || null;
+          M.summary = Object.assign({}, M.summary || {}, stored || {});
+          _paintRestoredKPIs(res, stored);
+        } catch(e){ console.warn('[acct] KPI paint failed:', e); }
+        // Run status / approval strip keys off the current run uuid.
+        try {
+          M._currentRunUuid = res.run.id;
+          if(typeof window.refreshApprovalUI === 'function') window.refreshApprovalUI();
+        } catch(e){ console.warn('[acct] approval strip refresh failed:', e); }
+        const acctStatus = document.getElementById('acct-status');
+        if(acctStatus){
+          acctStatus.className = 'chip green self-center';
+          acctStatus.textContent = 'Restored · ' + res.journals.length + ' JE rows';
+        }
+        if(typeof toast === 'function'){
+          const when = res.run.run_at ? new Date(res.run.run_at).toLocaleString() : 'earlier';
+          toast('Loaded the saved accounting run from ' + when +
+                ' · ' + res.journals.length + ' JE rows. Re-run if the deal has changed since.',
+                5000, { kind:'info' });
+        }
+        console.log('[acct] restored run', res.run.id, '·', res.journals.length, 'JE rows · status', res.run.status);
+        return true;
+      })();
+      const out = await _restoreInFlight;
+      _restoreInFlight = null;
+      return out;
+    } catch(err){
+      _restoreInFlight = null;
+      console.warn('[acct] restore failed:', err);
+      return false;
+    }
+  };
 
   function enableRunAccountingButton(inst){
     const btn = document.getElementById('btn-acct-run');
@@ -35975,7 +36431,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           ? totalDrawnInit
           : (hasPostCloseDraws ? 0 : totalFace);
         const events = [];
-        if(initialAmt > 0.005){
+        if(totalDrawnInit > 0.005){
+          // Per-tranche initial draws, each on its own funding date. Emitting
+          // one event per tranche (rather than a single aggregate at settle)
+          // matters now that drawnInitiallyDate exists: two tranches funding
+          // on different days must not be collapsed onto one date, or the
+          // accounting run would disagree with the Cashflow schedule.
+          B.tranches.forEach(t => {
+            const amt = +t.drawnInitially || 0;
+            if(amt <= 0.005) return;
+            events.push({
+              date: t.drawnInitiallyDate || B.deal.settle,
+              type:'draw', amount: amt,
+              drawdownId: t.id+'_D1', status:'actual'
+            });
+          });
+        } else if(initialAmt > 0.005){
+          // Legacy fully-funded-at-close presets: no drawn_initially anywhere,
+          // no post-close draws → fund totalFace at settlement, as before.
           events.push({ date: B.deal.settle, type:'draw', amount: initialAmt, drawdownId: id+'_D1', status:'actual' });
         }
         // Subsequent drawdowns per tranche
@@ -36190,6 +36663,34 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       // applies. Daily calc is unchanged.
       if(B.facility.interestAccrualFreq){
         inst.couponFrequency = B.facility.interestAccrualFreq;
+      }
+      // Per-component accrual frequencies. A deal can carry a fixed leg
+      // accruing semi-annually and a floating leg accruing monthly, which a
+      // single scalar cannot express. Two things happen here:
+      //
+      //  1. The full map is handed to the engine as `componentAccrualFreq`
+      //     so the JE splitter can group each component on its own cadence
+      //     once it is taught to read it.
+      //  2. Until then, `couponFrequency` is set to the FINEST cadence in
+      //     use. Splitting monthly and aggregating up is lossless; splitting
+      //     semi-annually and trying to recover monthly is not — so erring
+      //     toward the finer cadence keeps the postings recoverable.
+      const _accOrder = ['weekly','monthly','quarterly','semi-annual','annual','at-maturity'];
+      const _accMap = [];
+      (B.tranches || []).forEach(t => (t.interestComponents || []).forEach(ic => {
+        if(ic && ic.accrualFreq){
+          _accMap.push({ trancheId: t.id, componentId: ic.id, componentName: ic.name, freq: ic.accrualFreq });
+        }
+      }));
+      if(_accMap.length){
+        inst.componentAccrualFreq = _accMap;
+        const finest = _accMap
+          .map(x => _accOrder.indexOf(x.freq))
+          .filter(i => i >= 0)
+          .concat(_accOrder.indexOf(B.facility.interestAccrualFreq || 'monthly'))
+          .filter(i => i >= 0)
+          .sort((a, b) => a - b)[0];
+        if(finest != null && finest >= 0) inst.couponFrequency = _accOrder[finest];
       }
     }
     // Preserve Builder tranches shape (with face + isPikToggle + interestComponents)
@@ -38090,6 +38591,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     $b('b-framework').value     = B.deal.framework;
     $b('b-settle').value        = B.deal.settle;
     $b('b-maturity').value      = B.deal.maturity;
+    var _fn = $b('b-facility-name');
+    if(_fn) _fn.value = B.facility.name || '';
     $b('b-commitment').value    = B.facility.commitment || '';
     // Sync the visible thousands-separator display input from the hidden number
     var _cd = document.getElementById('b-commitment-display');
@@ -38213,7 +38716,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!confirm('Clear the builder?')) return;
     B.deal = { name:'', dealId:'', counterparty:'', le:'', currency:'USD',
                framework:'IFRS', settle:'', maturity:'' };
-    B.facility = { commitment: 0, availEnd:'', dayBasis:'ACT/360',
+    B.facility = { name:'', commitment: 0, availEnd:'', dayBasis:'ACT/360',
                    holiday:'none', repayment:'AtMaturity', type:'termLoan' };
     B.tranches = []; B.fees = [];
     // V3 — CRITICAL: clear B._presetKey too, otherwise autosave still thinks
@@ -38286,8 +38789,29 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // computeCashflows() (which now honours the picker).
   window.__onCfPeriodChange = function(value){
     try { localStorage.setItem('cf-period-months', value); } catch(_){}
+    __cfSyncDailyControls(value);
     if(typeof recompute === 'function') recompute();
   };
+  window.__onCfDailyFromChange = function(value){
+    try { localStorage.setItem('cf-daily-from', value || ''); } catch(_){}
+    if(typeof recompute === 'function') recompute();
+  };
+  // Show the From-date only at daily granularity, and seed it from the deal
+  // settle date the first time it's revealed so the window opens where the
+  // schedule starts rather than empty.
+  function __cfSyncDailyControls(freq){
+    const wrap = $b('cf-daily-from-wrap');
+    const inp  = $b('cf-daily-from');
+    if(!wrap) return;
+    const isDaily = freq === 'daily';
+    wrap.style.display = isDaily ? 'inline-flex' : 'none';
+    if(isDaily && inp && !inp.value){
+      let v = '';
+      try { v = localStorage.getItem('cf-daily-from') || ''; } catch(_){}
+      inp.value = v || ((window.B && window.B.deal && window.B.deal.settle) || '');
+    }
+  }
+  window.__cfSyncDailyControls = __cfSyncDailyControls;
   // Sync the picker's <select> value to the resolved default whenever the
   // active deal changes. Called from the deal-load path (via a 1500ms poll
   // — the same pattern the Dashboard uses) so switching decks re-defaults
@@ -38304,6 +38828,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     try { target = localStorage.getItem('cf-period-months'); } catch(_){}
     if(!target || !CF_FREQ_MAP[target]) target = _defaultCashflowFreq();
     if(pick.value !== target){ pick.value = target; }
+    // Deal changed — re-anchor the daily window on the new settle date rather
+    // than leaving the previous deal's date in the box.
+    const inp = $b('cf-daily-from');
+    if(inp) inp.value = (window.B && window.B.deal && window.B.deal.settle) || '';
+    __cfSyncDailyControls(pick.value);
   }, 1500);
 
   // ─── Tranche filter for Stage 1 Cashflow view ─────────────────────
@@ -38495,6 +39024,34 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     //                       origination/arrangement/capitalisedCost (Tier 1 #12)
     const facilityCommitment = ((window.B || {}).facility || {}).commitment || 0;
     let cumDraw = 0, cumIntAcc = 0, cumIntPaid = 0, cumCapCost = 0;
+    // ─── Interest paid — asserted, never derived ──────────────────────
+    // This column used to be set equal to the period's accrual, which made
+    // every period look settled and, at daily granularity, showed interest
+    // "paid" on all 365 days. Interest paid is a FACT: it comes from a booked
+    // Interest paid event, or from cash management actuals. Absent either,
+    // the honest answer is nothing paid — not "assume it was".
+    const _ipEvents = [];
+    ((window.B || {}).tranches || []).forEach(t => (t.interestPayments || []).forEach(p => {
+      if(p && p.date) _ipEvents.push({ date: p.date, amount: +p.amount || 0 });
+    }));
+    // Cash management actuals are the second source. Only POSTED interest
+    // receipts count — a cancelled or pending movement has not been paid.
+    // Used only when no events are booked, so a deal that has both does not
+    // double-count; the booked events win because someone asserted them.
+    let _ipSource = _ipEvents.length ? 'events' : 'none';
+    if(!_ipEvents.length && typeof M !== 'undefined' && M && M.workdayActuals &&
+       Array.isArray(M.workdayActuals.actuals)){
+      M.workdayActuals.actuals.forEach(a => {
+        if(!a || !a.date) return;
+        if(String(a.status || '').toUpperCase() !== 'POSTED') return;
+        if(!/interest/i.test(String(a.transactionType || ''))) return;
+        // Ignore accrual-side rows — only cash receipts are payment.
+        if(/accru|receivable|amortis|amortiz/i.test(String(a.transactionType || ''))) return;
+        _ipEvents.push({ date: a.date, amount: Math.abs(+a.amountLE || 0) });
+        _ipSource = 'cashmgmt';
+      });
+    }
+    window.__cfInterestPaidSource = _ipSource;
     // Sum of currently-known capitalised costs (Tier 1 #12) — flat, applied
     // in the period that contains each event's date.
     const inst2 = (typeof currentInstrument === 'function') ? currentInstrument() : null;
@@ -38505,10 +39062,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     rows = rows.map(r => {
       cumDraw += (+r.drawdowns || 0);
       cumIntAcc += (+r.interest || 0);
-      // Interest paid — approximate as the accrued interest of this period.
-      // When coupon frequency < accrual frequency this understates, but the
-      // engine's schedule-JE splitter fills that in downstream.
-      const paidThisPeriod = (+r.interest || 0);
+      // Interest paid — sum of asserted payments falling in this period.
+      // Zero when nothing has been booked or received, which is the truthful
+      // answer; the previous code returned the accrual here and so reported
+      // every period as fully settled.
+      const paidThisPeriod = _ipEvents
+        .filter(p => p.date >= r.start && p.date < r.end)
+        .reduce((s, p) => s + p.amount, 0);
       cumIntPaid += paidThisPeriod;
       // Capitalised costs falling in this period
       const capThisPeriod = capCostEvents
@@ -38527,7 +39087,36 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         capCostToDate:         cumCapCost
       });
     });
-    // Stash the enriched rows for the XLSX exporter to reuse
+    // ─── Daily view — slice to a window AFTER enrichment ──────────────
+    // Enrichment above walks every row from settle, so the "to date" columns
+    // on the rows we keep are genuine life-to-date figures rather than
+    // window subtotals. Slicing here (not in computeCashflows) is what makes
+    // that true.
+    let dailyBanner = '';
+    if(_resolveCashflowFreq() === 'daily' && rows.length){
+      const anchor = _resolveDailyFrom(rows);
+      let from = rows.findIndex(r => r.end > anchor);   // first day ENDING after the anchor
+      if(from < 0) from = Math.max(0, rows.length - CF_DAILY_WINDOW_DAYS);
+      const to = Math.min(rows.length, from + CF_DAILY_WINDOW_DAYS);
+      const shown = rows.slice(from, to);
+      const hiddenBefore = from, hiddenAfter = rows.length - to;
+      if(hiddenBefore || hiddenAfter){
+        dailyBanner =
+          '<div style="background:#F5F3FF; border:0.5px solid #C4B5FD; border-left:3px solid #7C3AED; border-radius:6px; padding:7px 10px; margin-bottom:10px; font-size:11px; color:#4C1D95; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+            '<i class="ti ti-calendar-search" style="font-size:14px; color:#7C3AED;"></i>' +
+            '<b>Daily view · ' + shown.length + ' day' + (shown.length===1?'':'s') + '</b> · ' +
+            (shown[0] ? shown[0].start : '') + ' to ' + (shown[shown.length-1] ? shown[shown.length-1].end : '') +
+            ' <span style="opacity:0.75;">(' + rows.length.toLocaleString() + ' days in the full schedule' +
+            (hiddenBefore ? ' · ' + hiddenBefore.toLocaleString() + ' before' : '') +
+            (hiddenAfter  ? ' · ' + hiddenAfter.toLocaleString()  + ' after'  : '') + ')</span>' +
+            '<span style="opacity:0.75;">Running totals are life-to-date, not window totals. Move the <b>From</b> date to shift the window.</span>' +
+          '</div>';
+      }
+      rows = shown;
+    }
+    // Stash the enriched rows for the XLSX exporter to reuse. In daily view
+    // this is the visible window — exporting what is on screen is what the
+    // user means by "export".
     window.__cfLastEnrichedRows = rows;
     // Also render the All-in Yield chart alongside the table
     try { renderStage1AllInYield(rows); } catch(err){ console.warn('[CF] yield chart failed:', err); }
@@ -38553,8 +39142,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         render:r => `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:500;">${fmtCcy(r.interest)}</td>` },
       { key:'interest_accrued_to_date', label:'Interest accrued to date', align:'right', title:'Cumulative interest accrued',
         render:r => `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:400; opacity:0.8;">${fmtCcy(r.interestAccruedToDate)}</td>` },
-      { key:'interest_paid', label:'Interest paid', align:'right', title:'Cash interest paid this period (splits on coupon cadence)',
-        render:r => `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:500;">${fmtCcy(r.interestPaidThisPeriod)}</td>` },
+      { key:'interest_paid', label:'Interest paid', align:'right',
+        title:'Cash interest actually paid — from booked Interest paid events, or from cash management actuals. Never derived from accrual, so a blank means nothing has been booked or received yet.',
+        render:r => {
+          const v = +r.interestPaidThisPeriod || 0;
+          // An em-dash rather than $0 — "not asserted" and "asserted as zero"
+          // are different statements and the reconciler needs to tell them apart.
+          return `<td style="padding:6px 10px; text-align:right; color:${v ? '#4338CA' : 'var(--n-400)'}; font-weight:${v ? '500' : '400'};">${v ? fmtCcy(v) : '—'}</td>`;
+        } },
       { key:'fees', label:'Fees', align:'right',
         render:r => `<td style="padding:6px 10px; text-align:right; color:#B45309; font-weight:500;">${fmtCcy(r.fees)}</td>` },
       { key:'cap_cost_to_date', label:'Cap. cost to date', align:'right', title:'Capitalised origination / arrangement / transaction costs — feeds realised G/L on sale',
@@ -38582,7 +39177,17 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const _colW = { period_start:110, period_end:110 };   // dates
     const _wFor = k => _colW[k] || 130;                   // money default
     const _tableW = visibleCols.reduce((s, c) => s + _wFor(c.key), 0);
-    const html = stage2CashBanner + bannerHtml + `<table style="width:${_tableW}px; table-layout:fixed; font-size:11px; font-variant-numeric:tabular-nums; border-collapse:collapse;">
+    // Explain an empty Interest paid column rather than leaving the user to
+    // wonder whether it is broken. Only shown when interest has accrued but
+    // no payment has been asserted from either source.
+    const _ipBanner = (window.__cfInterestPaidSource === 'none' && cumIntAcc > 0.005) ? (
+      '<div style="background:#F8FAFC; border:0.5px solid var(--n-200); border-left:3px solid var(--n-400); border-radius:6px; padding:7px 10px; margin-bottom:10px; font-size:11px; color:var(--n-700); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+        '<i class="ti ti-cash-off" style="font-size:14px; color:var(--n-500);"></i>' +
+        '<b>Interest paid is empty because nothing has been asserted yet.</b>' +
+        '<span>Book an <b>Interest paid</b> event in Lifecycle events, or load actuals in Cash management. It is never inferred from the accrual.</span>' +
+      '</div>'
+    ) : '';
+    const html = _ipBanner + dailyBanner + stage2CashBanner + bannerHtml + `<table style="width:${_tableW}px; table-layout:fixed; font-size:11px; font-variant-numeric:tabular-nums; border-collapse:collapse;">
       <colgroup>
         ${visibleCols.map(c => `<col style="width:${_wFor(c.key)}px;">`).join('')}
       </colgroup>
@@ -38931,7 +39536,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!$b('builder')){ return; }   // safety — v1 doesn't have this section
     // Wire top-level deal/facility inputs
     ['b-deal-name','b-deal-id','b-counterparty','b-le','b-currency','b-framework',
-     'b-settle','b-maturity','b-commitment','b-avail-end','b-day-basis','b-holiday',
+     'b-settle','b-maturity','b-facility-name','b-commitment','b-avail-end','b-day-basis','b-holiday',
      'b-repayment','b-facility-type',
      // Mezz support — new construction/arranger inputs
      'b-structure','b-lender-role','b-senior-provider','b-senior-limit',
@@ -39048,6 +39653,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     if(tab === 'pcssync'){
       setTimeout(() => { window.__pcsLoad && window.__pcsLoad(); }, 30);
+    }
+    // Opening Accounting after a page reload: pull the last saved run back
+    // rather than presenting an empty tab that demands a re-run. No-ops when
+    // journals are already in memory.
+    if(tab === 'stage-2'){
+      setTimeout(() => {
+        window.__restoreLastAccountingRun && window.__restoreLastAccountingRun();
+      }, 60);
     }
   };
 
@@ -43427,6 +44040,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       icon:'ti-arrow-down-right',
       hint:'Principal repayment scheduled or ad-hoc.',
       jumpTo: function(){ _leGoto('builder', 'tranches-section'); } },
+    { key:'interestPaid', name:'Interest paid',    type:'Debit',      category:'Interest',     tier:'core', trancheAware:true,
+      icon:'ti-cash',
+      hint:'Cash interest received. Accrual is calculated; payment is asserted.',
+      jumpTo: function(){ _leGoto('builder', 'tranches-section'); } },
     { key:'fee',        name:'Fee (arrangement / commitment / …)', type:'Credit', category:'Fees', tier:'core', trancheAware:false,
       icon:'ti-receipt',
       hint:'Add an arrangement, commitment, utilisation, agency, or performance fee.',
@@ -43534,6 +44151,33 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         if(!t) throw new Error('Tranche not found');
         t.drawdowns = t.drawdowns || [];
         t.drawdowns.push({ date: v.date, amount: +v.amount, label: v.label || '' });
+      },
+      update: function(v, target){
+        const dest = _leTrancheByRef(v.tranche);
+        if(!dest) throw new Error('Tranche not found');
+        if(target.kind === 'initialDraw'){
+          // The initial draw is not a row in t.drawdowns — it is the tranche's
+          // own drawnInitially/date pair. Moving it to a different tranche is
+          // not an edit, it is two operations, so refuse rather than guess.
+          if(dest !== target.tranche){
+            throw new Error('The initial draw belongs to ' + (target.tranche.name || 'its tranche') +
+                            '. Change the amount or date here, or add a separate drawdown on another tranche.');
+          }
+          target.tranche.drawnInitially = +v.amount;
+          target.tranche.drawnInitiallyDate = v.date || '';
+          return;
+        }
+        // A plain drawdown can move between tranches — remove then re-add.
+        if(dest !== target.tranche){
+          const arr = target.tranche.drawdowns || [];
+          const i = arr.indexOf(target.rec);
+          if(i >= 0) arr.splice(i, 1);
+          dest.drawdowns = dest.drawdowns || [];
+          dest.drawdowns.push(target.rec);
+        }
+        target.rec.date   = v.date;
+        target.rec.amount = +v.amount;
+        target.rec.label  = v.label || '';
       }
     },
     paydown: {
@@ -43555,6 +44199,51 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         if(!t) throw new Error('Tranche not found');
         t.repayments = t.repayments || [];
         t.repayments.push({ date: v.date, amount: +v.amount, kind: v.kind });
+      },
+      update: function(v, target){
+        const dest = _leTrancheByRef(v.tranche);
+        if(!dest) throw new Error('Tranche not found');
+        if(dest !== target.tranche){
+          const arr = target.tranche.repayments || [];
+          const i = arr.indexOf(target.rec);
+          if(i >= 0) arr.splice(i, 1);
+          dest.repayments = dest.repayments || [];
+          dest.repayments.push(target.rec);
+        }
+        target.rec.date   = v.date;
+        target.rec.amount = +v.amount;
+        target.rec.kind   = v.kind;
+      }
+    },
+    interestPaid: {
+      title: 'Add interest paid',
+      hint: 'Cash interest actually received. Accrual is calculated; payment is asserted.',
+      icon: 'ti-cash',
+      fields: [
+        { name:'tranche', label:'Tranche', type:'select', required:true, options: _leTrancheOptions },
+        { name:'date',    label:'Payment date', type:'date',  required:true },
+        { name:'amount',  label:'Amount ($)',   type:'money', required:true, placeholder:'e.g. 64,653' },
+        { name:'reference', label:'Reference (optional)', type:'text', placeholder:'e.g. bank ref / remittance id' }
+      ],
+      submit: function(v){
+        const t = _leTrancheByRef(v.tranche);
+        if(!t) throw new Error('Tranche not found');
+        t.interestPayments = t.interestPayments || [];
+        t.interestPayments.push({ date: v.date, amount: +v.amount, source:'event', reference: v.reference || '' });
+      },
+      update: function(v, target){
+        const dest = _leTrancheByRef(v.tranche);
+        if(!dest) throw new Error('Tranche not found');
+        if(dest !== target.tranche){
+          const arr = target.tranche.interestPayments || [];
+          const i = arr.indexOf(target.rec);
+          if(i >= 0) arr.splice(i, 1);
+          dest.interestPayments = dest.interestPayments || [];
+          dest.interestPayments.push(target.rec);
+        }
+        target.rec.date      = v.date;
+        target.rec.amount    = +v.amount;
+        target.rec.reference = v.reference || '';
       }
     },
     fee: {
@@ -43597,6 +44286,19 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           base: v.base || 'commitment', frequency: v.frequency || 'oneOff',
           trancheRef: v.trancheRef || null, paymentDate: v.paymentDate || null
         });
+      },
+      update: function(v, target){
+        const f = target.rec;
+        // Keep the existing id — downstream fee attribution and JE trace key
+        // off it, so regenerating it would orphan anything already posted.
+        f.label = v.label; f.kind = v.kind; f.mode = v.mode;
+        f.pct = v.pct ? +v.pct : 0;
+        f.flatAmount = v.flatAmount ? +v.flatAmount : 0;
+        f.bps = v.bps ? +v.bps : 0;
+        f.base = v.base || 'commitment';
+        f.frequency = v.frequency || 'oneOff';
+        f.trancheRef = v.trancheRef || null;
+        f.paymentDate = v.paymentDate || null;
       }
     },
     // ─── Tier 1 transtypes ───
@@ -43796,7 +44498,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
 
   function _leCurrentFormKey(){ return window.__leCurrentFormKey || null; }
 
-  window.__leOpenEventForm = function(key){
+  window.__leOpenEventForm = function(key, ref){
     const form = EVENT_FORMS[key];
     const panel = document.getElementById('le-form-panel');
     const title = document.getElementById('le-form-title');
@@ -43809,8 +44511,21 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       return;
     }
     window.__leCurrentFormKey = key;
+    // Edit mode — resolve the row's ref to the live record and its values.
+    // A ref that no longer resolves (deal reloaded, row removed) must NOT
+    // silently degrade into "add", or the user gets a duplicate instead of
+    // an edit. Say so and stop.
+    let edit = null;
+    if(ref){
+      edit = _leResolveRef(ref);
+      if(!edit){
+        if(typeof toast === 'function') toast('That event is no longer available — reload the deal and try again', 4000, { kind:'warning' });
+        return;
+      }
+    }
+    window.__leEditRef = edit ? ref : null;
     if(err) err.style.display = 'none';
-    if(title) title.textContent = form.title;
+    if(title) title.textContent = edit ? form.title.replace(/^Add\b/, 'Edit') : form.title;
     if(hint)  hint.textContent = form.hint || '';
     if(iconWrap) iconWrap.innerHTML = '<i class="ti ' + (form.icon || 'ti-plus') + '" style="font-size:14px;"></i>';
     // Render each field
@@ -43846,6 +44561,21 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         this.value = digits === '' ? '' : Number(digits).toLocaleString('en-US');
       });
     });
+    // Prefill from the record being edited. Done after render (rather than via
+    // each field's `default`) so the same schema serves both add and edit.
+    if(edit){
+      fields.querySelectorAll('[data-le-fld]').forEach(el => {
+        const n = el.getAttribute('data-le-fld');
+        if(!(n in edit.values)) return;
+        const v = edit.values[n];
+        if(el.getAttribute('data-le-money') === '1'){
+          const digits = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+          el.value = digits === '' ? '' : Number(digits).toLocaleString('en-US');
+        } else {
+          el.value = v == null ? '' : v;
+        }
+      });
+    }
     panel.style.display = 'block';
     panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
     // Focus the first field for immediate typing
@@ -43857,6 +44587,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const panel = document.getElementById('le-form-panel');
     if(panel) panel.style.display = 'none';
     window.__leCurrentFormKey = null;
+    // Clear edit state, or the next "Add" would overwrite the last edited row.
+    window.__leEditRef = null;
   };
 
   window.__leSubmitForm = function(){
@@ -43883,10 +44615,21 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       return;
     }
     try {
-      form.submit(values);
+      const editRef = window.__leEditRef || null;
+      if(editRef){
+        const target = _leResolveRef(editRef);
+        if(!target) throw new Error('That event is no longer available — reload the deal and try again');
+        if(typeof form.update !== 'function'){
+          throw new Error('This event type cannot be edited inline yet');
+        }
+        form.update(values, target);
+      } else {
+        form.submit(values);
+      }
       _leAfterMutate();
+      const verb = editRef ? ' updated' : ' saved';
       window.__leCloseForm();
-      if(typeof toast === 'function') toast(form.title.replace(/^Add /,'').replace(/^[a-z]/, c => c.toUpperCase()) + ' saved', 2500, { kind:'success' });
+      if(typeof toast === 'function') toast(form.title.replace(/^(Add|Edit) /,'').replace(/^[a-z]/, c => c.toUpperCase()) + verb, 2500, { kind:'success' });
     } catch(e){
       console.error('[LE] submit failed:', e);
       if(err){ err.textContent = e.message || String(e); err.style.display = 'block'; }
@@ -43908,21 +44651,38 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       if((+t.drawnInitially || 0) > 0){
         out.push({
           key:'drawdown', name:'Drawdown · Initial', type:'Credit', category:'Funding',
-          tranche: trName, amount:+t.drawnInitially, date: (B_.deal || {}).settle || '', status:'Active',
+          // `ref` is what makes Edit possible — without an address back to the
+          // underlying record the pencil could only ever open a blank form.
+          ref: 'initialDraw|' + ti,
+          tranche: trName, amount:+t.drawnInitially,
+          date: t.drawnInitiallyDate || (B_.deal || {}).settle || '', status:'Active',
           source:'builder', tier:'core'
         });
       }
       (t.drawdowns || []).forEach((d, di) => {
         out.push({
           key:'drawdown', name:'Drawdown', type:'Credit', category:'Funding',
+          ref: 'drawdown|' + ti + '|' + di,
           tranche: trName, amount:+d.amount || 0, date: d.date || '',
           status: (d.date && new Date(d.date) > new Date()) ? 'Scheduled' : 'Active',
           source:'builder', tier:'core'
         });
       });
+      (t.interestPayments || []).forEach((p, pi) => {
+        out.push({
+          key:'interestPaid',
+          name: p.source === 'cashmgmt' ? 'Interest paid · from cash mgmt' : 'Interest paid',
+          type:'Debit', category:'Interest',
+          ref: 'interestPaid|' + ti + '|' + pi,
+          tranche: trName, amount:+p.amount || 0, date: p.date || '',
+          status: (p.date && new Date(p.date) > new Date()) ? 'Scheduled' : 'Active',
+          source:'builder', tier:'core', meta: p.reference || ''
+        });
+      });
       (t.repayments || []).forEach((r, ri) => {
         out.push({
           key:'paydown', name:'Paydown', type:'Debit', category:'Repayment',
+          ref: 'paydown|' + ti + '|' + ri,
           tranche: trName, amount:+r.amount || 0, date: r.date || '',
           status: (r.date && new Date(r.date) > new Date()) ? 'Scheduled' : 'Active',
           source:'builder', tier:'core'
@@ -43930,7 +44690,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       });
     });
     // Fees
-    (B_.fees || []).forEach(f => {
+    (B_.fees || []).forEach((f, fi) => {
       let tranche = 'Facility-wide';
       if(f.trancheRef){
         const t = tranches.find(x => x.id === f.trancheRef);
@@ -43939,6 +44699,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const amount = (+f.pct ? null : (+f.flatAmount || +f.bps || 0));
       out.push({
         key:'fee', name: f.label || 'Fee', type:'Credit', category:'Fees',
+        ref: 'fee|' + fi,
         tranche, amount: amount, date: f.paymentDate || '',
         status:'Active', source:'builder', tier:'core',
         meta: f.kind + ' · ' + f.mode
@@ -44076,18 +44837,74 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         '<td style="padding:11px 14px;">' + statusPill(e.status) + '</td>' +
         '<td style="padding:11px 14px; color:var(--n-600); font-family:ui-monospace,monospace; font-size:11px;">' + _leEsc(e.date || '—') + '</td>' +
         '<td style="padding:11px 14px; text-align:center;">' +
-          '<button type="button" onclick="window.__leEditEvent && window.__leEditEvent(\'' + e.key + '\')" ' +
+          '<button type="button" onclick="window.__leEditEvent && window.__leEditEvent(\'' + e.key + '\', \'' + (e.ref || '') + '\')" ' +
                   'style="background:none; border:none; color:var(--n-500); cursor:pointer; padding:4px;" title="Edit this event"><i class="ti ti-pencil" style="font-size:14px;"></i></button>' +
         '</td>' +
       '</tr>'
     )).join('');
   };
 
-  window.__leEditEvent = function(key){
+  // Resolve a row `ref` back to the record it came from, plus a values object
+  // the form can prefill from. Returns null when the ref is stale (deal
+  // reloaded, row deleted) so the caller can fail loudly rather than silently
+  // editing the wrong record.
+  function _leResolveRef(ref){
+    const B_ = window.B; if(!B_ || !ref) return null;
+    const parts = String(ref).split('|');
+    const kind = parts[0];
+    const tranches = B_.tranches || [];
+    // Must mirror _leTrancheOptions' value scheme exactly, or the prefilled
+    // <select> silently falls back to the first tranche.
+    const trVal = (t, i) => t.id || ('#' + i);
+    if(kind === 'initialDraw'){
+      const ti = +parts[1]; const t = tranches[ti]; if(!t) return null;
+      return { kind, tranche: t, values: {
+        tranche: trVal(t, ti), date: t.drawnInitiallyDate || (B_.deal || {}).settle || '',
+        amount: t.drawnInitially || '', label: 'Initial draw'
+      }};
+    }
+    if(kind === 'drawdown'){
+      const ti = +parts[1]; const t = tranches[ti]; if(!t) return null;
+      const d = (t.drawdowns || [])[+parts[2]]; if(!d) return null;
+      return { kind, tranche: t, rec: d, values: {
+        tranche: trVal(t, ti), date: d.date || '', amount: d.amount || '', label: d.label || d.reason || ''
+      }};
+    }
+    if(kind === 'paydown'){
+      const ti = +parts[1]; const t = tranches[ti]; if(!t) return null;
+      const r = (t.repayments || [])[+parts[2]]; if(!r) return null;
+      return { kind, tranche: t, rec: r, values: {
+        tranche: trVal(t, ti), date: r.date || '', amount: r.amount || '', kind: r.kind || 'scheduled'
+      }};
+    }
+    if(kind === 'interestPaid'){
+      const ti = +parts[1]; const t = tranches[ti]; if(!t) return null;
+      const p = (t.interestPayments || [])[+parts[2]]; if(!p) return null;
+      return { kind, tranche: t, rec: p, values: {
+        tranche: trVal(t, ti), date: p.date || '', amount: p.amount || '', reference: p.reference || ''
+      }};
+    }
+    if(kind === 'fee'){
+      const f = (B_.fees || [])[+parts[1]]; if(!f) return null;
+      return { kind, rec: f, values: {
+        label: f.label || '', kind: f.kind || 'arrangement', mode: f.mode || 'fixPct',
+        pct: f.pct || '', flatAmount: f.flatAmount || '', bps: f.bps || '',
+        base: f.base || 'commitment', frequency: f.frequency || 'oneOff',
+        trancheRef: f.trancheRef || '', paymentDate: f.paymentDate || ''
+      }};
+    }
+    return null;
+  }
+  window.__leResolveRef = _leResolveRef;
+
+  window.__leEditEvent = function(key, ref){
     // If a form schema exists for this key, open the centralized entry form
     // (preserves the "everything in Lifecycle Events" principle).
     if(EVENT_FORMS && EVENT_FORMS[key]){
-      window.__leOpenEventForm(key);
+      // Passing `ref` is what turns this from "open a blank Add form" into a
+      // real edit. Without it the pencil could only ever create a new event —
+      // which is exactly the bug this fixes.
+      window.__leOpenEventForm(key, ref || null);
       return;
     }
     // Fallback for anything not yet form-enabled
