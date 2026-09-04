@@ -6664,9 +6664,13 @@
         <div style="font-size:11px; color:var(--n-500); margin-top:2px;">Covenants, ECL drift, maturity, overdue notices, default interest — one screen, sorted by risk.</div>
       </div>
       <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+        <!-- Legal entities, sourced from the Investran extract. Funds no longer
+             exist as a concept here — allocations are held against Investran
+             legal entity ids. The element id is unchanged so existing wiring
+             keeps working. -->
         <select id="watchlist-filter-fund" onchange="window.refreshWatchlist && window.refreshWatchlist()"
-                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by fund allocation">
-          <option value="">All funds</option>
+                class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by legal entity allocation">
+          <option value="">All legal entities</option>
         </select>
         <select id="watchlist-filter-severity" onchange="window.renderWatchlist && window.renderWatchlist()"
                 class="border border-gray-300 rounded px-2 py-1 text-[11px]" title="Filter by severity">
@@ -22988,6 +22992,32 @@ window.closeWatchlistModal = function(){
 // Populate a fund <select> element with the current fund cache. Adds an
 // "All funds" default option first. Safe to call before funds are loaded
 // (leaves the dropdown as-is) and idempotent (rebuilds on every call).
+// Fill a filter <select> with the legal entities synced from Investran.
+// Replaces the funds list: allocations are held against Investran legal
+// entity ids (deal_legal_entity_allocations.le_external_id), so filtering by
+// fund could never match anything once the migration off funds happened.
+async function _populateLegalEntityDropdown(selectId){
+  const el = document.getElementById(selectId);
+  if(!el) return;
+  const prev = el.value;
+  let entities = window._leCache;
+  if(!(Array.isArray(entities) && entities.length) &&
+     window.SB && typeof window.SB.fetchLegalEntities === 'function'){
+    try { entities = window._leCache = await window.SB.fetchLegalEntities(); }
+    catch(err){ console.warn('[watchlist] fetchLegalEntities failed:', err); }
+  }
+  entities = Array.isArray(entities) ? entities : [];
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // Sorted by name — the Investran extract is not ordered, and an unsorted
+  // 39-entry picker is hard to use.
+  const sorted = entities.slice().sort((a,b) =>
+    String(a.name || '').localeCompare(String(b.name || '')));
+  el.innerHTML = '<option value="">All legal entities</option>' +
+    sorted.map(e => '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>').join('');
+  if(prev && sorted.some(e => String(e.id) === String(prev))) el.value = prev;
+}
+
 async function _populateFundDropdown(selectId){
   const el = document.getElementById(selectId);
   if(!el) return;
@@ -23127,16 +23157,29 @@ function splitJEsByLegalEntity(journals, inst){
 }
 if(typeof window !== 'undefined') window.splitJEsByLegalEntity = splitJEsByLegalEntity;
 
-// Filter [{key,name,inst,...}] by fund id — returns only deals with at
-// least one allocation to the given fund. `null` fundId = no filter.
-function _filterDealsByFund(deals, fundId){
-  if(!fundId) return deals;
+// Filter [{key,name,inst,...}] by Investran legal entity id — returns only
+// deals with at least one allocation to that entity. Blank = no filter.
+//
+// The allocation rows keep the historic `fundAllocations` shape, but the id
+// they carry is the Investran LegalEntityId (le_external_id). Compare as
+// strings: the extract yields '45' while some call sites pass a number, and
+// a strict === between the two silently matches nothing.
+function _filterDealsByLegalEntity(deals, leId){
+  if(!leId) return deals;
+  const want = String(leId);
   return deals.filter(d => {
     const inst = d.inst || {};
-    const allocs = Array.isArray(inst.fundAllocations) ? inst.fundAllocations
+    const allocs = Array.isArray(inst.legalEntityAllocations) && inst.legalEntityAllocations.length
+                 ? inst.legalEntityAllocations
+                 : Array.isArray(inst.fundAllocations) ? inst.fundAllocations
                  : Array.isArray(d.fundAllocations) ? d.fundAllocations : [];
-    return allocs.some(a => a && a.fundId === fundId);
+    return allocs.some(a => a && (String(a.leId || a.fundId || '') === want));
   });
+}
+// Kept as an alias so any remaining caller keeps working while Portfolio is
+// still on the funds picker.
+function _filterDealsByFund(deals, fundId){
+  return _filterDealsByLegalEntity(deals, fundId);
 }
 
 // Ensure notices cache is populated — the inbox lazy-loads it on first
@@ -23228,8 +23271,8 @@ window.refreshWatchlist = async function(){
     if(typeof LMA === 'undefined' || typeof LMA.computeWatchlist !== 'function'){
       throw new Error('Analytics library missing computeWatchlist. Reload the page.');
     }
-    // Populate fund picker (idempotent) and apply filter
-    await _populateFundDropdown('watchlist-filter-fund');
+    // Populate the legal-entity picker (idempotent) and apply the filter
+    await _populateLegalEntityDropdown('watchlist-filter-fund');
     const allDeals = _watchlistBuildDeals();
     if(!allDeals.length){
       errBox.style.display = '';
@@ -23237,8 +23280,30 @@ window.refreshWatchlist = async function(){
       body.innerHTML = '';
       return;
     }
-    const fundId = (document.getElementById('watchlist-filter-fund') || {}).value || '';
-    const deals  = _filterDealsByFund(allDeals, fundId);
+    const leSel = document.getElementById('watchlist-filter-fund');
+    const leId  = (leSel || {}).value || '';
+    const deals = _filterDealsByLegalEntity(allDeals, leId);
+    // A filter that matches nothing needs to say so. Otherwise the screen
+    // just empties and the user cannot tell whether the entity has no deals
+    // or the watchlist itself broke.
+    if(leId && !deals.length){
+      const leName = (leSel && leSel.options[leSel.selectedIndex] &&
+                      leSel.options[leSel.selectedIndex].text) || 'this legal entity';
+      errBox.style.display = '';
+      errBox.innerHTML =
+        '<div class="v4-empty" style="padding:32px 20px;">' +
+          // ti-radar is already used in this panel's header, so it is known to
+          // exist in the icon set. ti-radar-off may not be, and a missing
+          // glyph reads as a broken screen.
+          '<div class="v4-empty-icon"><i class="ti ti-radar" aria-hidden="true"></i></div>' +
+          '<div class="v4-empty-title">No deals allocated to ' + escapeHTML(leName) + '</div>' +
+          '<div class="v4-empty-body">Allocations are set in Loan builder → Legal entity &amp; allocations. ' +
+            'Choose <b>All legal entities</b> to see the full book.</div>' +
+        '</div>';
+      body.innerHTML = '';
+      summary.textContent = '0 of ' + allDeals.length + ' deals';
+      return;
+    }
     const notices = await _watchlistEnsureNotices();
     const result  = LMA.computeWatchlist({ deals, notices });
     window._watchlistCache = result;
