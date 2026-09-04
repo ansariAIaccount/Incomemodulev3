@@ -3865,7 +3865,7 @@
         <div style="font-size:12px; font-weight:600; color:var(--n-900); letter-spacing:-0.1px;">All-in yield over the deal period</div>
         <span id="cf-yield-eir-chip" class="chip blue" style="font-size:10px; font-variant-numeric:tabular-nums;">EIR —</span>
         <span style="flex:1;"></span>
-        <span style="font-size:10px; color:var(--n-500);">Base + spread + ratchet + ESG + OID/PIK amort + fees</span>
+        <span style="font-size:10px; color:var(--n-500);">One line per tranche + face-weighted facility blend · base + spread + ratchet + ESG + fee amortisation</span>
       </div>
       <div id="cf-yield-chart"></div>
       <div id="cf-yield-legend" style="display:flex; gap:12px; font-size:10.5px; color:var(--n-600); margin-top:4px; flex-wrap:wrap;"></div>
@@ -39314,8 +39314,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const B_ = window.B;
     if(!B_ || !enrichedRows || !enrichedRows.length){ panel.style.display = 'none'; return; }
     panel.style.display = 'block';
-    const t0 = B_.tranches && B_.tranches[0];
-    const ic0 = t0 && t0.interestComponents && t0.interestComponents[0];
+    const tranches = (B_.tranches || []).filter(t => t && (t.interestComponents || []).length);
+    const t0 = tranches[0];
+    const ic0 = t0 && t0.interestComponents[0];
     if(!t0 || !ic0){ host.innerHTML = '<div style="font-size:11px;color:var(--n-500);padding:8px 0;">No interest component to plot.</div>'; return; }
     // Total capitalised costs + arrangement/OID/exit fees — amortised
     // straight-line across the deal life to feed the all-in yield bump.
@@ -39331,37 +39332,75 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const maturity = B_.deal && B_.deal.maturity ? new Date(B_.deal.maturity) : null;
     const yearsLife = (settle && maturity) ? Math.max(0.5, (maturity - settle) / (365.25 * 86400000)) : 3;
     const feeBps = totalCommit > 0 ? Math.round((feeSumForAmort / totalCommit) / yearsLife * 10000) : 0;
-    // Series: for each row midpoint compute base + spread + esg + ratchet + fee-amort
-    const series = enrichedRows.map(r => {
-      const mid = r.start;
-      const base = +ic0.baseValue || 0;
-      const band = (ic0.spreads || []).find(s => (!s.from || s.from <= mid) && (!s.to || s.to >= mid));
+    // ─── One series per tranche, plus a blended facility line ────────────
+    // Previously this charted B.tranches[0] only, and ignored the tranche
+    // filter entirely — so on a multi-tranche deal you were always looking at
+    // the first tranche's rate no matter what was selected. A single line
+    // also hid the whole point: a SONIA leg, a fixed PIK leg and a wider
+    // capex leg behave completely differently over the life.
+    const rateAt = (ic, when) => {
+      const base = +ic.baseValue || 0;
+      const band = (ic.spreads || []).find(s => (!s.from || s.from <= when) && (!s.to || s.to >= when));
       const spreadBps = band ? (+band.bps || 0) : 0;
-      const esgBps = +ic0.esgAdjustmentBps || 0;
+      const esgBps = +ic.esgAdjustmentBps || 0;
       let ratchetBps = 0;
-      if(ic0.ratchet && ic0.ratchet.tiers && ic0.ratchet.tiers.length){
-        ratchetBps = +ic0.ratchet.tiers[0].marginBps || 0;
+      if(ic.ratchet && ic.ratchet.tiers && ic.ratchet.tiers.length){
+        ratchetBps = +ic.ratchet.tiers[0].marginBps || 0;
       }
-      const allIn = base + (spreadBps + esgBps + ratchetBps + feeBps) / 10000;
-      return { date: r.end, allIn, base, spreadBps, esgBps, ratchetBps, feeBps };
+      return { base, spreadBps, esgBps, ratchetBps };
+    };
+    // Colour-blind-safe, and distinct at 1.5px on a projector.
+    const TR_COLOURS = ['#4338CA','#B45309','#047857','#BE185D','#0369A1','#6D28D9'];
+    const trancheSeries = tranches.map((t, ti) => {
+      const ic = t.interestComponents[0];
+      const pts = enrichedRows.map(r => {
+        const p = rateAt(ic, r.start);
+        // Fee amortisation is a facility-level cost; attribute it to every
+        // tranche rather than loading it all onto the first one.
+        const allIn = p.base + (p.spreadBps + p.esgBps + p.ratchetBps + feeBps) / 10000;
+        return { date: r.end, allIn, base: p.base, spreadBps: p.spreadBps,
+                 esgBps: p.esgBps, ratchetBps: p.ratchetBps, feeBps };
+      });
+      return {
+        name: t.name || ('Tranche ' + String.fromCharCode(65 + ti)),
+        colour: TR_COLOURS[ti % TR_COLOURS.length],
+        face: +t.face || 0,
+        pts
+      };
     });
-    // Simple mean for the header EIR chip
-    const meanAllIn = series.reduce((s,x)=>s+x.allIn, 0) / (series.length || 1);
-    if(chip) chip.textContent = 'EIR ≈ ' + (meanAllIn * 100).toFixed(3) + '%';
+    // Blended line — face-weighted, which is what "the facility yields X"
+    // actually means. An unweighted mean would let a £20m mezz leg pull the
+    // number as hard as a £45m senior leg.
+    const totalFace = trancheSeries.reduce((s, t) => s + t.face, 0) || 1;
+    const blended = enrichedRows.map((r, i) => {
+      const allIn = trancheSeries.reduce(
+        (s, t) => s + ((t.pts[i] ? t.pts[i].allIn : 0) * (t.face / totalFace)), 0);
+      return { date: r.end, allIn };
+    });
+    // `series` stays as the first tranche so the legend's component breakdown
+    // below keeps working unchanged.
+    const series = trancheSeries[0].pts;
+    const meanBlended = blended.reduce((s,x)=>s+x.allIn, 0) / (blended.length || 1);
+    if(chip) chip.textContent = 'Blended EIR ≈ ' + (meanBlended * 100).toFixed(3) + '%';
     // Draw as inline SVG line chart
     const W = 1100, H = 160, PADL = 44, PADR = 16, PADT = 10, PADB = 24;
     const innerW = W - PADL - PADR, innerH = H - PADT - PADB;
-    const ys = series.map(s => s.allIn);
-    const minY = Math.min(...ys) * 0.98;
-    const maxY = Math.max(...ys) * 1.02;
+    // Scale across EVERY tranche, not just the first — otherwise a mezz leg
+    // several hundred bps above the senior draws straight off the top.
+    const allYs = trancheSeries.reduce((acc, t) => acc.concat(t.pts.map(p => p.allIn)), [])
+                               .concat(blended.map(b => b.allIn));
+    const minY = Math.min(...allYs) * 0.98;
+    const maxY = Math.max(...allYs) * 1.02;
     const yRange = Math.max(0.0001, maxY - minY);
     const xStep = innerW / Math.max(1, series.length - 1);
-    const pts = series.map((s, i) => {
-      const x = PADL + i * xStep;
-      const y = PADT + innerH - ((s.allIn - minY) / yRange) * innerH;
-      return { x, y, s };
+    const toXY = (v, i) => ({
+      x: PADL + i * xStep,
+      y: PADT + innerH - ((v - minY) / yRange) * innerH
     });
-    const path = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+    const pathFor = arr => arr.map((v, i) => {
+      const p = toXY(v, i);
+      return (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
+    }).join(' ');
     // Y-axis labels
     const yTicks = 4;
     let yTickLabels = '';
@@ -39379,29 +39418,55 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const x = PADL + i * xStep;
       xTickLabels += '<text x="' + x + '" y="' + (H - 4) + '" font-size="9" fill="#6B7280" text-anchor="middle">' + series[i].date + '</text>';
     });
-    // Area fill under the line
-    const area = 'M ' + pts[0].x + ' ' + (PADT + innerH) + ' ' + pts.map(p => 'L ' + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ') +
-                 ' L ' + pts[pts.length - 1].x + ' ' + (PADT + innerH) + ' Z';
+    // Blended line sits under a soft fill so it reads as the aggregate; the
+    // tranche lines sit on top, thinner, so divergence is the thing you see.
+    const blendedPath = pathFor(blended.map(b => b.allIn));
+    const bPts = blended.map((b, i) => toXY(b.allIn, i));
+    const area = 'M ' + bPts[0].x + ' ' + (PADT + innerH) + ' ' +
+                 bPts.map(p => 'L ' + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ') +
+                 ' L ' + bPts[bPts.length - 1].x + ' ' + (PADT + innerH) + ' Z';
+    const markerEvery = Math.max(1, Math.floor(series.length / 12));
+    const esc = s => String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const tranchePaths = trancheSeries.map(t =>
+      '<path d="' + pathFor(t.pts.map(p => p.allIn)) + '" stroke="' + t.colour +
+      '" stroke-width="1.5" fill="none" stroke-linejoin="round"/>'
+    ).join('');
+    const trancheDots = trancheSeries.map(t =>
+      t.pts.map((p, i) => {
+        if(i % markerEvery !== 0) return '';
+        const xy = toXY(p.allIn, i);
+        return '<circle cx="' + xy.x.toFixed(1) + '" cy="' + xy.y.toFixed(1) + '" r="2" fill="' + t.colour + '">' +
+          '<title>' + esc(t.name) + '\n' + p.date + ' · ' + (p.allIn*100).toFixed(3) + '%' +
+          '\nbase ' + (p.base*100).toFixed(2) + '%' +
+          '\nspread ' + p.spreadBps + ' bps' +
+          '\nratchet ' + p.ratchetBps + ' bps' +
+          '\nESG ' + p.esgBps + ' bps' +
+          '\nfee amort ' + p.feeBps + ' bps</title></circle>';
+      }).join('')
+    ).join('');
     host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="none" style="max-height:180px;">' +
       yTickLabels + xTickLabels +
-      '<path d="' + area + '" fill="#4338CA" fill-opacity="0.08"/>' +
-      '<path d="' + path + '" stroke="#4338CA" stroke-width="1.6" fill="none"/>' +
-      pts.filter((_, i) => i % Math.max(1, Math.floor(series.length/12)) === 0).map(p =>
-        '<circle cx="' + p.x + '" cy="' + p.y + '" r="2" fill="#4338CA">' +
-          '<title>' + p.s.date + ' · ' + (p.s.allIn*100).toFixed(3) + '%\nbase ' + (p.s.base*100).toFixed(2) + '%\nspread ' + p.s.spreadBps + ' bps\nratchet ' + p.s.ratchetBps + ' bps\nESG ' + p.s.esgBps + ' bps\nfee amort ' + p.s.feeBps + ' bps</title>' +
-        '</circle>'
-      ).join('') +
+      '<path d="' + area + '" fill="#94A3B8" fill-opacity="0.10"/>' +
+      // Dashed and heavier: an aggregate, visibly not one of the tranches.
+      '<path d="' + blendedPath + '" stroke="#475569" stroke-width="2.2" fill="none" stroke-dasharray="5 3"/>' +
+      tranchePaths + trancheDots +
       '</svg>';
     // Legend
     if(leg){
-      const s0 = series[0] || {};
+      // One swatch per tranche with its own mean, so the legend answers
+      // "which line is which, and roughly where does each sit" without
+      // hovering. Facility line first.
+      const meanOf = arr => arr.reduce((s,x)=>s+x.allIn,0) / (arr.length || 1);
       leg.innerHTML =
-        '<span><span style="display:inline-block;width:8px;height:8px;background:#4338CA;border-radius:2px;margin-right:4px;"></span>All-in EIR</span>' +
-        '<span>Base ' + ((s0.base||0)*100).toFixed(2) + '%</span>' +
-        '<span>Spread ' + (s0.spreadBps||0) + ' bps</span>' +
-        '<span>Ratchet ' + (s0.ratchetBps||0) + ' bps</span>' +
-        '<span>ESG ' + (s0.esgBps||0) + ' bps</span>' +
-        '<span>Fee amort ' + (s0.feeBps||0) + ' bps <span style="color:var(--n-400)">(over ' + yearsLife.toFixed(1) + 'y life)</span></span>';
+        '<span><span style="display:inline-block;width:14px;height:0;border-top:2.2px dashed #475569;margin-right:5px;vertical-align:middle;"></span>' +
+          'Facility (face-weighted) ' + (meanBlended*100).toFixed(2) + '%</span>' +
+        trancheSeries.map(t =>
+          '<span><span style="display:inline-block;width:8px;height:8px;background:' + t.colour +
+            ';border-radius:2px;margin-right:4px;"></span>' + esc(t.name) + ' ' +
+            (meanOf(t.pts)*100).toFixed(2) + '%</span>'
+        ).join('') +
+        '<span style="color:var(--n-400)">incl. fee amort ' + feeBps + ' bps over ' + yearsLife.toFixed(1) + 'y</span>';
     }
   }
 
