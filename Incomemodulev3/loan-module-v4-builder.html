@@ -38857,6 +38857,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         ic.fixings = _rfxCache[ic.baseIndex];
       }
     }));
+    // Repaint the tranche cards, not just the cashflow. recompute() refreshes
+    // the schedule but never re-renders the tranches, so the RFR Fixings
+    // Series block kept showing "No fixings" even though the series had just
+    // been attached to the component — the data was there, the card was stale.
+    if(typeof renderTranches === 'function'){
+      try { renderTranches(); } catch(e){ console.warn('[rfx] renderTranches failed:', e); }
+    }
     // Trigger a recompute so the cashflow rows reflect the hydrated fixings
     if(typeof recompute === 'function') recompute();
   }
