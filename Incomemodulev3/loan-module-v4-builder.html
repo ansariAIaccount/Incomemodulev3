@@ -353,6 +353,11 @@
 </script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- PortF external-deal feed — Excel ingestion path. Turns a PortF workbook
+     into the same snapshot object the pull API returns, so both routes share
+     one validator, one importer and one set of tables. Loaded after SheetJS
+     because it calls XLSX.utils. -->
+<script src="portf-excel-parser.js"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -2046,6 +2051,7 @@
     { id:'open-notices',     label:'Open notices',          hint:'Loan agent notices inbox',             icon:'ti-mail-forward', fn:() => window.openNoticesModal && window.openNoticesModal() },
     { id:'open-watchlist',   label:'Open watchlist',        hint:'Cross-portfolio early-warning',        icon:'ti-alert-triangle', fn:() => window.openWatchlistModal && window.openWatchlistModal() },
     { id:'open-portfolio',   label:'Open portfolio',        hint:'Yield · Duration · WAL · DV01',        icon:'ti-chart-pie-4',  fn:() => window.openPortfolioModal && window.openPortfolioModal() },
+    { id:'portf-import',     label:'Import external deal',  hint:'Drop a PortF workbook',                icon:'ti-file-import',  fn:() => window.openPortfImportModal && window.openPortfImportModal() },
     { id:'open-regulatory',  label:'Open regulatory reports', hint:'Form PF · AIFMD · FR Y-14Q',         icon:'ti-file-search',  fn:() => window.openRegulatoryModal && window.openRegulatoryModal() },
     { id:'open-financials',  label:'Open borrower financials', hint:'AI-extract statements',            icon:'ti-report-analytics', fn:() => window.openFinancialsModal && window.openFinancialsModal() },
     { id:'open-ca',          label:'Open credit agreements',hint:'Browse · AI-extract from PDF',         icon:'ti-file-certificate', fn:() => window.openCreditAgreementsListModal && window.openCreditAgreementsListModal() },
@@ -2263,6 +2269,15 @@
             <div style="flex:1;">
               <div style="font-weight:600;">Portfolio</div>
               <div style="font-size:10.5px; color:#6B7280;">Yield · Duration · WAL · DV01</div>
+            </div>
+          </button>
+          <button class="tools-menu-item" onclick="window.closeToolsMenu(); window.openPortfImportModal && window.openPortfImportModal();"
+                  style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:transparent; border:none; text-align:left; cursor:pointer; font-size:12px; color:#111827;"
+                  onmouseover="this.style.background='#F3F4F6'" onmouseout="this.style.background='transparent'">
+            <i class="ti ti-file-import" style="font-size:18px; color:#4F46E5;"></i>
+            <div style="flex:1;">
+              <div style="font-weight:600;">Import external deal</div>
+              <div style="font-size:10.5px; color:#6B7280;">PortF workbook · read-only, accounting only</div>
             </div>
           </button>
           <button class="tools-menu-item" onclick="window.closeToolsMenu(); window.openRegulatoryModal && window.openRegulatoryModal();"
@@ -8348,6 +8363,111 @@
   </div>
 </div>
 
+<!-- ═══ PortF external-deal import modal ═══
+     Second ingestion path for externally-calculated deals. The first is the
+     pull API; this one takes the same data as a workbook so a deal can be
+     brought in before the API exists, or when a one-off file is all there is.
+     Both paths produce the identical snapshot object and land in the same
+     external_snapshots / external_cashflows tables.
+
+     Deliberately a review screen, not a one-click import: the workbook leaves
+     several things unstated (day count, currency, days covered) and the
+     operator needs to see what was inferred before it becomes accounting. -->
+<div id="portf-import-modal" class="json-modal" style="display:none">
+  <div class="json-modal-bd" onclick="window.closePortfImportModal && window.closePortfImportModal()"></div>
+  <div class="json-modal-pn" style="width:min(1120px,96vw); max-height:92vh;">
+    <div class="json-modal-h">
+      <div>
+        <div class="font-semibold text-[14px] flex items-center gap-2">
+          <i class="ti ti-file-import text-[18px]" style="color:#4F46E5"></i>
+          Import external deal
+        </div>
+        <div class="text-[11px] text-gray-500">
+          Drop a PortF workbook. Deal setup, events and cashflows are read as calculated elsewhere —
+          PCS holds them read-only and does the accounting.
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="portf-import-mode-chip" class="chip gray" style="font-size:10.5px;">Excel</span>
+        <button class="mat-btn outline !py-1 !px-2" onclick="window.closePortfImportModal && window.closePortfImportModal()" title="Close">
+          <i class="ti ti-x text-[16px]"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="json-modal-b" id="portf-import-body" style="font-size:12px;">
+
+      <!-- Step 1 — drop -->
+      <div id="portf-import-step-upload" style="padding:28px 24px;">
+        <label id="portf-import-dropzone"
+               style="display:block; border:2px dashed #C7D2FE; border-radius:12px; padding:40px 20px; text-align:center; cursor:pointer; background:linear-gradient(135deg,#F0F9FF 0%,#EEF2FF 100%); transition:background .15s, border-color .15s;">
+          <i class="ti ti-cloud-upload" style="font-size:42px; color:#4F46E5;"></i>
+          <div style="font-size:14px; font-weight:600; color:#3730A3; margin-top:8px;">Choose a PortF workbook</div>
+          <div style="font-size:11px; color:#6366F1; margin-top:4px;">Or drag &amp; drop it here · .xlsx</div>
+          <input type="file" id="portf-import-file" accept=".xlsx,.xls" style="display:none"/>
+        </label>
+
+        <div style="margin-top:18px; display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
+          <div>
+            <label class="text-[10px] uppercase text-gray-600 block mb-1">Currency</label>
+            <select id="portf-import-ccy" class="border border-gray-300 rounded px-2 py-1 text-[12px] bg-white w-full">
+              <option value="">Read from file (GBP if absent)</option>
+              <option value="GBP">GBP</option><option value="USD">USD</option>
+              <option value="EUR">EUR</option><option value="AUD">AUD</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[10px] uppercase text-gray-600 block mb-1">Day count convention</label>
+            <select id="portf-import-daycount" class="border border-gray-300 rounded px-2 py-1 text-[12px] bg-white w-full">
+              <option value="">Read from file (ACT/365 if absent)</option>
+              <option value="ACT/365">ACT/365</option><option value="ACT/360">ACT/360</option>
+              <option value="ACT/ACT">ACT/ACT</option><option value="30/360">30/360</option>
+              <option value="30E/360">30E/360</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[10px] uppercase text-gray-600 block mb-1">External deal id</label>
+            <input id="portf-import-dealid" type="text" placeholder="Derived from Company"
+                   class="border border-gray-300 rounded px-2 py-1 text-[12px] bg-white w-full"/>
+          </div>
+        </div>
+
+        <div style="margin-top:16px; padding:12px 14px; background:#F9FAFB; border-radius:8px; border:1px solid #E5E7EB; font-size:11.5px; color:#4B5563; line-height:1.65;">
+          <b style="color:#1F2937;">Expected shape</b> — sheets <b>Loan info</b> (facility) and <b>Tranch info</b> (tranche).
+          Each needs the label/value header block, the commitment schedule, the component definition block, and the dated cashflow table.<br>
+          Anything the workbook leaves blank is flagged on the next screen rather than quietly defaulted.
+        </div>
+      </div>
+
+      <!-- Step 2 — review -->
+      <div id="portf-import-step-review" style="display:none; padding:6px 4px;">
+        <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px; padding:8px 12px; background:#F9FAFB; border-radius:6px;">
+          <span id="portf-import-file-info" style="font-size:12px; color:#374151; font-weight:500;"></span>
+          <span id="portf-import-counts" style="font-size:12px; color:#374151; margin-left:auto;"></span>
+        </div>
+        <div id="portf-import-issues" style="margin-bottom:12px;"></div>
+        <div id="portf-import-preview" style="max-height:46vh; overflow:auto; border:1px solid #E5E7EB; border-radius:6px;"></div>
+      </div>
+
+      <!-- Step 3 — result -->
+      <div id="portf-import-step-done" style="display:none; padding:28px 24px; text-align:center;">
+        <i class="ti ti-circle-check" style="font-size:42px; color:#059669;"></i>
+        <div id="portf-import-done-msg" style="font-size:13px; color:#065F46; margin-top:10px; font-weight:600;"></div>
+        <div id="portf-import-done-sub" style="font-size:11.5px; color:#6B7280; margin-top:6px;"></div>
+      </div>
+    </div>
+
+    <div class="json-modal-f">
+      <span id="portf-import-foot" class="text-[11px] text-gray-600 mr-auto">No file loaded.</span>
+      <button id="portf-import-back" class="mat-btn outline" style="display:none"
+              onclick="window.__portfImportReset && window.__portfImportReset()">Choose another file</button>
+      <button id="portf-import-go" class="mat-btn success" style="display:none" disabled
+              onclick="window.__portfImportCommit && window.__portfImportCommit()">Import as external deal</button>
+      <button class="mat-btn outline" onclick="window.closePortfImportModal && window.closePortfImportModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Bulk XLSX loan-book import modal (#233) ═══
      Takes an Excel template with one loan per row and saves each to the DB.
      Row-level validation → results grid → optional rollback. -->
@@ -13596,6 +13716,10 @@ window.SB = (function(){
     },
     get isConnected(){ return _connected; },
     get heavyWriteDepth(){ return _heavyWriteDepth; },
+    // Raw PostgREST client. Used by the external-deal importer, which writes
+    // to tables with no dedicated adapter yet. Prefer a named adapter above
+    // for anything the app calls more than once.
+    get client(){ return _client; },
     // Deal access — direct user assignments (per-deal)
     listDealAssignments, assignUserToDeal, removeDealAssignment,
     // User + team helpers
@@ -21673,6 +21797,422 @@ function _bulkRowToInstrument(v){
     _importedAt: new Date().toISOString(),
     _importSource: 'bulk-xlsx'
   };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PortF external-deal import — Excel path
+   ───────────────────────────────────────────────────────────────────────────
+   Parsing lives in portf-excel-parser.js and produces the same snapshot the
+   pull API returns. Everything below is the UI around it plus the shared
+   importer, which the API poller will call too.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+window._portfImport = { snapshot: null, warnings: [], errors: [], filename: null };
+
+window.openPortfImportModal = function(){
+  const el = document.getElementById('portf-import-modal');
+  if(!el) return;
+  window.__portfImportReset();
+  el.style.display = 'flex';
+};
+
+window.closePortfImportModal = function(){
+  const el = document.getElementById('portf-import-modal');
+  if(el) el.style.display = 'none';
+};
+
+window.__portfImportReset = function(){
+  ['upload','review','done'].forEach(s => {
+    const n = document.getElementById('portf-import-step-' + s);
+    if(n) n.style.display = (s === 'upload') ? '' : 'none';
+  });
+  const f = document.getElementById('portf-import-file'); if(f) f.value = '';
+  const go = document.getElementById('portf-import-go'); if(go){ go.style.display='none'; go.disabled = true; }
+  const bk = document.getElementById('portf-import-back'); if(bk) bk.style.display = 'none';
+  const ft = document.getElementById('portf-import-foot'); if(ft) ft.textContent = 'No file loaded.';
+  window._portfImport = { snapshot: null, warnings: [], errors: [], filename: null };
+};
+
+(function wirePortfDropzone(){
+  function attach(){
+    const input = document.getElementById('portf-import-file');
+    const zone  = document.getElementById('portf-import-dropzone');
+    if(!input || !zone) return;
+    if(input.__portfWired) return;
+    input.__portfWired = true;
+
+    input.addEventListener('change', e => {
+      const file = e.target.files && e.target.files[0];
+      if(file) window.__portfImportHandleFile(file);
+    });
+
+    ['dragenter','dragover'].forEach(ev => zone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation();
+      zone.style.background = '#E0E7FF'; zone.style.borderColor = '#6366F1';
+    }));
+    ['dragleave','drop'].forEach(ev => zone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation();
+      zone.style.background = 'linear-gradient(135deg,#F0F9FF 0%,#EEF2FF 100%)';
+      zone.style.borderColor = '#C7D2FE';
+    }));
+    zone.addEventListener('drop', e => {
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if(file) window.__portfImportHandleFile(file);
+    });
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
+  else attach();
+})();
+
+window.__portfImportHandleFile = function(file){
+  const foot = document.getElementById('portf-import-foot');
+  if(typeof PortFExcel === 'undefined'){
+    if(foot) foot.textContent = 'Parser not loaded — portf-excel-parser.js must sit beside this file.';
+    return;
+  }
+  if(foot) foot.textContent = 'Reading ' + file.name + '…';
+
+  const reader = new FileReader();
+  reader.onload = ev => {
+    let res;
+    try {
+      const wb = XLSX.read(new Uint8Array(ev.target.result), { type:'array', cellDates:true });
+      res = PortFExcel.parseWorkbook(wb, {
+        filename: file.name,
+        currency: (document.getElementById('portf-import-ccy')||{}).value || null,
+        defaultDayCount: (document.getElementById('portf-import-daycount')||{}).value || null,
+        externalDealId: ((document.getElementById('portf-import-dealid')||{}).value || '').trim() || null
+      });
+    } catch(e){
+      if(foot) foot.textContent = 'Could not read the workbook: ' + (e.message || e);
+      console.error('[portf] parse failed', e);
+      return;
+    }
+    window._portfImport = {
+      snapshot: res.snapshot, warnings: res.warnings, errors: res.errors, filename: file.name
+    };
+    window.__portfImportRenderReview();
+  };
+  reader.onerror = () => { if(foot) foot.textContent = 'Could not read that file.'; };
+  reader.readAsArrayBuffer(file);
+};
+
+window.__portfImportRenderReview = function(){
+  const S = window._portfImport;
+  const s = S.snapshot;
+  document.getElementById('portf-import-step-upload').style.display = 'none';
+  document.getElementById('portf-import-step-review').style.display = '';
+  document.getElementById('portf-import-back').style.display = '';
+
+  const esc = t => String(t == null ? '' : t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const money = (v, ccy) => v == null ? '—'
+    : (ccy ? ccy + ' ' : '') + Number(v).toLocaleString(undefined, {maximumFractionDigits:2});
+
+  document.getElementById('portf-import-file-info').textContent = S.filename || '';
+
+  if(!s){
+    document.getElementById('portf-import-counts').textContent = 'Nothing could be read.';
+    document.getElementById('portf-import-preview').innerHTML = '';
+  } else {
+    document.getElementById('portf-import-counts').textContent =
+      `${s.tranches.length} tranche${s.tranches.length===1?'':'s'} · ` +
+      `${s.components.length} components · ${s.events.length} events · ` +
+      `${s.cashflows.length.toLocaleString()} cashflow rows`;
+  }
+
+  // Issues first — this screen exists to make the inferences visible.
+  const issues = document.getElementById('portf-import-issues');
+  let h = '';
+  if(S.errors.length){
+    h += `<div style="border:1px solid #FCA5A5; background:#FEF2F2; border-radius:8px; padding:10px 12px; margin-bottom:8px;">
+      <div style="font-weight:600; color:#991B1B; font-size:12px; margin-bottom:6px;">
+        <i class="ti ti-alert-circle" style="vertical-align:-2px;"></i>
+        ${S.errors.length} problem${S.errors.length===1?'':'s'} — import blocked</div>
+      <ul style="margin:0; padding-left:18px; color:#7F1D1D; font-size:11.5px; line-height:1.65;">
+        ${S.errors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div>`;
+  }
+  if(S.warnings.length){
+    h += `<div style="border:1px solid #FCD34D; background:#FFFBEB; border-radius:8px; padding:10px 12px;">
+      <div style="font-weight:600; color:#92400E; font-size:12px; margin-bottom:6px;">
+        <i class="ti ti-info-circle" style="vertical-align:-2px;"></i>
+        ${S.warnings.length} thing${S.warnings.length===1?'':'s'} the workbook left unstated or ambiguous</div>
+      <ul style="margin:0; padding-left:18px; color:#78350F; font-size:11.5px; line-height:1.65;">
+        ${S.warnings.map(w => '<li>' + esc(w) + '</li>').join('')}</ul>
+      <div style="font-size:11px; color:#92400E; margin-top:8px; padding-top:8px; border-top:1px solid #FDE68A;">
+        These do not block the import. Amounts are posted exactly as PortF states them —
+        the inferences above affect what is displayed, not what is booked.</div></div>`;
+  }
+  if(!S.errors.length && !S.warnings.length){
+    h = `<div style="border:1px solid #A7F3D0; background:#ECFDF5; border-radius:8px; padding:10px 12px; color:#065F46; font-size:11.5px;">
+      <i class="ti ti-circle-check" style="vertical-align:-2px;"></i> Everything needed was stated explicitly — nothing inferred.</div>`;
+  }
+  issues.innerHTML = h;
+
+  // Preview — facility, components, then a window onto the cashflows.
+  if(s){
+    const ccy = s.facility.currency;
+    const th = t => `<th style="padding:6px 8px; text-align:left; border-bottom:1px solid #E5E7EB; position:sticky; top:0; background:#F3F4F6;">${t}</th>`;
+    const thr = t => th(t).replace('text-align:left', 'text-align:right');
+    const td = (t, r) => `<td style="padding:5px 8px; border-bottom:1px solid #F3F4F6; ${r?'text-align:right; font-variant-numeric:tabular-nums;':''}">${t}</td>`;
+
+    let p = `<div style="padding:10px 12px; background:#FAFAFA; border-bottom:1px solid #E5E7EB; font-size:11.5px; line-height:1.8;">
+      <b style="font-size:12px;">${esc(s.facility.company || '—')}</b>
+      <span class="chip gray" style="margin-left:6px; font-size:10px;">external · ${esc(s.externalDealId)}</span><br>
+      ${esc(s.facility.loanStartDate)} → ${esc(s.facility.loanEndDate)} ·
+      ${esc(s.facility.dayCountConvention)} · interest accrues ${esc(s.facility.interestAccrues)}<br>
+      Committed <b>${money(s.facility.committedAmount, ccy)}</b> ·
+      Maximum facility <b>${money(s.facility.maximumFacilityAmount, ccy)}</b>
+    </div>`;
+
+    p += `<table style="width:100%; border-collapse:collapse; font-size:11px;"><thead><tr>
+      ${th('Component')}${th('Scope')}${th('Posting')}${th('Basis')}${th('On')}${th('Structure')}
+      ${thr('Rate')}${th('Accrues')}${th('Settles')}</tr></thead><tbody>`;
+    s.components.forEach(c => {
+      p += `<tr>${td(esc(c.name))}${td(esc(c.scope))}${td(esc(c.postingType))}
+        ${td(esc(c.calculationBasis))}${td(esc(c.basisReference || '—'))}
+        ${td(esc(c.rateStructure) + (c.index ? ' · ' + esc(c.index) : ''))}
+        ${td(c.rate == null ? '—' : (c.rate*100).toFixed(4) + '%', true)}
+        ${td(esc(c.accrualFrequency) + (c.accrualAnchor ? ' · ' + esc(c.accrualAnchor) : ''))}
+        ${td(esc(c.settlementFrequency || '—'))}</tr>`;
+    });
+    p += '</tbody></table>';
+
+    if(s.cashflows.length){
+      p += `<div style="padding:8px 12px; background:#FAFAFA; border-top:1px solid #E5E7EB; border-bottom:1px solid #E5E7EB; font-size:11px; font-weight:600;">
+        First 40 cashflow rows of ${s.cashflows.length.toLocaleString()}</div>`;
+      p += `<table style="width:100%; border-collapse:collapse; font-size:11px;"><thead><tr>
+        ${th('Date')}${thr('Days')}${th('Tranche')}${th('Component')}${th('Lot')}
+        ${thr('Basis')}${thr('Rate')}${thr('Amount')}</tr></thead><tbody>`;
+      s.cashflows.slice(0, 40).forEach(r => {
+        const inferred = r.daysCovered == null
+          ? '<span style="color:#9CA3AF;">—</span>'
+          : `<span title="Inferred from the dates, not stated in the file">${r.daysCovered}</span>`;
+        p += `<tr>${td(esc(r.date))}${td(inferred, true)}
+          ${td(esc(r.externalTrancheId || 'facility'))}
+          ${td(esc(r.combined ? r.componentNames.join(' + ') : (r.componentNames[0] || r.externalComponentId)))}
+          ${td(esc(r.drawdownLotId || '—'))}
+          ${td(money(r.basisBalance), true)}
+          ${td(r.rate == null ? '—' : (r.rate*100).toFixed(4) + '%', true)}
+          ${td(money(r.amount), true)}</tr>`;
+      });
+      p += '</tbody></table>';
+    }
+    document.getElementById('portf-import-preview').innerHTML = p;
+  }
+
+  const go = document.getElementById('portf-import-go');
+  go.style.display = '';
+  go.disabled = !s || S.errors.length > 0;
+  document.getElementById('portf-import-foot').textContent = S.errors.length
+    ? 'Fix the problems above, or ask PortF for a corrected file.'
+    : 'Ready to import.';
+};
+
+window.__portfImportCommit = async function(){
+  const S = window._portfImport;
+  if(!S.snapshot || S.errors.length) return;
+  const go = document.getElementById('portf-import-go');
+  const foot = document.getElementById('portf-import-foot');
+  go.disabled = true;
+  foot.textContent = 'Importing…';
+  try {
+    const out = await window.importExternalSnapshot(S.snapshot, { warnings: S.warnings });
+    document.getElementById('portf-import-step-review').style.display = 'none';
+    document.getElementById('portf-import-step-done').style.display = '';
+    document.getElementById('portf-import-back').style.display = 'none';
+    go.style.display = 'none';
+    document.getElementById('portf-import-done-msg').textContent =
+      (out.created ? 'Created ' : 'Updated ') + (S.snapshot.facility.company || S.snapshot.externalDealId);
+    document.getElementById('portf-import-done-sub').innerHTML =
+      `${out.cashflowRows.toLocaleString()} cashflow rows stored` +
+      (out.changes ? ` · ${out.changes} change${out.changes===1?'':'s'} against the previous snapshot` : '') +
+      (out.postedAffected ? `<br><b style="color:#B45309;">${out.postedAffected} restated period(s) have already been posted to Investran — review before re-running accounting.</b>` : '') +
+      `<br>The deal is read-only in the module. Run accounting from the Accounting tab.`;
+    foot.textContent = 'Done.';
+    // Refresh the deal library so the new external deal is pickable without
+    // a reload. Best-effort — a failure here must not read as a failed import.
+    try { if(window.SB && SB.fetchUserDeals) await SB.fetchUserDeals(); } catch(e){ console.warn('[portf] deal refresh failed', e); }
+  } catch(e){
+    console.error('[portf] import failed', e);
+    foot.textContent = 'Import failed: ' + (e.message || e);
+    go.disabled = false;
+  }
+};
+
+/* Shared importer — the Excel path above and the pull poller both call this.
+   Writes the snapshot, diffs it against the current one, and flags any
+   restated period that has already gone to Investran. */
+window.importExternalSnapshot = function(snap, opts){
+  // Wrapped in withHeavyWrite so the background health ping does not read a
+  // legitimately-busy pool as a dropped connection — this insert can run to
+  // hundreds of thousands of rows. That misdiagnosis has bitten this app
+  // before on exactly this shape of write.
+  return SB.withHeavyWrite('external snapshot import', () => _importExternalSnapshotInner(snap, opts));
+};
+
+async function _importExternalSnapshotInner(snap, opts){
+  opts = opts || {};
+  if(!window.SB || !SB.isConnected) throw new Error('Not connected to the database');
+  const sb = SB.client;
+  if(!sb) throw new Error('No Supabase client');
+
+  const system = snap.externalSystem || 'portf';
+
+  // 1 · Deal row. Matched on (external_system, external_deal_id) — never on
+  //     name, which users rename.
+  let created = false;
+  let { data: deal, error: findErr } = await sb.from('deals')
+    .select('id, name, source')
+    .eq('external_system', system)
+    .eq('external_deal_id', snap.externalDealId)
+    .maybeSingle();
+  if(findErr) throw findErr;
+
+  const dealFields = {
+    name: snap.facility.company || snap.externalDealId,
+    currency: snap.facility.currency,
+    settlement_date: snap.facility.loanStartDate,
+    maturity_date: snap.facility.loanEndDate,
+    source: 'external',
+    external_system: system,
+    external_deal_id: snap.externalDealId
+  };
+
+  if(deal){
+    const { error } = await sb.from('deals').update(dealFields).eq('id', deal.id);
+    if(error) throw error;
+  } else {
+    const { data, error } = await sb.from('deals')
+      .insert({ ...dealFields, deal_code: snap.externalDealId, framework: opts.framework || 'IFRS' })
+      .select('id').single();
+    if(error) throw error;
+    deal = data; created = true;
+  }
+
+  // 2 · Skip an unchanged re-import outright. Re-uploading the same workbook
+  //     is a normal thing to do by accident; it should not churn the tables.
+  const { data: current } = await sb.from('external_snapshots')
+    .select('id, content_hash, snapshot_id')
+    .eq('deal_id', deal.id).eq('is_current', true).maybeSingle();
+
+  if(current && current.content_hash === snap.contentHash){
+    return { created, dealId: deal.id, unchanged: true,
+             cashflowRows: snap.cashflows.length, changes: 0, postedAffected: 0 };
+  }
+
+  // 3 · New snapshot row.
+  const { data: snapRow, error: snapErr } = await sb.from('external_snapshots').insert({
+    deal_id: deal.id,
+    external_deal_id: snap.externalDealId,
+    snapshot_id: snap.snapshotId,
+    content_hash: snap.contentHash,
+    generated_at: snap.generatedAt,
+    status: 'validated',
+    facility_jsonb: snap.facility,
+    components_jsonb: snap.components,
+    tranches_jsonb: snap.tranches,
+    events_jsonb: snap.events,
+    cashflow_rows: snap.cashflows.length,
+    validation_jsonb: { warnings: opts.warnings || null, ingestMethod: snap.ingestMethod || null,
+                        sourceFilename: snap.sourceFilename || null, parseMeta: snap.parseMeta || null }
+  }).select('id').single();
+  if(snapErr) throw snapErr;
+
+  // 4 · Cashflows, chunked. A 40-year daily deal runs to ~260k rows and a
+  //     single insert of that size is what starved the pool in the past.
+  const CHUNK = 900;
+  const rows = snap.cashflows.map(r => ({
+    snapshot_id: snapRow.id,
+    deal_id: deal.id,
+    flow_date: r.date,
+    external_tranche_id: r.externalTrancheId || '(facility)',
+    external_component_id: r.externalComponentId,
+    drawdown_lot_id: r.drawdownLotId,
+    posting_type: r.postingType,
+    days_covered: r.daysCovered == null ? 1 : r.daysCovered,
+    basis_balance: r.basisBalance,
+    rate: r.rate,
+    amount: r.amount,
+    cash_settled: r.cashSettled || 0
+  }));
+  for(let i = 0; i < rows.length; i += CHUNK){
+    const { error } = await sb.from('external_cashflows').insert(rows.slice(i, i + CHUNK));
+    if(error) throw error;
+  }
+
+  // 5 · Diff against the snapshot being replaced. PortF sends no restatement
+  //     marker, so this is the only way a corrected prior period is visible.
+  let changes = 0, postedAffected = 0;
+  if(current){
+    const { data: prior } = await sb.from('external_cashflows')
+      .select('flow_date, external_tranche_id, external_component_id, drawdown_lot_id, amount')
+      .eq('snapshot_id', current.id);
+
+    if(prior){
+      const key = r => [r.flow_date || r.date, r.external_tranche_id || r.externalTrancheId || '(facility)',
+                        r.external_component_id || r.externalComponentId, r.drawdown_lot_id || r.drawdownLotId || ''].join('|');
+      const before = new Map(prior.map(r => [key(r), Number(r.amount)]));
+      const diffs = [];
+
+      rows.forEach(r => {
+        const k = [r.flow_date, r.external_tranche_id, r.external_component_id, r.drawdown_lot_id || ''].join('|');
+        if(!before.has(k)){
+          diffs.push({ change_type:'added', flow_date:r.flow_date, external_tranche_id:r.external_tranche_id,
+                       external_component_id:r.external_component_id, drawdown_lot_id:r.drawdown_lot_id,
+                       field:'amount', old_value:null, new_value:r.amount });
+        } else {
+          const old = before.get(k);
+          if(Math.abs(old - Number(r.amount)) > 0.005){
+            diffs.push({ change_type:'changed', flow_date:r.flow_date, external_tranche_id:r.external_tranche_id,
+                         external_component_id:r.external_component_id, drawdown_lot_id:r.drawdown_lot_id,
+                         field:'amount', old_value:old, new_value:r.amount });
+          }
+          before.delete(k);
+        }
+      });
+      before.forEach((v, k) => {
+        const [d, t, c, l] = k.split('|');
+        diffs.push({ change_type:'removed', flow_date:d, external_tranche_id:t, external_component_id:c,
+                     drawdown_lot_id:l || null, field:'amount', old_value:v, new_value:null });
+      });
+
+      // Which of those touch a period already posted to Investran?
+      let postedThrough = null;
+      const { data: runs } = await sb.from('accounting_runs')
+        // Status values are capitalised in this table ('Posted', 'Approved',
+        // 'Draft'). Lower-case here matches nothing and would silently report
+        // no posted-period conflicts at all — the one thing this check exists
+        // to catch.
+        .select('run_at, status').eq('deal_id', deal.id)
+        .in('status', ['Posted','Approved']).order('run_at', { ascending:false }).limit(1);
+      if(runs && runs.length) postedThrough = String(runs[0].run_at).slice(0, 10);
+
+      const payload = diffs.map(d => ({
+        deal_id: deal.id, snapshot_id: snapRow.id, prior_snapshot_id: current.id,
+        scope: 'cashflow', ...d,
+        posted_before_change: !!(postedThrough && d.flow_date && d.flow_date <= postedThrough)
+      }));
+      postedAffected = payload.filter(p => p.posted_before_change).length;
+      changes = payload.length;
+
+      for(let i = 0; i < payload.length; i += CHUNK){
+        const { error } = await sb.from('external_snapshot_changes').insert(payload.slice(i, i + CHUNK));
+        if(error) throw error;
+      }
+    }
+  }
+
+  // 6 · Promote. Order matters: clear the old flag before setting the new one,
+  //     because a partial unique index allows only one current row per deal.
+  if(current){
+    await sb.from('external_snapshots').update({ is_current:false, status:'superseded' }).eq('id', current.id);
+  }
+  const { error: promErr } = await sb.from('external_snapshots')
+    .update({ is_current: true }).eq('id', snapRow.id);
+  if(promErr) throw promErr;
+
+  return { created, dealId: deal.id, snapshotRowId: snapRow.id, unchanged: false,
+           cashflowRows: rows.length, changes, postedAffected };
 }
 
 // Public API — open/close.
