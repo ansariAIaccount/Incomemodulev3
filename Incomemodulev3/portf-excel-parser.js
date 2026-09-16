@@ -1,57 +1,46 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   PortF Excel parser — second ingestion path for external deals
+   PCS Loan Import — Excel workbook parser
+   Template: "PCS Loan Import New Deal.xlsx" (agreed with PortF, Sept 2026)
    ───────────────────────────────────────────────────────────────────────────
-   The API pull (GET /deals/{id}) and this file both produce the SAME snapshot
-   object described in PortF-feed-contract-v0.2.md. Everything downstream —
-   validation, storage, diffing, accounting — sees one shape and does not know
-   or care which path the data arrived by.
+   Produces the same snapshot object the pull API returns, so validation,
+   storage, diffing and accounting see one shape regardless of route.
 
-       Excel file  ─┐
-                    ├─► snapshot JSON ─► validate ─► import ─► diff ─► accounting
-       PortF API   ─┘
+   WORKBOOK SHAPE
+     "Loan info"      one per file. Deal Setup / Facility Setup / Facility Fees
+                      blocks, then the facility cashflow table.
+     "Tranche N"      one per tranche, up to 50. Tranche Details / Tranche
+                      Interest Details / Tranche Fees, then its cashflow table.
+     "Lookup values"  the agreed vocabulary. Every governed field is validated
+                      against it and anything else stops the import.
 
-   Layout this parses (from "Loan info portF.xlsx"):
+   NOTHING IS READ FROM A FIXED CELL ADDRESS. Blocks are located by their
+   section heading ("Deal Setup", "Tranche Interest Details", …) and fields by
+   their label within that block. This is not defensive programming for its own
+   sake: in the agreed template itself, Tranche 1 starts its blocks on row 2 and
+   Tranche 2 on row 3. Fixed addresses would already be wrong.
 
-     Header block      A2:B8   label in col A, value in col B
-     Commitments       D2:E..  Date | Total Commitment, repeating down
-     Component block   row 2 cell reading "Name" marks the LABEL column;
-                       component values sit at labelCol+2, +4, +6 …
-                       rows below carry Posting Type, Calculation Basis,
-                       Interest Rate Structure, Interest Rate, Accrual
-                       Frequency, Settlement Frequency, Settlement Type,
-                       First Settlement Date, Drawdown
-     Group labels      row 13  "Cash Interest" / "Cash Fee"   (posting type)
-                       row 14  the components each group covers
-     Cashflow header   row 15
-     Cashflow rows     row 16 onward
+   CASHFLOW TABLE
+     Four sections, delimited by their running-total columns:
+       … pairs … | Total Accrued PIK Interest
+       … pairs … | Flat PIK Fee  | Total Accrued PIK Fee | Total Accrued PIK
+       … pairs … | Total Cash Interest
+       … pairs … | Flat Cash Fee | Total Cash Fee | Total Cash | Total
+     Each section holds four Rate/Amount pairs, one per balance basis, named in
+     the row above the header. So posting type and settlement type both come
+     from the section, and the basis from the column — no guessing.
 
-   Two things the sheet does not state, which this parser derives:
-
-   1. daysCovered. The row date is the period START. Days covered is the gap
-      to the next date in the same series. Verified against the sample:
-      31 Jul (Fri) → 3 Aug (Mon) is 3 days and carries £10,697.65, which is
-      exactly 3 × the £3,565.88 that the following 1-day row carries.
-
-   2. Component attribution. Row 14 can name TWO components over a single
-      Rate/Amount pair ("20 Year Fixed, Monthly SONIA"). The workbook simply
-      does not say how much of that amount belongs to which component. This
-      parser does not guess: it emits one row against a combined pseudo-
-      component and raises a warning. Per-component attribution requires the
-      long-format API feed.
-
-   Exposes: PortFExcel.parseWorkbook(wb)  — a SheetJS workbook
-            PortFExcel.parseGrids(grids)  — { sheetName: rows[][] }, for tests
+   Exposes: PortFExcel.parseWorkbook(wb)   SheetJS workbook
+            PortFExcel.parseGrids(grids)   { sheetName: rows[][] }, for tests
    ═══════════════════════════════════════════════════════════════════════════ */
 (function (root) {
   'use strict';
 
-  /* ── coercion ─────────────────────────────────────────────────────────── */
+  /* ── cell coercion ────────────────────────────────────────────────────── */
 
-  // Cells arrive as '£ 23,000,000.00', '£  -', '0.0045', 0.0045, or null.
   function num(v) {
     if (v === null || v === undefined || v === '') return null;
     if (typeof v === 'number') return isFinite(v) ? v : null;
-    var s = String(v).replace(/[£$€,\s]/g, '').replace(/ /g, '');
+    var s = String(v).replace(/[£$€¥,\s]/g, '').replace(/ /g, '');
     if (s === '' || s === '-' || s === '—') return 0;
     var neg = /^\((.*)\)$/.exec(s);
     if (neg) s = '-' + neg[1];
@@ -69,11 +58,9 @@
     var s = String(v).trim();
     var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
     if (m) return m[1] + '-' + m[2] + '-' + m[3];
-    // Excel serial date, 1900 system
     var n = parseFloat(s);
-    if (isFinite(n) && n > 20000 && n < 90000) {
-      var d = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000);
-      return iso(d);
+    if (isFinite(n) && n > 20000 && n < 90000) {          // Excel serial, 1900
+      return iso(new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000));
     }
     var p = new Date(s);
     return isNaN(p.getTime()) ? null : iso(p);
@@ -85,13 +72,18 @@
     return String(v).trim();
   }
 
+  // Label matching: case, spacing and a trailing colon must not matter.
+  function norm(v) {
+    return txt(v).toLowerCase().replace(/\s+/g, ' ').replace(/\s*:\s*$/, '').trim();
+  }
+
   function dayDiff(a, b) {
     if (!a || !b) return null;
     return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
   }
 
   function slug(s) {
-    return String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    return String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
   }
 
   function cell(grid, r, c) {
@@ -99,364 +91,514 @@
     return row ? (row[c] === undefined ? null : row[c]) : null;
   }
 
-  /* ── enum mapping ─────────────────────────────────────────────────────── */
-  // Every mapper returns null on an unrecognised value rather than guessing.
-  // Callers turn a null into a rejection naming the cell, per contract §9.
-
-  var FREQ = {
-    'daily': 'daily', 'weekly': 'weekly', 'fortnightly': 'fortnightly',
-    'monthly': 'monthly', 'quarterly': 'quarterly',
-    'semi-annually': 'semiAnnual', 'semiannually': 'semiAnnual',
-    'semi annually': 'semiAnnual', 'semi-annual': 'semiAnnual',
-    'annually': 'annual', 'annual': 'annual', 'yearly': 'annual',
-    'one-off': 'oneOff', 'one off': 'oneOff', 'oneoff': 'oneOff',
-    'at maturity': 'atMaturity', 'at-maturity': 'atMaturity'
-  };
-
-  // "Semi-annually (Anniversary)" carries two facts in one cell.
-  function freq(v) {
-    var s = txt(v).toLowerCase();
-    if (!s) return { frequency: null, anchor: null };
-    var anchor = null;
-    var m = /\(([^)]*)\)/.exec(s);
-    if (m) {
-      var a = m[1].trim();
-      anchor = /anniversar/.test(a) ? 'anniversary' : (/calendar|month.?end|eom/.test(a) ? 'calendar' : null);
-      s = s.slice(0, m.index).trim();
-    }
-    s = s.replace(/[.,;]+$/, '').trim();
-    return { frequency: FREQ[s] || null, anchor: anchor, raw: txt(v) };
+  // A1-style reference, for error messages that name the offending cell.
+  function ref(sheet, r, c) {
+    var s = '', n = c + 1;
+    while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; }
+    return sheet + '!' + s + (r + 1);
   }
 
-  var POSTING = { 'interest': 'interest', 'fee': 'fee', 'principal': 'principal' };
+  /* ── lookup tab ───────────────────────────────────────────────────────── */
+  /* The workbook carries its own vocabulary. Reading it from the file rather
+     than hard-coding it here means PortF can extend the list without a code
+     change, and means the error message can quote the values the file itself
+     declares — not a list in our source that may have drifted from theirs.   */
 
-  var BASIS = {
+  function readLookups(grid, warn) {
+    var out = {};
+    if (!grid) return out;
+    // Header cells are any non-empty cell with values beneath it. The tab has
+    // two header bands (facility-level and component-level); both are found.
+    for (var r = 0; r < grid.length; r++) {
+      for (var c = 0; c < 20; c++) {
+        var head = txt(cell(grid, r, c));
+        if (!head) continue;
+        var vals = [], rr = r + 1;
+        while (rr < grid.length) {
+          var v = txt(cell(grid, rr, c));
+          if (!v) break;
+          vals.push(v);
+          rr++;
+        }
+        if (vals.length >= 2) {
+          var key = norm(head);
+          if (!out[key]) out[key] = { values: [], cells: [], header: head, at: ref('Lookup values', r, c) };
+          vals.forEach(function (v, i) {
+            if (out[key].values.map(norm).indexOf(norm(v)) === -1) {
+              out[key].values.push(v);
+              out[key].cells.push(ref('Lookup values', r + 1 + i, c));
+            }
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  /* Known defects in the agreed template, accepted deliberately and reported.
+     Neither is silently patched: the import proceeds, and the review screen
+     names the cell so the tab gets fixed at source rather than worked around
+     here forever. */
+  var LOOKUP_REPAIRS = {
+    'day count conversion': {
+      add: ['ACT/365'],
+      why: 'The Day Count list has ACT/360 twice and no ACT/365. ACT/365 is accepted as ' +
+           'the intended second value — without it no SONIA or other GBP deal could be ' +
+           'imported. Please correct the Lookup values tab.'
+    },
+    'frequency': {
+      alias: { 'montly': 'Monthly' },
+      why: 'The Frequency list spells Monthly as "Montly". Both spellings are accepted. ' +
+           'Please correct the Lookup values tab.'
+    }
+  };
+
+  /* Which workbook label is governed by which lookup column. The label and the
+     lookup header do not always match — the sheets say "Day Count Convention",
+     the lookup tab says "Day Count Conversion". */
+  var GOVERNED = {
+    'deal structure':                    'deal structure',
+    'currency':                          'currency',
+    'accounting framework':              'accounting framework',
+    'day count convention':              'day count conversion',
+    'day count conversion':              'day count conversion',
+    'holiday calendar':                  'holiday calendar',
+    'repayment type':                    'repayment type',
+    'facility type':                     'facility type',
+    'interest accrual period (default)': 'interest accrual period (default)',
+    'fee types':                         'fee types',
+    'base':                              'base',
+    'frequency':                         'frequency',
+    'aasb':                              'ifrs',
+    'ifrs':                              'ifrs',
+    'interest type':                     'interest type',
+    'accrual frequency':                 'accrual',
+    'terms':                             'terms (multi)',
+    'settlement type':                   'settlement type'
+  };
+
+  // Fields where a blank is as invalid as a wrong value. A defaulted day count
+  // mis-states every accrual in the file; a defaulted currency mis-states every
+  // amount. The softer fields are allowed to be absent.
+  /* Blank blocks the import only where a missing value would change a NUMBER.
+     Day count, currency and accounting framework silently mis-state every
+     amount in the file if defaulted, so they must be stated. A blank fee Base
+     or Frequency is descriptive only — the amounts still come from the
+     cashflow table and still post correctly — so those warn instead. That
+     distinction is not cosmetic: the agreed template's own tranche-fee blocks
+     leave Base blank, and a blanket rule would reject the sample file. */
+  var REQUIRED_GOVERNED = {
+    'currency': true,
+    'accounting framework': true,
+    'day count convention': true,
+    'day count conversion': true,
+    'deal structure': true,
+    'interest type': true,
+    'settlement type': false,
+    'fee types': false,
+    'base': false,
+    'frequency': false
+  };
+  // Blank on these is still called out, just not fatal.
+  var WARN_IF_BLANK = { 'fee types': true, 'base': true, 'frequency': true, 'holiday calendar': true };
+
+  /* ── validation ───────────────────────────────────────────────────────── */
+
+  function makeValidator(lookups, warn, err) {
+    var repairsReported = {};
+
+    function allowed(key) {
+      var l = lookups[key];
+      var vals = l ? l.values.slice() : [];
+      var rep = LOOKUP_REPAIRS[key];
+      if (rep && rep.add) rep.add.forEach(function (v) {
+        if (vals.map(norm).indexOf(norm(v)) === -1) vals.push(v);
+      });
+      return vals;
+    }
+
+    /* Returns the canonical value from the lookup tab, or null having recorded
+       an error. Canonicalising matters: the file may say "gbp" and the lookup
+       "GBP", and everything downstream should see one spelling. */
+    return function validate(label, rawValue, where) {
+      var key = GOVERNED[norm(label)];
+      if (!key) return txt(rawValue);            // not a governed field
+
+      var value = txt(rawValue);
+      var list = allowed(key);
+
+      if (!list.length) {
+        // No such column on the lookup tab — cannot validate, so say so rather
+        // than pretending the value was checked.
+        warn(where + ': "' + label + '" cannot be validated — the Lookup values tab has no ' +
+             '"' + key + '" column. The value was accepted as given.');
+        return value;
+      }
+
+      if (!value) {
+        if (REQUIRED_GOVERNED[norm(label)]) {
+          err(where + ': ' + label + ' is blank. It must be one of: ' + list.join(', ') + '.');
+          return null;
+        }
+        if (WARN_IF_BLANK[norm(label)]) {
+          warn(where + ': ' + label + ' is blank. Accepted — it does not affect any amount — but ' +
+               'PortF should populate it. Expected one of: ' + list.join(', ') + '.');
+        }
+        return '';
+      }
+
+      // Aliases for known template misspellings.
+      var rep = LOOKUP_REPAIRS[key];
+      if (rep && rep.alias) {
+        var aliased = rep.alias[norm(value)];
+        if (aliased) value = aliased;
+      }
+
+      var hit = list.filter(function (v) { return norm(v) === norm(value); })[0];
+      if (hit === undefined) {
+        err(where + ': ' + label + ' is "' + value + '", which is not an accepted value. ' +
+            'Must be one of: ' + list.join(', ') + '.');
+        return null;
+      }
+
+      if (rep && rep.why && !repairsReported[key]) {
+        repairsReported[key] = true;
+        warn('Lookup values tab: ' + rep.why);
+      }
+      return hit;                                 // canonical spelling
+    };
+  }
+
+  /* ── canonical mapping, applied AFTER validation ──────────────────────── */
+  /* Validation proves the value is one the workbook declares. These maps turn
+     that agreed wording into the internal vocabulary. A value that reaches
+     here has already passed the lookup check, so an unmapped one is our gap,
+     not the file's, and is reported as such. */
+
+  var FREQ_MAP = {
+    'one-off': 'oneOff', 'weekly': 'weekly', 'monthly': 'monthly', 'montly': 'monthly',
+    'quarterly': 'quarterly', 'semi': 'semiAnnual', 'semi-annual': 'semiAnnual',
+    'semi-annually': 'semiAnnual', 'annual': 'annual', 'annually': 'annual',
+    'at maturity': 'atMaturity', 'at maturity (bullet)': 'atMaturity',
+    'facility default': ''
+  };
+
+  var SETTLE_MAP = {
+    'cash': 'cash', 'capitalized': 'capitalised', 'capitalised': 'capitalised', 'pik': 'pik'
+  };
+
+  var BASIS_MAP = {
     'principal balance': 'principalBalance',
     'unfunded balance': 'unfundedBalance',
+    'principal + capitalised': 'principalPlusCapitalised',
+    'principal + capitalized': 'principalPlusCapitalised',
+    'unfunded (net of capitalisations)': 'unfundedNetOfCapitalisations',
+    'unfunded (net of capitalizations)': 'unfundedNetOfCapitalisations',
     'commitment': 'commitment',
-    'face value': 'faceValue',
-    'drawn balance': 'principalBalance'
+    'funded': 'principalBalance',
+    'unfunded': 'unfundedBalance',
+    'tranche face': 'faceValue'
   };
 
-  var STRUCT = { 'fixed': 'fixed', 'floating': 'floating' };
-
-  var SETTLE = {
-    'cash': 'cash', 'capitalised': 'capitalised', 'capitalized': 'capitalised',
-    'pik': 'pik', 'payment in kind': 'pik'
-  };
-
-  var DAYCOUNT = {
-    'act/360': 'ACT/360', 'actual/360': 'ACT/360',
-    'act/365': 'ACT/365', 'actual/365': 'ACT/365', 'act/365f': 'ACT/365',
-    'act/act': 'ACT/ACT', 'actual/actual': 'ACT/ACT',
+  var DAYCOUNT_MAP = {
+    'act/360': 'ACT/360', 'act/365': 'ACT/365', 'act/act': 'ACT/ACT',
     '30/360': '30/360', '30e/360': '30E/360'
   };
 
-  function mapEnum(table, v) {
-    var s = txt(v).toLowerCase().replace(/\s+/g, ' ').trim();
-    if (!s) return null;
-    return table[s] || null;
+  function mapOrReport(table, value, what, where, warn) {
+    if (!value) return null;
+    var hit = table[norm(value)];
+    if (hit === undefined) {
+      warn(where + ': "' + value + '" is a valid ' + what + ' per the lookup tab, but PCS has no ' +
+           'handling for it yet. Imported as-is; it will not drive any calculation.');
+      return value;
+    }
+    return hit;
   }
 
-  /* ── header block (A2:B..) ────────────────────────────────────────────── */
+  /* ── block reading ────────────────────────────────────────────────────── */
+  /* A block is a section heading ("Deal Setup") with labels running down its
+     own column and values in the columns to its right. One value column for
+     the singular blocks; several for components and fees. */
 
-  function readHeaderBlock(grid) {
-    var out = {};
-    for (var r = 0; r < Math.min(grid.length, 14); r++) {
-      var k = txt(cell(grid, r, 0));
-      if (!k) continue;
-      out[k.toLowerCase().replace(/\s+/g, ' ')] = cell(grid, r, 1);
-    }
-    return out;
+  /* Match a cashflow slot's label to a declared component. The template labels
+     the slot "Commitment Fee" while the fee block names it "Commitment", so an
+     exact match misses. Compared on the name with a trailing Fee/Interest
+     dropped — close enough to join reliably, strict enough not to collide. */
+  function matchComponent(list, name) {
+    if (!name) return null;
+    var strip = function (x) { return norm(x).replace(/\s+(fee|interest)$/, '').trim(); };
+    var want = strip(name);
+    return list.filter(function (c) { return norm(c.name) === norm(name); })[0] ||
+           list.filter(function (c) { return strip(c.name) === want; })[0] || null;
   }
 
-  /* ── commitment schedule (D2:E..) ─────────────────────────────────────── */
-
-  function readCommitments(grid, warn, sheetName) {
-    var rows = [];
-    // Find the "Date"/"Total Commitment" header pair in the top rows.
-    var hr = -1, dc = -1;
-    for (var r = 0; r < Math.min(grid.length, 12) && hr < 0; r++) {
-      for (var c = 0; c < 12; c++) {
-        if (txt(cell(grid, r, c)).toLowerCase() === 'date' &&
-            /total commitment/i.test(txt(cell(grid, r, c + 1)))) { hr = r; dc = c; break; }
+  function findSection(grid, headingText, maxRow) {
+    var want = norm(headingText);
+    for (var r = 0; r < Math.min(grid.length, maxRow || 12); r++) {
+      for (var c = 0; c < 24; c++) {
+        if (norm(cell(grid, r, c)) === want) return { row: r, col: c };
       }
     }
-    if (hr < 0) return rows;
-    for (var i = hr + 1; i < grid.length; i++) {
-      var d = iso(cell(grid, i, dc));
-      var a = num(cell(grid, i, dc + 1));
-      if (!d && a === null) break;          // blank row ends the block
-      if (!d) { warn(sheetName + ': commitment row ' + (i + 1) + ' has an amount but no date — skipped'); continue; }
-      rows.push({ effectiveDate: d, amount: a });
-    }
-    return rows;
+    return null;
   }
 
-  /* ── component definition block ───────────────────────────────────────── */
-  /* Row 2 holds "Name" in the label column; each component occupies a column
-     at labelCol+2, +4, +6 … The rows beneath carry its attributes.          */
-
-  var COMPONENT_FIELDS = {
-    'posting type': 'postingTypeRaw',
-    'calculation basis': 'calculationBasisRaw',
-    'calculation method': 'calculationMethodRaw',
-    'interest rate structure': 'rateStructureRaw',
-    'interest rate': 'rateRaw',
-    'index': 'indexRaw',
-    'accrual frequency': 'accrualRaw',
-    'settlement frequency': 'settlementRaw',
-    'settlement type': 'settlementTypeRaw',
-    'first settlement date': 'firstSettlementRaw',
-    'drawdown': 'drawdownRaw'
-  };
-
-  function readComponents(grid, scope, ctx, warn, err, sheetName) {
-    var out = [];
-    // Locate the label column: the cell reading "Name" in the top rows.
-    var nameRow = -1, labelCol = -1;
-    for (var r = 0; r < Math.min(grid.length, 12) && nameRow < 0; r++) {
-      for (var c = 0; c < 30; c++) {
-        if (txt(cell(grid, r, c)).toLowerCase() === 'name') { nameRow = r; labelCol = c; break; }
-      }
+  /* Reads a block into { labelKey: {value, row, col} }, for `width` value
+     columns. Stops at the first fully blank label row after at least one hit,
+     so a block never bleeds into whatever sits below it. */
+  function readBlock(grid, at, width, maxRows) {
+    if (!at) return null;
+    var fields = {}, blanks = 0;
+    for (var r = at.row + 1; r < Math.min(grid.length, at.row + (maxRows || 24)); r++) {
+      var label = txt(cell(grid, r, at.col));
+      if (!label) { if (++blanks >= 3) break; continue; }
+      blanks = 0;
+      var vals = [];
+      for (var i = 0; i < width; i++) vals.push(cell(grid, r, at.col + 1 + i));
+      fields[norm(label)] = { label: label, values: vals, row: r, col: at.col };
     }
-    if (nameRow < 0) { warn(sheetName + ': no component block found (no "Name" label)'); return out; }
+    return fields;
+  }
 
-    // Attribute rows sit beneath the Name row, keyed by their label.
-    var fieldRow = {};
-    for (var r2 = nameRow + 1; r2 < Math.min(grid.length, nameRow + 14); r2++) {
-      var lbl = txt(cell(grid, r2, labelCol)).toLowerCase().replace(/\s+/g, ' ');
-      if (COMPONENT_FIELDS[lbl]) fieldRow[COMPONENT_FIELDS[lbl]] = r2;
+  // How many value columns does a multi-column block have? Counted from its
+  // first populated label row, so an empty trailing "Component N" placeholder
+  // column is not mistaken for a real component.
+  function blockWidth(grid, at, nameLabels) {
+    if (!at) return 0;
+    var nameRow = -1;
+    for (var r = at.row + 1; r < Math.min(grid.length, at.row + 12) && nameRow < 0; r++) {
+      var l = norm(cell(grid, r, at.col));
+      if (nameLabels.indexOf(l) !== -1) nameRow = r;
     }
-
-    // Walk right in steps of 2 until an empty name column.
-    for (var col = labelCol + 2; col < labelCol + 40; col += 2) {
-      var name = txt(cell(grid, nameRow, col));
-      if (!name) break;
-
-      var raw = {};
-      Object.keys(fieldRow).forEach(function (k) { raw[k] = cell(grid, fieldRow[k], col); });
-
-      // Component ids must be unique across tranches — two tranches can both
-      // carry a "Monthly SONIA". ctx.trancheKey is the tranche's own token,
-      // passed in rather than parsed back out of the id (splitting on '-' broke
-      // as soon as tranche ids stopped being a tidy "T1").
-      var id = (ctx.externalDealId || 'DEAL') +
-               (scope === 'tranche' && ctx.trancheKey ? '-' + ctx.trancheKey : '') +
-               '-' + slug(name);
-
-      var acc = freq(raw.accrualRaw);
-      var set = freq(raw.settlementRaw);
-
-      var comp = {
-        externalComponentId: id,
-        scope: scope,
-        name: name,
-        postingType: mapEnum(POSTING, raw.postingTypeRaw),
-        calculationMethod: txt(raw.calculationMethodRaw)
-          ? (/level/i.test(txt(raw.calculationMethodRaw)) ? 'levelPayment' : 'dayCount')
-          : 'dayCount',
-        calculationBasis: mapEnum(BASIS, raw.calculationBasisRaw),
-        basisReference: null,           // resolved below
-        rateStructure: mapEnum(STRUCT, raw.rateStructureRaw),
-        index: txt(raw.indexRaw) || null,
-        rate: num(raw.rateRaw),
-        accrualFrequency: acc.frequency,
-        accrualAnchor: acc.anchor,
-        settlementFrequency: set.frequency,
-        settlementType: mapEnum(SETTLE, raw.settlementTypeRaw),
-        firstSettlementDate: iso(raw.firstSettlementRaw),
-        drawdownScope: /all/i.test(txt(raw.drawdownRaw)) ? 'all' : (txt(raw.drawdownRaw) || 'all'),
-        effectiveFrom: ctx.loanStartDate || null,
-        effectiveTo: null
-      };
-
-      if (scope === 'tranche' && ctx.externalTrancheId) comp.externalTrancheId = ctx.externalTrancheId;
-
-      // The name often encodes the index when the structure is floating and
-      // no explicit Index cell exists: "Monthly SONIA", "Daily SOFR".
-      if (comp.rateStructure === 'floating' && !comp.index) {
-        var m = /\b(SONIA|SOFR|ESTR|EURIBOR|BBSY|BBSW|TONA|CORRA|SORA)\b/i.exec(name);
-        if (m) comp.index = m[1].toUpperCase();
-        else warn(sheetName + ': component "' + name + '" is floating but names no index — set it before accounting');
-      }
-
-      // basisReference: an unfunded-balance component must say whether it
-      // ticks on the committed amount or the maximum facility. The workbook
-      // has no such cell, so it is resolved against the commitment schedule
-      // by the caller and left null here when it cannot be determined.
-      if (comp.calculationBasis === 'unfundedBalance') comp.basisReference = ctx.unfundedBasisReference || null;
-      else if (comp.calculationBasis === 'principalBalance') comp.basisReference = 'drawn';
-
-      // Hard failures — never defaulted, per contract §9.
-      if (!comp.postingType) err(sheetName + ': component "' + name + '" has an unrecognised Posting Type (' + txt(raw.postingTypeRaw) + ')');
-      if (!comp.calculationBasis) err(sheetName + ': component "' + name + '" has an unrecognised Calculation Basis (' + txt(raw.calculationBasisRaw) + ')');
-      if (!comp.rateStructure) err(sheetName + ': component "' + name + '" has an unrecognised Interest Rate Structure (' + txt(raw.rateStructureRaw) + ')');
-      // A one-off fee has no accrual cadence — it is charged, not accrued —
-      // so a blank Accrual Frequency there is correct, not a defect.
-      if (!comp.accrualFrequency && comp.settlementFrequency === 'oneOff') {
-        comp.accrualFrequency = 'oneOff';
-      }
-      if (!comp.accrualFrequency) err(sheetName + ': component "' + name + '" has an unrecognised Accrual Frequency (' + (acc.raw || '(blank)') + ')');
-      if (comp.rateStructure === 'fixed' && comp.rate === null) err(sheetName + ': fixed component "' + name + '" has no Interest Rate');
-      // A rate above 1 is a percent that should have been a decimal.
-      if (comp.rate !== null && comp.rate > 1) err(sheetName + ': component "' + name + '" has rate ' + comp.rate + ' — rates must be decimals (0.0702, not 7.02)');
-
-      out.push(comp);
+    if (nameRow < 0) return 0;
+    var n = 0;
+    for (var c = at.col + 1; c < at.col + 60; c++) {
+      if (!txt(cell(grid, nameRow, c))) break;
+      n++;
     }
-    return out;
+    return n;
+  }
+
+  function fieldAt(fields, names, idx) {
+    if (!fields) return null;
+    for (var i = 0; i < names.length; i++) {
+      var f = fields[norm(names[i])];
+      if (f) return { raw: f.values[idx || 0], label: f.label, row: f.row, col: f.col + 1 + (idx || 0) };
+    }
+    return null;
   }
 
   /* ── cashflow table ───────────────────────────────────────────────────── */
-  /* Row 13 names each group's posting type, row 14 the components it covers,
-     row 15 the columns. A group may cover more than one component, which the
-     workbook gives no way to split — see the note at the top of this file.  */
 
-  /* Drawdown lot identity.
-     Accrual rows identify their lot in prose — "Drawdown — £23,000,000 on
-     2026-07-31" — while the event rows carry the same drawdown as an amount
-     and a date with no prose at all. Deriving the id from (date, amount) in
-     both places is what lets an event and its accruals join up, which the
-     consolidation handling in contract §5 depends on. */
-  function lotId(date, amount) {
-    if (!date || !amount) return null;
-    return 'LOT-' + date + '-' + Math.round(Math.abs(amount));
-  }
-
-  function lotIdFromScope(scopeRaw) {
-    if (!scopeRaw) return null;
-    var amt = /£\s*([\d,]+(?:\.\d+)?)/.exec(scopeRaw);
-    var dt = /(\d{4}-\d{2}-\d{2})/.exec(scopeRaw);
-    if (amt && dt) return lotId(dt[1], num(amt[1]));
-    return slug(scopeRaw).slice(0, 32);   // unparseable prose — keep it stable
-  }
+  // Section boundaries, identified by their running-total column.
+  var SECTION_TOTALS = [
+    { match: /^total accrued pik interest$/, postingType: 'interest', settlementType: 'pik' },
+    { match: /^total accrued pik fee$/,      postingType: 'fee',      settlementType: 'pik' },
+    { match: /^total cash interest$/,        postingType: 'interest', settlementType: 'cash' },
+    { match: /^total cash fee$/,             postingType: 'fee',      settlementType: 'cash' }
+  ];
+  var FLAT_FEE = { 'flat pik fee': 'pik', 'flat cash fee': 'cash' };
 
   function findCashflowHeader(grid) {
     for (var r = 0; r < grid.length; r++) {
-      if (txt(cell(grid, r, 0)).toLowerCase() === 'date' &&
-          /initial purchase/i.test(txt(cell(grid, r, 1)))) return r;
+      for (var c = 0; c < 6; c++) {
+        if (norm(cell(grid, r, c)) === 'date' &&
+            /initial purchase/.test(norm(cell(grid, r, c + 1)))) return { row: r, col: c };
+      }
     }
-    return -1;
+    return null;
   }
 
-  function readCashflows(grid, components, ctx, warn, err, sheetName, meta) {
+  function readCashflows(grid, ctx, warn, err, sheet, meta) {
     var rows = [];
-    meta = meta || {};
-    // Denominator for the implied-days yardstick below. ACT/ACT and the 30/360
-    // family are close enough to 365 over the short periods this compares.
+    var hdr = findCashflowHeader(grid);
+    if (!hdr) { warn(sheet + ': no cashflow table found.'); return rows; }
+
+    var HR = hdr.row, C0 = hdr.col;
+    var header = [];
+    for (var c = 0; c < 80; c++) header[c] = norm(cell(grid, HR, c));
+
+    // Movement + balance columns, by label rather than offset.
+    var col = {};
+    header.forEach(function (h, i) {
+      if (h === 'date') col.date = i;
+      else if (h === 'initial purchase') col.initialPurchase = i;
+      else if (h === 'drawdown') col.drawdown = i;
+      else if (h === 'principal payment') col.principalPayment = i;
+      else if (h === 'drawdown scope') col.scope = i;
+      else if (h === 'principal balance' && col.principalBalance === undefined) col.principalBalance = i;
+      else if (h === 'unfunded balance' && col.unfundedBalance === undefined) col.unfundedBalance = i;
+      else if (/^principal \+ capitalis?zed$|^principal \+ capitalised$/.test(h) && col.principalPlusCap === undefined) col.principalPlusCap = i;
+      else if (/^unfunded \(net of capitalis|^unfunded \(net of capitaliz/.test(h) && col.unfundedNet === undefined) col.unfundedNet = i;
+    });
+
+    /* Walk left to right accumulating Rate/Amount pairs, and assign them to a
+       section when its running-total column appears. Deriving the section from
+       the totals rather than from the (optional) banner row above means it
+       works on both sheet types — the facility sheet has no banner row. */
+    var pending = [], groups = [], flats = [];
+    for (var i = C0; i < header.length; i++) {
+      var h = header[i];
+      if (!h) continue;
+
+      if (h === 'rate') {
+        if (header[i + 1] !== 'amount') {
+          err(ref(sheet, HR, i) + ': a "Rate" column must be followed immediately by "Amount".');
+          continue;
+        }
+        var basisRaw = txt(cell(grid, HR - 1, i));
+        pending.push({ rateCol: i, amountCol: i + 1, basisRaw: basisRaw });
+        i++;                                        // skip the Amount column
+        continue;
+      }
+
+      if (FLAT_FEE[h] !== undefined) { flats.push({ col: i, settlementType: FLAT_FEE[h], label: txt(cell(grid, HR, i)) }); continue; }
+
+      var sec = SECTION_TOTALS.filter(function (s) { return s.match.test(h); })[0];
+      if (sec) {
+        pending.forEach(function (p) {
+          groups.push({
+            rateCol: p.rateCol, amountCol: p.amountCol, basisRaw: p.basisRaw,
+            postingType: sec.postingType, settlementType: sec.settlementType
+          });
+        });
+        // A flat-fee column belongs to the section whose total follows it.
+        flats.forEach(function (f) {
+          if (f.settlementType === sec.settlementType && sec.postingType === 'fee') f.postingType = 'fee';
+        });
+        pending = [];
+      }
+    }
+    if (pending.length) {
+      warn(sheet + ': ' + pending.length + ' Rate/Amount pair(s) sit after the last section total and ' +
+           'cannot be attributed to PIK or cash. They are skipped.');
+    }
+    if (!groups.length) { warn(sheet + ': cashflow table has no Rate/Amount groups.'); return rows; }
+
+    meta.groups = groups.length;
+
+    /* The basis label doubles as the component name: where a component or fee
+       actually occupies a slot, the template overwrites the basis wording with
+       its name ("20 Year Fixed", "Commitment Fee"). So an unrecognised label is
+       not an error — it identifies the component. */
+    /* Each section holds four pairs, one per balance basis, in a fixed order.
+       Where a component actually occupies a slot the template OVERWRITES the
+       basis wording with the component's name ("20 Year Fixed"), so an
+       unrecognised label identifies the component — and the basis is then
+       recovered from the slot's position rather than lost. Without this the
+       balance is null, and with it every days-covered check that depends on
+       the balance. */
+    var SLOT_BASIS = ['principalBalance', 'unfundedBalance',
+                      'principalPlusCapitalised', 'unfundedNetOfCapitalisations'];
+    var slotOf = {};
+    groups.forEach(function (g) {
+      var sec = g.postingType + '/' + g.settlementType;
+      slotOf[sec] = (slotOf[sec] === undefined) ? 0 : slotOf[sec] + 1;
+      g.slot = slotOf[sec];
+
+      var mapped = BASIS_MAP[norm(g.basisRaw)];
+      if (mapped) { g.basis = mapped; g.componentName = null; }
+      else {
+        g.basis = SLOT_BASIS[g.slot] || null;
+        g.componentName = g.basisRaw || null;
+        // A single pair labelled with two component names cannot be split: the
+        // workbook never says how the amount divides. Imported combined and
+        // flagged, never apportioned by guesswork.
+        if (g.componentName && /,/.test(g.componentName)) {
+          g.combinedNames = g.componentName.split(/\s*,\s*/).map(function (x) { return x.trim(); }).filter(Boolean);
+          g.combined = true;
+        }
+      }
+      g.componentId = ctx.componentIdFor(g);
+    });
+
+    var combined = groups.filter(function (g) { return g.combined; });
+    if (combined.length) {
+      warn(sheet + ': ' + combined.length + ' Rate/Amount pair(s) cover more than one component (' +
+           combined[0].combinedNames.join(' + ') + '). The workbook does not say how the amount splits ' +
+           'between them, so it is imported as one combined line. Per-component reporting needs a ' +
+           'separate pair for each.');
+    }
+
     var den = /360/.test(ctx.dayCountConvention || '') ? 360 : 365;
-    var hr = findCashflowHeader(grid);
-    if (hr < 0) { warn(sheetName + ': no cashflow table found'); return rows; }
-
-    var headers = (grid[hr] || []).map(function (v) { return txt(v).toLowerCase(); });
-
-    var colBalance = -1, colScope = -1;
-    headers.forEach(function (h, i) {
-      if (/unfunded balance|principal balance/.test(h)) colBalance = i;
-      if (/drawdown scope/.test(h)) colScope = i;
-    });
-
-    // Groups: each "rate" column starts one, paired with the "amount" beside it.
-    var groups = [];
-    headers.forEach(function (h, i) {
-      if (h !== 'rate') return;
-      if (txt(cell(grid, hr, i + 1)).toLowerCase() !== 'amount') {
-        err(sheetName + ': "Rate" at column ' + (i + 1) + ' is not followed by "Amount"');
-        return;
-      }
-      var postingLabel = '';
-      for (var back = i; back >= 0 && !postingLabel; back--) postingLabel = txt(cell(grid, hr - 2, back));
-      var memberLabel = '';
-      for (var b2 = i; b2 >= 0 && !memberLabel; b2--) memberLabel = txt(cell(grid, hr - 1, b2));
-      if (/balance basis/i.test(memberLabel)) memberLabel = '';
-
-      var members = memberLabel
-        ? memberLabel.split(/\s*,\s*/).map(function (s) { return s.trim(); }).filter(Boolean)
-        : [];
-
-      var matched = members.map(function (nm) {
-        var hit = components.filter(function (c) { return c.name.toLowerCase() === nm.toLowerCase(); })[0];
-        if (!hit) warn(sheetName + ': cashflow group names "' + nm + '", which is not a defined component');
-        return hit || null;
-      }).filter(Boolean);
-
-      var postingType = /interest/i.test(postingLabel) ? 'interest'
-                      : /fee/i.test(postingLabel) ? 'fee'
-                      : /principal/i.test(postingLabel) ? 'principal'
-                      : (matched[0] ? matched[0].postingType : null);
-
-      var combined = matched.length > 1;
-      if (combined) {
-        warn(sheetName + ': one Rate/Amount pair covers ' + matched.length + ' components (' +
-             matched.map(function (c) { return c.name; }).join(', ') +
-             '). The workbook does not say how the amount splits, so it is imported as a single combined line. ' +
-             'Per-component figures need the API feed.');
-      }
-
-      groups.push({
-        rateCol: i,
-        amountCol: i + 1,
-        cashCol: (headers[i + 2] || '').indexOf('total cash') === 0 ? i + 2 : -1,
-        postingType: postingType,
-        components: matched,
-        combined: combined,
-        componentId: combined
-          ? (ctx.externalDealId + (ctx.externalTrancheId ? '-' + slug(ctx.externalTrancheId.split('-').pop()) : '') +
-             '-COMBINED-' + slug(postingType || 'X'))
-          : (matched[0] ? matched[0].externalComponentId : null)
-      });
-    });
-
-    if (!groups.length) { warn(sheetName + ': cashflow table has no Rate/Amount groups'); return rows; }
-
-    // Collect raw rows first; daysCovered needs the NEXT date per series.
     var raw = [];
-    for (var r = hr + 1; r < grid.length; r++) {
-      var d = iso(cell(grid, r, 0));
+
+    for (var r = HR + 1; r < grid.length; r++) {
+      var d = iso(cell(grid, r, col.date));
       if (!d) continue;
-      var scopeRaw = colScope >= 0 ? txt(cell(grid, r, colScope)) : '';
+      var scopeRaw = col.scope !== undefined ? txt(cell(grid, r, col.scope)) : '';
       var lot = lotIdFromScope(scopeRaw);
-      var bal = colBalance >= 0 ? num(cell(grid, r, colBalance)) : null;
+      var balances = {
+        principalBalance:            col.principalBalance !== undefined ? num(cell(grid, r, col.principalBalance)) : null,
+        unfundedBalance:             col.unfundedBalance  !== undefined ? num(cell(grid, r, col.unfundedBalance))  : null,
+        principalPlusCapitalised:    col.principalPlusCap !== undefined ? num(cell(grid, r, col.principalPlusCap)) : null,
+        unfundedNetOfCapitalisations:col.unfundedNet      !== undefined ? num(cell(grid, r, col.unfundedNet))      : null
+      };
 
       groups.forEach(function (g, gi) {
         var amt = num(cell(grid, r, g.amountCol));
-        var rt = num(cell(grid, r, g.rateCol));
-        if (amt === null && rt === null) return;
+        var rt  = num(cell(grid, r, g.rateCol));
+        if (!amt && !rt) return;                     // nothing posted on this line
         if (rt !== null && rt > 1) {
-          err(sheetName + ' row ' + (r + 1) + ': rate ' + rt + ' must be a decimal, not a percent');
+          err(ref(sheet, r, g.rateCol) + ': rate ' + rt + ' must be a decimal, not a percentage.');
         }
+        var bal = g.basis ? balances[g.basis] : null;
         raw.push({
-          rowNo: r + 1,
-          seriesKey: gi + '|' + (lot || ''),
+          rowNo: r + 1, seriesKey: gi + '|' + (lot || ''),
           date: d,
           externalTrancheId: ctx.externalTrancheId || null,
           externalComponentId: g.componentId,
-          componentNames: g.components.map(function (c) { return c.name; }),
-          combined: g.combined,
+          componentNames: g.combinedNames || (g.componentName ? [g.componentName] : []),
+          combined: !!g.combined,
+          postingType: g.postingType,
+          settlementType: g.settlementType,
+          balanceBasis: g.basis || null,
           drawdownLotId: lot,
           drawdownScopeText: scopeRaw || null,
-          postingType: g.postingType,
           basisBalance: bal,
           rate: rt,
           amount: amt === null ? 0 : amt,
-          // What the figures themselves say the period must have been. This
-          // is the yardstick the calendar conventions below are scored against.
           impliedDays: (bal && rt && amt) ? (amt * den) / (bal * rt) : null,
-          cashSettled: g.cashCol >= 0 ? (num(cell(grid, r, g.cashCol)) || 0) : 0
+          cashSettled: g.settlementType === 'cash' ? (amt || 0) : 0
+        });
+      });
+
+      flats.forEach(function (f, fi) {
+        var amt = num(cell(grid, r, f.col));
+        if (!amt) return;
+        raw.push({
+          rowNo: r + 1, seriesKey: 'flat' + fi + '|' + (lot || ''),
+          date: d,
+          externalTrancheId: ctx.externalTrancheId || null,
+          externalComponentId: ctx.flatFeeId(f.settlementType),
+          componentNames: [f.label],
+          postingType: 'fee',
+          settlementType: f.settlementType,
+          balanceBasis: null,
+          drawdownLotId: lot,
+          drawdownScopeText: scopeRaw || null,
+          basisBalance: null,
+          rate: null,
+          amount: amt,
+          impliedDays: null,
+          isFlat: true,
+          cashSettled: f.settlementType === 'cash' ? amt : 0
         });
       });
     }
 
-    /* daysCovered is not stated anywhere in the workbook, and the sample does
-       NOT use one convention throughout: on "Tranch info" the row date is the
-       period START (days = gap forward), on "Loan info" it is the period END
-       (days = gap back to the previous date, or to loan start for the first
-       row). Assuming either one would silently mis-state half the file.
+    deriveDaysCovered(raw, ctx, warn, sheet, meta);
+    raw.forEach(function (x) { delete x.seriesKey; rows.push(x); });
+    rows.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    return rows;
+  }
 
-       So both are scored against impliedDays and the better fit wins. The
-       residual is reported rather than smoothed away — where PortF's figures
-       do not reconcile to the calendar, that is a question for PortF. */
-
+  /* daysCovered is not stated in the workbook and the two sheet types do not
+     agree on what the row date means — on tranche sheets it is the period
+     start, on the facility sheet the period end. Rather than assume, both
+     readings are scored against the days the figures themselves imply and the
+     better fit wins. The residual is reported, never smoothed away. */
+  function deriveDaysCovered(raw, ctx, warn, sheet, meta) {
     var bySeries = {};
     raw.forEach(function (x) { (bySeries[x.seriesKey] = bySeries[x.seriesKey] || []).push(x); });
     Object.keys(bySeries).forEach(function (k) {
@@ -467,10 +609,9 @@
       var j;
       if (mode === 'start') {
         for (j = i + 1; j < list.length; j++) if (list[j].date !== list[i].date) return dayDiff(list[i].date, list[j].date);
-        return null;                              // last row: no successor
+        return null;
       }
       for (j = i - 1; j >= 0; j--) if (list[j].date !== list[i].date) return dayDiff(list[j].date, list[i].date);
-      // First row under end-dating runs from the start of the loan.
       return ctx.loanStartDate ? dayDiff(ctx.loanStartDate, list[i].date) : null;
     }
 
@@ -481,8 +622,7 @@
           if (!x.impliedDays) return;
           var d = gapAt(bySeries[k], i, mode);
           if (d === null || d <= 0) return;
-          total += Math.abs(d - x.impliedDays) / x.impliedDays;
-          n++;
+          total += Math.abs(d - x.impliedDays) / x.impliedDays; n++;
         });
       });
       return n ? { err: total / n, n: n } : { err: Infinity, n: 0 };
@@ -491,20 +631,16 @@
     var sStart = score('start'), sEnd = score('end');
     var mode = sEnd.err < sStart.err ? 'end' : 'start';
     meta.dateConvention = mode === 'start' ? 'rowDateIsPeriodStart' : 'rowDateIsPeriodEnd';
-    var chosenErr = (mode === 'start' ? sStart.err : sEnd.err);
-    meta.conventionFitPct = isFinite(chosenErr) ? +(chosenErr * 100).toFixed(3) : null;
     meta.conventionScored = (mode === 'start' ? sStart.n : sEnd.n);
 
     if (sStart.n || sEnd.n) {
-      warn(sheetName + ': days covered is not in the file. Read as "' + meta.dateConvention +
-           '" — it fits the stated amounts ' +
-           (isFinite(sStart.err) && isFinite(sEnd.err)
-              ? 'better than the alternative (' + (+(Math.min(sStart.err, sEnd.err) * 100)).toFixed(2) + '% mean error vs ' +
-                (+(Math.max(sStart.err, sEnd.err) * 100)).toFixed(2) + '%)'
-              : 'across ' + meta.conventionScored + ' rows') + '.');
+      warn(sheet + ': days covered is not stated in the file. Read as "' + meta.dateConvention +
+           '" — it fits the stated amounts better than the alternative (' +
+           (+(Math.min(sStart.err, sEnd.err) * 100)).toFixed(2) + '% mean error vs ' +
+           (+(Math.max(sStart.err, sEnd.err) * 100)).toFixed(2) + '%).');
     }
 
-    var offBy = 0, worst = 0, worstRow = null;
+    var offBy = 0, worst = 0, worstRow = null, residuals = [];
     Object.keys(bySeries).forEach(function (k) {
       bySeries[k].forEach(function (x, i) {
         var d = gapAt(bySeries[k], i, mode);
@@ -513,7 +649,7 @@
         if (x.daysCovered && x.impliedDays) {
           x.daysCoveredResidualPct = +(((x.daysCovered - x.impliedDays) / x.impliedDays) * 100).toFixed(3);
           if (Math.abs(x.daysCoveredResidualPct) > 0.5) {
-            offBy++;
+            offBy++; residuals.push(x.daysCoveredResidualPct);
             if (Math.abs(x.daysCoveredResidualPct) > Math.abs(worst)) { worst = x.daysCoveredResidualPct; worstRow = x; }
           }
         }
@@ -521,85 +657,72 @@
     });
 
     if (offBy) {
-      // A constant residual across every row is the signature of a rate that
-      // has been rounded for display rather than a period that is wrong. The
-      // sample's 45bp commitment fee is stated as 0.0045 to four decimals; the
-      // amounts imply 0.0044669, and that 4dp rounding alone accounts for the
-      // whole 0.74% gap. On a 5.7% rate the same rounding is only 0.02%, which
-      // is why the tranche sheet reconciles and the facility sheet does not.
-      var residuals = [];
-      Object.keys(bySeries).forEach(function (k) {
-        bySeries[k].forEach(function (x) {
-          if (typeof x.daysCoveredResidualPct === 'number' && Math.abs(x.daysCoveredResidualPct) > 0.5) residuals.push(x.daysCoveredResidualPct);
-        });
-      });
       var spread = residuals.length ? Math.max.apply(null, residuals) - Math.min.apply(null, residuals) : 0;
-      var systematic = residuals.length > 2 && spread < 0.05;
-
-      if (systematic) {
-        var impliedRate = worstRow && worstRow.rate ? worstRow.rate / (1 + worst / 100) : null;
+      if (residuals.length > 2 && spread < 0.05) {
+        var implied = worstRow && worstRow.rate ? worstRow.rate / (1 + worst / 100) : null;
         meta.ratePrecisionSuspect = true;
-        warn(sheetName + ': every row is off the calendar by the same ' + worst.toFixed(2) + '%, which is the signature ' +
-             'of a rate rounded for display, not a wrong period. The stated rate ' +
-             (worstRow ? worstRow.rate : '?') + ' appears to be ' +
-             (impliedRate ? impliedRate.toFixed(7) : 'a longer decimal') + ' rounded to 4 places. ' +
-             'Amounts are used as given so the accounting is unaffected, but ask PortF to send rates at full precision — ' +
-             'a 4dp rate distorts any recalculation of a low-rate fee by roughly 1%.');
+        warn(sheet + ': every affected row is off the calendar by the same ' + worst.toFixed(2) + '%, the ' +
+             'signature of a rate rounded for display rather than a wrong period. The stated rate ' +
+             (worstRow ? worstRow.rate : '?') + ' looks like ' + (implied ? implied.toFixed(8) : 'a longer decimal') +
+             ' rounded. Amounts are used as given, so the accounting is unaffected.');
       } else {
-        warn(sheetName + ': ' + offBy + ' cashflow row(s) do not reconcile to the calendar — the stated amount implies a ' +
-             'shorter or longer period than the dates do (worst: row ' + (worstRow ? worstRow.rowNo : '?') +
-             ', off by ' + worst.toFixed(2) + '%). PCS posts PortF\'s amounts as given, so the accounting is unaffected, ' +
-             'but days covered shown on screen is our inference, not their statement. Worth asking PortF to confirm.');
+        warn(sheet + ': ' + offBy + ' row(s) do not reconcile to the calendar — the stated amount implies a ' +
+             'different period length than the dates do (worst: row ' + (worstRow ? worstRow.rowNo : '?') +
+             ', off by ' + worst.toFixed(2) + '%). Amounts post as given; days covered on screen is our inference.');
       }
     }
-
-    var unresolved = raw.filter(function (x) { return x.daysCovered === null && x.amount; });
-    if (unresolved.length) {
-      warn(sheetName + ': ' + unresolved.length + ' cashflow line(s) sit at the edge of the file with no neighbouring ' +
-           'date, so days covered cannot be inferred. The amount is still imported and still posts.');
-    }
-
-    raw.forEach(function (x) { delete x.seriesKey; rows.push(x); });
-    rows.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
-    return rows;
   }
 
-  /* ── events, derived from the cashflow table's movement columns ───────── */
+  /* Drawdown lots. Accrual rows identify their lot in prose; event rows carry
+     only an amount and a date. Deriving the id from (date, amount) in both
+     places is what lets the two join up. */
+  function lotId(date, amount) {
+    if (!date || !amount) return null;
+    return 'LOT-' + date + '-' + Math.round(Math.abs(amount));
+  }
+  function lotIdFromScope(scopeRaw) {
+    if (!scopeRaw) return null;
+    var amt = /[£$€]?\s*([\d,]+(?:\.\d+)?)/.exec(scopeRaw);
+    var dt  = /(\d{4}-\d{2}-\d{2})/.exec(scopeRaw);
+    if (amt && dt) return lotId(dt[1], num(amt[1]));
+    return slug(scopeRaw).slice(0, 40);
+  }
 
-  function readEvents(grid, ctx, warn, sheetName) {
+  /* ── events ───────────────────────────────────────────────────────────── */
+
+  function readEvents(grid, ctx, sheet) {
     var events = [];
-    var hr = findCashflowHeader(grid);
-    if (hr < 0) return events;
-    var headers = (grid[hr] || []).map(function (v) { return txt(v).toLowerCase(); });
+    var hdr = findCashflowHeader(grid);
+    if (!hdr) return events;
+    var header = [];
+    for (var c = 0; c < 80; c++) header[c] = norm(cell(grid, hdr.row, c));
 
     var map = [
-      { re: /initial purchase/, type: 'initialPurchase' },
-      { re: /^drawdown$/, type: 'drawdown' },
-      { re: /principal payment/, type: 'principalPayment' }
+      { h: 'initial purchase',   type: 'initialPurchase' },
+      { h: 'drawdown',           type: 'drawdown' },
+      { h: 'principal payment',  type: 'principalPayment' }
     ];
     var cols = [];
-    headers.forEach(function (h, i) {
-      map.forEach(function (m) { if (m.re.test(h)) cols.push({ col: i, type: m.type }); });
+    header.forEach(function (h, i) {
+      map.forEach(function (m) { if (h === m.h) cols.push({ col: i, type: m.type }); });
     });
     if (!cols.length) return events;
 
-    var colScope = headers.indexOf('drawdown scope');
+    var scopeCol = header.indexOf('drawdown scope');
     var n = 0;
-    for (var r = hr + 1; r < grid.length; r++) {
-      var d = iso(cell(grid, r, 0));
+    for (var r = hdr.row + 1; r < grid.length; r++) {
+      var d = iso(cell(grid, r, hdr.col));
       if (!d) continue;
-      cols.forEach(function (cdef) {
-        var amt = num(cell(grid, r, cdef.col));
-        if (!amt) return;                    // 0 and '£ -' are not events
-        var scopeRaw = colScope >= 0 ? txt(cell(grid, r, colScope)) : '';
+      cols.forEach(function (cd) {
+        var amt = num(cell(grid, r, cd.col));
+        if (!amt) return;                             // 0 and blank are not events
+        var scopeRaw = scopeCol >= 0 ? txt(cell(grid, r, scopeCol)) : '';
         events.push({
-          externalEventId: ctx.externalDealId + '-E' + (++n),
+          externalEventId: ctx.externalDealId + '-' + (ctx.trancheKey || 'FAC') + '-E' + (++n),
           externalTrancheId: ctx.externalTrancheId || null,
-          eventType: cdef.type,
+          eventType: cd.type,
           eventDate: d,
           amount: amt,
-          // Same derivation the accrual rows use, so an event and the accruals
-          // it gave rise to carry the same lot id and can be joined.
           drawdownLotId: lotIdFromScope(scopeRaw) || lotId(d, amt),
           sourceRow: r + 1
         });
@@ -608,27 +731,19 @@
     return events;
   }
 
-  /* ── main ─────────────────────────────────────────────────────────────── */
-
+  /* ── warning rollup ───────────────────────────────────────────────────── */
   /* Fifty tranche sheets means fifty copies of every per-sheet warning, and a
-     review screen with 200 near-identical lines is one nobody reads. Warnings
-     of the form "<sheet>: <message>" are collapsed onto the message, listing
-     the sheets it affects. The first sheet name is kept verbatim so a genuinely
-     one-off warning still reads normally. */
+     review screen of 200 near-identical lines is one nobody reads. */
   function rollUp(list) {
     var groups = [], index = {};
     list.forEach(function (w) {
       var m = /^([^:]{1,60}):\s([\s\S]+)$/.exec(w);
       var sheet = m ? m[1] : null;
-      var body = m ? m[2] : w;
-      // Numbers inside a message differ per sheet ("3 rows", "7 rows"); key on
-      // the shape so those still group, and show the range afterwards.
+      var body  = m ? m[2] : w;
       var key = body.replace(/\b\d[\d,.]*\b/g, '#');
-      if (!index[key]) { index[key] = { sheets: [], body: body, bare: !sheet }; groups.push(index[key]); }
+      if (!index[key]) { index[key] = { sheets: [], body: body }; groups.push(index[key]); }
       if (sheet) index[key].sheets.push(sheet);
-      else index[key].bodies = (index[key].bodies || []).concat(body);
     });
-
     return groups.map(function (g) {
       if (!g.sheets.length) return g.body;
       if (g.sheets.length === 1) return g.sheets[0] + ': ' + g.body;
@@ -637,188 +752,352 @@
     });
   }
 
+  /* ── main ─────────────────────────────────────────────────────────────── */
+
   function parseGrids(grids, opts) {
     opts = opts || {};
     var warnings = [], errors = [];
     function warn(m) { warnings.push(m); }
     function err(m) { errors.push(m); }
 
-    /* Sheet names are matched loosely — "Loan info", "Loan Info", "LoanInfo".
-       One worksheet per tranche, so EVERY sheet matching /tranch/ is read and
-       the workbook may carry as many as it likes. Order is preserved so the
-       tranches appear as they do in the file. */
-    var loanKey = null, trancheKeys = [];
+    var loanKey = null, lookupKey = null, trancheKeys = [];
     Object.keys(grids).forEach(function (k) {
-      var n = k.toLowerCase().replace(/\s+/g, '');
+      var n = norm(k).replace(/\s+/g, '');
       if (/^loaninfo/.test(n)) loanKey = k;
+      else if (/^lookup/.test(n)) lookupKey = k;
       else if (/tranch/.test(n)) trancheKeys.push(k);
     });
-    if (!loanKey) { err('No "Loan info" sheet found — cannot identify the facility'); return { snapshot: null, warnings: rollUp(warnings), errors: errors }; }
 
-    var loan = grids[loanKey];
-    var head = readHeaderBlock(loan);
-
-    var company = txt(head['company']);
-    if (!company) err('Loan info: Company is blank — it identifies the deal');
-
-    var externalDealId = opts.externalDealId || slug(company) || 'PORTF-DEAL';
-
-    var dayCountRaw = head['day count convention'];
-    var dayCount = mapEnum(DAYCOUNT, dayCountRaw);
-    if (!dayCount) {
-      dayCount = opts.defaultDayCount || 'ACT/365';
-      warn('Loan info: Day Count Convention is blank. Defaulted to ' + dayCount +
-           ' — confirm before running accounting, because it changes every accrual.');
+    if (!loanKey) {
+      err('No "Loan info" sheet found — cannot identify the facility.');
+      return { snapshot: null, warnings: rollUp(warnings), errors: errors };
+    }
+    if (!lookupKey) {
+      err('No "Lookup values" sheet found. Field values cannot be validated against the agreed ' +
+          'list, so the import is stopped rather than accepting unchecked data.');
+      return { snapshot: null, warnings: rollUp(warnings), errors: errors };
     }
 
-    var commitments = readCommitments(loan, warn, 'Loan info');
-    var committedAmount = commitments.reduce(function (s, c) { return s + (c.amount || 0); }, 0) || null;
+    var lookups = readLookups(grids[lookupKey], warn);
+    var validate = makeValidator(lookups, warn, err);
+    var meta = { sheets: {}, lookupColumns: Object.keys(lookups) };
+
+    var loan = grids[loanKey];
+
+    // Old-template detection: fail with a sentence that explains, rather than
+    // an avalanche of "label not found".
+    if (!findSection(loan, 'Deal Setup', 14) && !findSection(loan, 'Facility Setup', 14)) {
+      err('"Loan info" has no "Deal Setup" or "Facility Setup" heading. This does not look like the ' +
+          'current PCS Loan Import template — an earlier layout will not import.');
+      return { snapshot: null, warnings: rollUp(warnings), errors: errors };
+    }
+
+    /* ── deal + facility ── */
+    var dealAt = findSection(loan, 'Deal Setup', 14);
+    var facAt  = findSection(loan, 'Facility Setup', 14);
+    var feeAt  = findSection(loan, 'Facility Fees', 14);
+
+    var deal = readBlock(loan, dealAt, 1) || {};
+    var fac  = readBlock(loan, facAt, 1) || {};
+
+    function fv(fields, names, label) {
+      var f = fieldAt(fields, names, 0);
+      if (!f) return { value: '', found: false };
+      var v = label ? validate(label, f.raw, ref(loanKey, f.row, f.col)) : txt(f.raw);
+      return { value: v === null ? '' : v, raw: f.raw, found: true, at: ref(loanKey, f.row, f.col) };
+    }
+
+    var company   = fv(deal, ['Deal Name']).value;
+    var dealCode  = fv(deal, ['Deal ID']).value;
+    var structure = fv(deal, ['Deal Structure'], 'Deal Structure').value;
+    var currency  = fv(deal, ['Currency'], 'Currency').value;
+    var framework = fv(deal, ['Accounting Framework'], 'Accounting Framework').value;
+
+    if (!company)  err('Loan info: Deal Name is blank — it identifies the deal.');
+    if (!dealCode) warn('Loan info: Deal ID is blank, so the deal is identified by its Deal Name. ' +
+                        'A stable id that survives a rename is strongly preferred.');
+
+    var dayCountRaw = fv(fac, ['Day Count Convention', 'Day Count Conversion'], 'Day Count Convention').value;
+    var dayCount    = mapOrReport(DAYCOUNT_MAP, dayCountRaw, 'day count', 'Loan info', warn);
 
     var facility = {
       company: company || null,
-      debtType: txt(head['debt type']) || null,
-      currency: opts.currency || 'GBP',
-      loanStartDate: iso(head['loan start date']),
-      loanEndDate: iso(head['loan end date']),
+      facilityName: fv(fac, ['Facility Name']).value || null,
+      dealStructure: structure || null,
+      counterparty: fv(deal, ['Counterparty']).value || null,
+      agentName: fv(deal, ['Agent Name']).value || null,
+      currency: currency || null,
+      accountingFramework: framework || null,
+      signingDate: iso(fv(deal, ['Signing Date']).raw),
+      loanStartDate: iso(fv(deal, ['Settlement Date']).raw),
+      loanEndDate: iso(fv(deal, ['Maturity Date']).raw),
+      committedAmount: num(fv(fac, ['Total Commitment']).raw),
+      maximumFacilityAmount: null,
+      availabilityEnd: iso(fv(fac, ['Availability End']).raw),
       dayCountConvention: dayCount,
-      interestAccrues: /next/i.test(txt(head['interest accrues'])) ? 'nextDay' : 'sameDay',
-      committedAmount: committedAmount,
-      maximumFacilityAmount: null,        // filled from the opening balance below
-      commitmentSchedule: commitments.map(function (c) {
-        return { effectiveDate: c.effectiveDate, amount: c.amount, reference: 'committed' };
-      })
+      holidayCalendar: fv(fac, ['Holiday Calendar'], 'Holiday Calendar').value || null,
+      repaymentType: fv(fac, ['Repayment Type'], 'Repayment Type').value || null,
+      facilityType: fv(fac, ['Facility Type'], 'Facility Type').value || null,
+      interestAccrualPeriod: mapOrReport(FREQ_MAP,
+        fv(fac, ['Interest Accrual Period (Default)'], 'Interest Accrual Period (Default)').value,
+        'accrual period', 'Loan info', warn)
     };
 
-    if (!facility.loanStartDate) err('Loan info: Loan Start Date is blank');
-    if (!facility.loanEndDate) err('Loan info: Loan End Date is blank');
-    if (!opts.currency) warn('Currency is not stated anywhere in the workbook. Assumed GBP — set it on import if wrong.');
+    if (!facility.loanStartDate) err('Loan info: Settlement Date is blank. It is the date interest starts accruing.');
+    if (!facility.loanEndDate)   err('Loan info: Maturity Date is blank.');
+    if (facility.signingDate && facility.loanStartDate && facility.signingDate > facility.loanStartDate) {
+      warn('Loan info: Signing Date is after Settlement Date. Unusual but not impossible — worth confirming.');
+    }
 
-    // The opening unfunded balance is the maximum facility, not the sum of
-    // the commitment rows. Contract §4: the two are different numbers and the
-    // fee ticks on the larger one.
-    var loanHr = findCashflowHeader(loan);
-    if (loanHr >= 0) {
-      var lh = (loan[loanHr] || []).map(function (v) { return txt(v).toLowerCase(); });
-      var ub = lh.findIndex(function (h) { return /unfunded balance/.test(h); });
+    var externalDealId = opts.externalDealId || slug(dealCode) || slug(company) || 'PCS-DEAL';
+
+    /* ── facility fees ── */
+    var fees = [];
+    var feeWidth = blockWidth(loan, feeAt, ['name']);
+    var feeFields = readBlock(loan, feeAt, feeWidth);
+    for (var fi = 0; fi < feeWidth; fi++) {
+      var fname = txt(fieldAt(feeFields, ['Name'], fi) && fieldAt(feeFields, ['Name'], fi).raw);
+      if (!fname) continue;
+      var at_ = function (names) { return fieldAt(feeFields, names, fi); };
+      var w = function (names, label) {
+        var f = at_(names);
+        if (!f) return '';
+        var v = label ? validate(label, f.raw, ref(loanKey, f.row, f.col)) : txt(f.raw);
+        return v === null ? '' : v;
+      };
+      fees.push({
+        externalComponentId: externalDealId + '-FEE-' + slug(fname),
+        scope: 'facility',
+        name: fname,
+        postingType: 'fee',
+        feeType: w(['Fee Types'], 'Fee Types') || null,
+        appliesTo: w(['Applies to']) || null,
+        rate: num(at_(['%']) && at_(['%']).raw),
+        calculationBasis: mapOrReport(BASIS_MAP, w(['Base'], 'Base'), 'fee basis', 'Loan info', warn),
+        settlementFrequency: mapOrReport(FREQ_MAP, w(['Frequency'], 'Frequency'), 'frequency', 'Loan info', warn),
+        firstSettlementDate: iso(at_(['Payment Date']) && at_(['Payment Date']).raw),
+        revenueTreatment: w(['AASB', 'IFRS'], 'AASB') || null
+      });
+    }
+
+    /* Maximum facility: the opening unfunded balance, which in the sample far
+       exceeds the commitment. Both are kept — the fee ticks on the larger, but
+       expected credit loss is measured on the committed amount only. */
+    var loanHdr = findCashflowHeader(loan);
+    if (loanHdr) {
+      var lh = [];
+      for (var lc = 0; lc < 80; lc++) lh[lc] = norm(cell(loan, loanHdr.row, lc));
+      var ub = lh.indexOf('unfunded balance');
       if (ub >= 0) {
-        for (var rr = loanHr + 1; rr < loan.length; rr++) {
-          var v = num(cell(loan, rr, ub));
-          if (v) { facility.maximumFacilityAmount = v; break; }
+        for (var rr2 = loanHdr.row + 1; rr2 < loan.length; rr2++) {
+          var v2 = num(cell(loan, rr2, ub));
+          if (v2) { facility.maximumFacilityAmount = v2; break; }
         }
       }
     }
-
-    var basisRef = null;
-    if (facility.maximumFacilityAmount && committedAmount) {
-      if (facility.maximumFacilityAmount > committedAmount * 1.5) {
-        basisRef = 'maximum';
-        warn('The opening unfunded balance (' + facility.maximumFacilityAmount.toLocaleString() +
-             ') far exceeds the commitment schedule total (' + committedAmount.toLocaleString() +
-             '). Read as the maximum facility, with unfunded-balance fees ticking on it. ' +
-             'ECL exposure still uses the committed amount only — see contract §4.');
-      } else {
-        basisRef = 'committed';
-      }
+    if (facility.maximumFacilityAmount && facility.committedAmount &&
+        facility.committedAmount > facility.maximumFacilityAmount) {
+      warn('Total Commitment (' + facility.committedAmount.toLocaleString() + ') exceeds the opening ' +
+           'unfunded balance (' + facility.maximumFacilityAmount.toLocaleString() + '). One of the two ' +
+           'is wrong, or the fee accrues on a narrower base than the whole commitment — worth confirming ' +
+           'with PortF, because it is the figure expected credit loss is measured against.');
+    }
+    if (facility.maximumFacilityAmount && facility.committedAmount &&
+        facility.maximumFacilityAmount > facility.committedAmount * 1.5) {
+      warn('The opening unfunded balance (' + facility.maximumFacilityAmount.toLocaleString() +
+           ') far exceeds Total Commitment (' + facility.committedAmount.toLocaleString() +
+           '). Read as the maximum facility, with unfunded-balance fees accruing on it. ' +
+           'ECL exposure still uses the committed amount only.');
     }
 
-    var facilityComponents = readComponents(loan, 'facility',
-      { externalDealId: externalDealId, loanStartDate: facility.loanStartDate, unfundedBasisReference: basisRef },
-      warn, err, 'Loan info');
-
-    var meta = { sheets: {} };
-    meta.sheets['Loan info'] = {};
-    var facilityCashflows = readCashflows(loan, facilityComponents, {
+    meta.sheets[loanKey] = {};
+    var facilityCashflows = readCashflows(loan, {
       externalDealId: externalDealId,
       externalTrancheId: null,
+      trancheKey: null,
       loanStartDate: facility.loanStartDate,
-      dayCountConvention: facility.dayCountConvention
-    }, warn, err, 'Loan info', meta.sheets['Loan info']);
+      dayCountConvention: facility.dayCountConvention,
+      componentIdFor: function (g) {
+        var base = externalDealId + '-FAC';
+        if (g.componentName && !g.combined) {
+          var hit = matchComponent(fees, g.componentName);
+          if (hit) return hit.externalComponentId;
+          return base + '-' + slug(g.componentName);
+        }
+        if (g.combined) return base + '-COMBINED-' + g.postingType.toUpperCase();
+        return base + '-' + g.postingType.toUpperCase() + '-' + g.settlementType.toUpperCase() +
+               '-' + slug(g.basis || 'NA');
+      },
+      flatFeeId: function (st) { return externalDealId + '-FAC-FLATFEE-' + st.toUpperCase(); }
+    }, warn, err, loanKey, meta.sheets[loanKey]);
 
-    /* ── tranches: one worksheet each ──────────────────────────────────────
-       Each /tranch/ sheet becomes one tranche. The tranche id is derived from
-       the SHEET NAME rather than from its position, because position moves
-       whenever someone reorders or inserts a sheet, and an id that moves
-       breaks the link to prior snapshots, to posted accounting runs and to
-       the GL. A sheet rename still breaks it — which is precisely the id
-       immutability question already open with PortF (contract §10 Q1).       */
-
-    var tranches = [], trancheComponents = [], trancheCashflows = [], events = [];
-    var usedTrancheIds = {};
+    /* ── tranches ── */
+    var tranches = [], components = [], trancheCashflows = [], events = [];
+    var usedKeys = {};
     var rowBudget = opts.maxCashflowRows || 500000;
-
-    if (!trancheKeys.length) {
-      warn('No tranche worksheet found — importing facility-level data only, with no tranche cashflows.');
-    }
-
-    // A plain loop, not forEach — the row-budget check below has to be able to
-    // BREAK. With forEach it could only record an error and carry on parsing,
-    // which defeats the point: the guard exists to stop before the tab runs
-    // out of memory, not to report afterwards that it should have.
     var budgetBlown = false;
-    for (var tsi = 0; tsi < trancheKeys.length; tsi++) {
-      var sheetName = trancheKeys[tsi], ti = tsi;
-      var tg = grids[sheetName];
-      var th = readHeaderBlock(tg);
-      var tName = txt(th['tranche name']);
 
-      // The sample carries a date in Tranche Name. Contract §6 makes names
-      // display-only, so a bad name is a warning, never a failure.
-      var tNameDate = null;
-      if (/^\d{4}-\d{2}-\d{2}/.test(tName)) {
-        tNameDate = iso(tName);
-        warn(sheetName + ': Tranche Name holds a date (' + tName + ') rather than a name, so the sheet name is used ' +
-             'instead. The date is kept as a candidate tranche start — it may be the real start date in the wrong ' +
-             'cell. Confirm with PortF before relying on it.');
-        tName = '';
-      }
-      if (!tName) tName = sheetName;
+    if (!trancheKeys.length) warn('No tranche worksheet found — facility-level data only.');
 
-      // Id from the sheet name, de-duplicated if two sheets slug alike.
-      var base = slug(sheetName) || ('T' + (ti + 1));
-      var key = base;
-      var dedupe = 2;
-      while (usedTrancheIds[key]) { key = base + '-' + (dedupe++); }
-      usedTrancheIds[key] = true;
+    for (var ti = 0; ti < trancheKeys.length; ti++) {
+      var sheet = trancheKeys[ti];
+      var tg = grids[sheet];
+
+      var tdAt = findSection(tg, 'Tranche Details', 14);
+      var tiAt = findSection(tg, 'Tranche Interest Details', 14);
+      var tfAt = findSection(tg, 'Tranche Fees', 14);
+      if (!tdAt) { err(sheet + ': no "Tranche Details" heading — cannot read this tranche.'); continue; }
+
+      var td = readBlock(tg, tdAt, 1) || {};
+      var tvf = function (names, label) {
+        var f = fieldAt(td, names, 0);
+        if (!f) return { value: '', raw: null };
+        var v = label ? validate(label, f.raw, ref(sheet, f.row, f.col)) : txt(f.raw);
+        return { value: v === null ? '' : v, raw: f.raw };
+      };
+
+      var tName = tvf(['Tranche Name']).value || sheet;
+      // Tranche names in the template repeat the deal code ("SP032 — 01042026"),
+      // which would produce SP032-SP032-01042026. Dropped for legibility only;
+      // the id is still derived from the name and still stable.
+      var base = slug(String(tName).replace(new RegExp('^\\s*' + externalDealId + '\\s*[—–-]*\\s*', 'i'), '')) ||
+                 slug(tName) || slug(sheet) || ('T' + (ti + 1));
+      var key = base, dedupe = 2;
+      while (usedKeys[key]) key = base + '-' + (dedupe++);
+      usedKeys[key] = true;
       var externalTrancheId = externalDealId + '-' + key;
 
-      var tCommitments = readCommitments(tg, warn, sheetName);
-
+      var tCcy = tvf(['Currency'], 'Currency').value;
       tranches.push({
         externalTrancheId: externalTrancheId,
         name: tName,
-        sheetName: sheetName,
-        currency: facility.currency,
-        commitment: tCommitments.length ? tCommitments[0].amount : null,
-        startDate: tCommitments.length ? tCommitments[0].effectiveDate : facility.loanStartDate,
-        startDateCandidate: tNameDate || null
+        sheetName: sheet,
+        currency: tCcy || facility.currency,
+        commitment: num(tvf(['Face Value']).raw),
+        initialDrawdown: num(tvf(['Initial Drawdown']).raw),
+        startDate: iso(tvf(['Initial Drawdown Date']).raw) || facility.loanStartDate
       });
 
-      var tctx = {
+      /* interest components */
+      var icWidth = blockWidth(tg, tiAt, ['interest name', 'name']);
+      var icFields = readBlock(tg, tiAt, icWidth);
+      var sheetComponents = [];
+      for (var ci = 0; ci < icWidth; ci++) {
+        var icNameF = fieldAt(icFields, ['Interest Name', 'Name'], ci);
+        var icName = txt(icNameF && icNameF.raw);
+        if (!icName) continue;
+        var g_ = function (names) { return fieldAt(icFields, names, ci); };
+        var gv = function (names, label) {
+          var f = g_(names);
+          if (!f) return '';
+          var v = label ? validate(label, f.raw, ref(sheet, f.row, f.col)) : txt(f.raw);
+          return v === null ? '' : v;
+        };
+
+        var comp = {
+          externalComponentId: externalDealId + '-' + key + '-' + slug(icName),
+          externalTrancheId: externalTrancheId,
+          scope: 'tranche',
+          name: icName,
+          postingType: 'interest',
+          index: gv(['Interest Type'], 'Interest Type') || null,
+          rate: num(g_(['Base Value']) && g_(['Base Value']).raw),
+          accrualFrequency: mapOrReport(FREQ_MAP, gv(['Accrual Frequency'], 'Accrual Frequency'), 'accrual frequency', sheet, warn),
+          terms: gv(['Terms'], 'Terms') || null,
+          settlementType: mapOrReport(SETTLE_MAP, gv(['Settlement Type'], 'Settlement Type'), 'settlement type', sheet, warn),
+          // The template misspells this label; both spellings are accepted.
+          firstSettlementDate: iso((g_(['First Settlement Date', 'Fist Settlement Date']) || {}).raw),
+          lookbackDays: num(g_(['Lookback']) && g_(['Lookback']).raw),
+          lockoutDays: num(g_(['Lockout']) && g_(['Lockout']).raw),
+          observationShift: num(g_(['Obs shift']) && g_(['Obs shift']).raw),
+          spreadBandStart: iso((g_(['Spread band 1 Start Date']) || {}).raw),
+          spreadBandEnd: iso((g_(['Spread band 2 End Date']) || {}).raw),
+          marginRatchet: txt((g_(['Margin Ratchet']) || {}).raw) || null,
+          esgAdjustmentBps: num(g_(['ESG Adjustment (bps)']) && g_(['ESG Adjustment (bps)']).raw),
+          floorBps: num(g_(['Rate FLOOR']) && g_(['Rate FLOOR']).raw),
+          capBps: num(g_(['Rate CAP']) && g_(['Rate CAP']).raw),
+          rateStructure: null
+        };
+        comp.rateStructure = (norm(comp.index) === 'fixed') ? 'fixed' : 'floating';
+        if (comp.rateStructure === 'fixed' && comp.rate === null) {
+          err(sheet + ': interest component "' + icName + '" is FIXED but has no Base Value.');
+        }
+        if (comp.rate !== null && comp.rate > 1) {
+          err(sheet + ': interest component "' + icName + '" has Base Value ' + comp.rate +
+              ' — rates must be decimals, not percentages.');
+        }
+        sheetComponents.push(comp);
+        components.push(comp);
+      }
+
+      /* tranche fees */
+      var tfWidth = blockWidth(tg, tfAt, ['name']);
+      var tfFields = readBlock(tg, tfAt, tfWidth);
+      for (var fj = 0; fj < tfWidth; fj++) {
+        var tfNameF = fieldAt(tfFields, ['Name'], fj);
+        var tfName = txt(tfNameF && tfNameF.raw);
+        if (!tfName) continue;
+        var h_ = function (names) { return fieldAt(tfFields, names, fj); };
+        var hv = function (names, label) {
+          var f = h_(names);
+          if (!f) return '';
+          var v = label ? validate(label, f.raw, ref(sheet, f.row, f.col)) : txt(f.raw);
+          return v === null ? '' : v;
+        };
+        var tfee = {
+          externalComponentId: externalDealId + '-' + key + '-FEE-' + slug(tfName),
+          externalTrancheId: externalTrancheId,
+          scope: 'tranche',
+          name: tfName,
+          postingType: 'fee',
+          feeType: hv(['Fee Types'], 'Fee Types') || null,
+          appliesTo: hv(['Applies to']) || null,
+          rate: num(h_(['%']) && h_(['%']).raw),
+          calculationBasis: mapOrReport(BASIS_MAP, hv(['Base'], 'Base'), 'fee basis', sheet, warn),
+          settlementFrequency: mapOrReport(FREQ_MAP, hv(['Frequency'], 'Frequency'), 'frequency', sheet, warn),
+          firstSettlementDate: iso(h_(['Payment Date']) && h_(['Payment Date']).raw),
+          revenueTreatment: hv(['AASB', 'IFRS'], 'AASB') || null
+        };
+        sheetComponents.push(tfee);
+        components.push(tfee);
+      }
+
+      meta.sheets[sheet] = {};
+      var flows = readCashflows(tg, {
         externalDealId: externalDealId,
         externalTrancheId: externalTrancheId,
         trancheKey: key,
-        loanStartDate: iso(th['loan start date']) || facility.loanStartDate,
-        dayCountConvention: facility.dayCountConvention
-      };
+        loanStartDate: iso(tvf(['Initial Drawdown Date']).raw) || facility.loanStartDate,
+        dayCountConvention: facility.dayCountConvention,
+        componentIdFor: (function (sc, k) {
+          return function (g) {
+            if (g.componentName && !g.combined) {
+              var hit = matchComponent(sc, g.componentName);
+              if (hit) return hit.externalComponentId;
+              return externalDealId + '-' + k + '-' + slug(g.componentName);
+            }
+            if (g.combined) return externalDealId + '-' + k + '-COMBINED-' + g.postingType.toUpperCase();
+            return externalDealId + '-' + k + '-' + g.postingType.toUpperCase() + '-' +
+                   g.settlementType.toUpperCase() + '-' + slug(g.basis || 'NA');
+          };
+        })(sheetComponents, key),
+        flatFeeId: (function (k) {
+          return function (st) { return externalDealId + '-' + k + '-FLATFEE-' + st.toUpperCase(); };
+        })(key)
+      }, warn, err, sheet, meta.sheets[sheet]);
 
-      meta.sheets[sheetName] = {};
-      var comps = readComponents(tg, 'tranche', tctx, warn, err, sheetName);
-      var flows = readCashflows(tg, comps, tctx, warn, err, sheetName, meta.sheets[sheetName]);
-      var evts  = readEvents(tg, tctx, warn, sheetName);
+      trancheCashflows = trancheCashflows.concat(flows);
+      events = events.concat(readEvents(tg, {
+        externalDealId: externalDealId, externalTrancheId: externalTrancheId, trancheKey: key
+      }, sheet));
 
-      trancheComponents = trancheComponents.concat(comps);
-      trancheCashflows  = trancheCashflows.concat(flows);
-      events            = events.concat(evts);
-
-      // Stop before the browser does. A 40-year daily tranche is ~30k rows;
-      // fifty of them is 1.5m, which exceeds what a tab can hold as objects.
-      // Failing here with a clear message beats an unexplained crash halfway
-      // through — and points at the API path, which streams server-side.
+      // Stop before the browser does. The check has to break the loop, not
+      // merely record an error, or the memory it exists to protect is already
+      // gone by the time anyone reads the message.
       if (facilityCashflows.length + trancheCashflows.length > rowBudget) {
-        err('This workbook exceeds ' + rowBudget.toLocaleString() + ' cashflow rows — stopped at sheet "' +
-            sheetName + '", tranche ' + (ti + 1) + ' of ' + trancheKeys.length + '. A browser cannot hold a file ' +
-            'this large in memory. Split it, shorten the schedule, or bring this deal in over the pull API, which ' +
-            'imports server-side with no such ceiling.');
+        err('This workbook exceeds ' + rowBudget.toLocaleString() + ' cashflow rows — stopped at "' +
+            sheet + '", tranche ' + (ti + 1) + ' of ' + trancheKeys.length + '. A browser cannot hold a ' +
+            'file this size. Use the pull API, which imports server-side with no such ceiling.');
         budgetBlown = true;
         break;
       }
@@ -826,19 +1105,10 @@
 
     if (budgetBlown) return { snapshot: null, warnings: rollUp(warnings), errors: errors };
 
-    if (trancheKeys.length > 1) {
-      meta.trancheSheets = trancheKeys.slice();
-      warn(trancheKeys.length + ' tranche worksheets read (' + trancheKeys.join(', ') + '). Tranche ids are derived ' +
-           'from the sheet names, so renaming a sheet in a later export will read as a new tranche rather than the ' +
-           'same one — keep the names stable between snapshots.');
-    }
-
-    var components = facilityComponents.concat(trancheComponents);
+    var allComponents = fees.concat(components);
     var cashflows = facilityCashflows.concat(trancheCashflows);
 
-    // A workbook is one point in time. The hash is over content only, so a
-    // re-export of unchanged figures does not read as a new snapshot.
-    var payload = { facility: facility, components: components, tranches: tranches, events: events, cashflows: cashflows };
+    var payload = { facility: facility, components: allComponents, tranches: tranches, events: events, cashflows: cashflows };
     var hash = 'fnv:' + fnv1a(JSON.stringify(payload));
 
     var snapshot = {
@@ -850,21 +1120,25 @@
       externalSystem: 'portf',
       ingestMethod: 'excel',
       sourceFilename: opts.filename || null,
+      templateVersion: 'PCS Loan Import New Deal',
       parseMeta: meta,
       facility: facility,
-      components: components,
+      components: allComponents,
       tranches: tranches,
       events: events,
       cashflows: cashflows
     };
 
-    // Contract §9 cross-reference check.
+    // Cross-reference check: every cashflow must point at something real.
     var known = {};
-    components.forEach(function (c) { known[c.externalComponentId] = true; });
+    allComponents.forEach(function (c) { known[c.externalComponentId] = true; });
+    var unknown = {};
     cashflows.forEach(function (cf) {
-      if (cf.externalComponentId && !known[cf.externalComponentId] && !/-COMBINED-/.test(cf.externalComponentId)) {
-        err('Cashflow row ' + cf.rowNo + ' references unknown component ' + cf.externalComponentId);
-      }
+      if (cf.externalComponentId && !known[cf.externalComponentId]) unknown[cf.externalComponentId] = (unknown[cf.externalComponentId] || 0) + 1;
+    });
+    Object.keys(unknown).forEach(function (id) {
+      warn(unknown[id] + ' cashflow row(s) post against "' + id + '", which is not a declared component ' +
+           'or fee. They import as a balance-basis line and will post, but cannot be reported per component.');
     });
 
     return { snapshot: snapshot, warnings: rollUp(warnings), errors: errors };
@@ -891,7 +1165,7 @@
   var api = {
     parseWorkbook: parseWorkbook,
     parseGrids: parseGrids,
-    _internals: { num: num, iso: iso, freq: freq, mapEnum: mapEnum, slug: slug, fnv1a: fnv1a }
+    _internals: { num: num, iso: iso, norm: norm, slug: slug, readLookups: readLookups, fnv1a: fnv1a }
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

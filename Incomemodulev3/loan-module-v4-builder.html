@@ -1823,6 +1823,10 @@
   <button class="v4-sb-item" onclick="window.openCreditAgreementsListModal && window.openCreditAgreementsListModal()">
     <i class="ti ti-file-certificate" aria-hidden="true"></i>Credit agreements
   </button>
+  <!-- Import external deal deliberately does NOT live here. It creates a deal,
+       so it belongs with the other deal-creation actions in the deal menu
+       (#v4-deal-menu → Actions), beside "Import credit agreement". Tools is for
+       cross-portfolio analysis of deals that already exist. -->
   <button class="v4-sb-item" onclick="window.openManageFundsModal && window.openManageFundsModal()">
     <i class="ti ti-wallet" aria-hidden="true"></i>Manage legal entities
   </button>
@@ -1938,6 +1942,16 @@
           <div style="font-size:10.5px; color:var(--n-500);">AI-extract from PDF</div>
         </div>
       </button>
+      <!-- External deal import. Sits here rather than under Tools because it
+           CREATES a deal, like the four entries above it — Tools is for
+           cross-portfolio analysis of deals that already exist. -->
+      <button class="v4-lm-item" onclick="v4LoadMenuClick('portf')" style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:transparent; border:none; text-align:left; cursor:pointer; font-size:12.5px; color:var(--n-900); font-family:inherit;" onmouseover="this.style.background='var(--n-100)'" onmouseout="this.style.background='transparent'">
+        <i class="ti ti-file-import" aria-hidden="true" style="font-size:17px; color:#4F46E5;"></i>
+        <div style="flex:1;">
+          <div style="font-weight:500;">Import external deal</div>
+          <div style="font-size:10.5px; color:var(--n-500);">PortF workbook · read-only, accounting only</div>
+        </div>
+      </button>
     </div>
   </div>
   <span class="v4-status-chip" id="v4-status-chip" style="display:none;">
@@ -2009,6 +2023,7 @@
     else if(kind === 'manual') { window.handleHeaderManualClick     && window.handleHeaderManualClick(); }
     else if(kind === 'isin')   { window.handleHeaderIsinClick       && window.handleHeaderIsinClick(); }
     else if(kind === 'ca')     { window.openCreditAgreementsListModal && window.openCreditAgreementsListModal(); }
+    else if(kind === 'portf')  { window.openPortfImportModal && window.openPortfImportModal(); }
   };
 
   // Render up to 5 most recent deals from window.PRESETS as quick-pick rows.
@@ -2797,8 +2812,21 @@
           <div><label class="b-label required">Accounting Framework</label>
             <select id="b-framework" class="b-input"><option value="IFRS">IFRS</option><option value="USGAAP">US GAAP (CECL)</option><option value="ASPE">Canadian ASPE</option><option value="AASB">AASB (Australian)</option></select>
           </div>
+          <!-- Signing Date — when the deal was executed. Separate from
+               Settlement Date, which remains the date cash moves, the position
+               opens and interest starts accruing. The two are often weeks
+               apart. Optional: not every deal records it, and nothing in the
+               engine depends on it. -->
+          <div><label class="b-label">Signing Date</label><input id="b-signing" type="date" class="b-input"/>
+            <div id="b-signing-hint" class="text-[10px] text-gray-500 mt-1">Execution date. Interest accrues from Settlement.</div>
+          </div>
           <div><label class="b-label required">Settlement Date</label><input id="b-settle" type="date" class="b-input"/></div>
           <div><label class="b-label required">Maturity Date</label><input id="b-maturity" type="date" class="b-input"/></div>
+          <!-- Agent Name — the facility agent / administrative agent. Populated
+               on most NWF deals, so it sits in the core Deal Setup grid rather
+               than in the syndication panel further down. Column already exists
+               on public.deals as agent_name. -->
+          <div><label class="b-label">Agent Name</label><input id="b-agent-name" type="text" placeholder="e.g. HSBC Bank plc" class="b-input"/></div>
         </div>
       </div>
     </details>
@@ -12137,6 +12165,13 @@ window.SB = (function(){
         framework:         framework,
         settlement_date:   B.deal.settle || stamp.slice(0,10),
         maturity_date:     B.deal.maturity || stamp.slice(0,10),
+        // Signing date is optional and has no fallback: an unstated execution
+        // date must stay null, not silently become today, or it would read as
+        // a fact nobody asserted.
+        signing_date:      B.deal.signingDate || null,
+        // Facility / administrative agent. Blank saves as null rather than ''
+        // so "no agent" and "agent not yet known" read the same downstream.
+        agent_name:        (B.deal.agentName || '').trim() || null,
         participation_pct: B.deal.participationPct != null ? B.deal.participationPct : 100,
         team_id:           teamId,
         is_preset:         false,
@@ -12319,6 +12354,10 @@ window.SB = (function(){
             // NULL = inherit the facility default. Empty string from the
             // <select> must become NULL, not '', or the CHECK rejects it.
             accrual_freq:         ic.accrualFreq || null,
+            // Same NULL-not-empty-string rule as accrual_freq above: the
+            // <select> yields '' for "inherit", and the CHECK rejects ''.
+            settlement_type:      ic.settlementType || null,
+            first_settlement_date: ic.firstSettlementDate || null,
             esg_adjustment_bps:   +ic.esgAdjustmentBps || 0,
             ratchet_kpi:          safeEnum('ratchet_kpi', ic.ratchet && ic.ratchet.kpi),
             // Rate floor / cap in bps — engine reads coupon.floor/cap
@@ -12919,6 +12958,8 @@ window.SB = (function(){
             framework:    row.framework,
             settle:       row.settlement_date,
             maturity:     row.maturity_date,
+            signingDate:  row.signing_date || '',
+            agentName:    row.agent_name || '',
             participationPct: row.participation_pct,
             // ─── Mezz support round-trip: bring construction-finance +
             // arranger + valuation fields back onto B.deal.*.
@@ -12997,6 +13038,8 @@ window.SB = (function(){
               baseIndex:           ic.base_index,
               baseValue:           +ic.base_value || 0,
               accrualFreq:         ic.accrual_freq || '',
+              settlementType:      ic.settlement_type || '',
+              firstSettlementDate: ic.first_settlement_date || '',
               esgAdjustmentBps:    +ic.esg_adjustment_bps || 0,
               floorBps:            +ic.floor_bps || 0,
               capBps:              +ic.cap_bps   || 0,
@@ -14360,15 +14403,38 @@ window.__applyDealStructureVisibility = function(structure){
   }
 };
 
+/* Currency symbols. The old inline expression was `USD ? '$' : EUR ? '€' : '£'`,
+   which silently rendered an AUD or JPY deal in pounds — a wrong currency is
+   indistinguishable from a wrong number to whoever reads the screen. Anything
+   not listed falls back to its ISO code ("SEK 1,200"), which is unambiguous
+   rather than confidently wrong. */
+const CCY_SYMBOL = {
+  USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'CHF ',
+  AUD: 'A$', NZD: 'NZ$', CAD: 'C$', SGD: 'S$', HKD: 'HK$', CNY: '¥', INR: '₹'
+};
+function ccySymbol(ccy){
+  const code = String(ccy || '').toUpperCase();
+  if(!code) return '';                       // unknown — show the bare number
+  return CCY_SYMBOL[code] || (code + ' ');
+}
+/* The active deal's currency, for the many render paths that format a number
+   without being handed one. Reads the builder first, then the live instrument. */
+function activeCcy(){
+  try {
+    if(window.B && window.B.deal && window.B.deal.currency) return window.B.deal.currency;
+    const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    if(inst && inst.currency) return inst.currency;
+  } catch(_){}
+  return '';
+}
 function fmtMoney(n, ccy){
   if(n == null || isNaN(n)) return '—';
-  const sym = ccy === 'USD' ? '$' : ccy === 'EUR' ? '€' : '£';
-  return sym + Math.round(n).toLocaleString('en-GB');
+  return ccySymbol(ccy === undefined ? activeCcy() : ccy) + Math.round(n).toLocaleString('en-GB');
 }
 function fmtMoney2(n, ccy){
   if(n == null || isNaN(n)) return '—';
-  const sym = ccy === 'USD' ? '$' : ccy === 'EUR' ? '€' : '£';
-  return sym + n.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return ccySymbol(ccy === undefined ? activeCcy() : ccy) +
+         n.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 function fmtDate(iso){
   if(!iso) return '—';
@@ -19042,7 +19108,7 @@ function onTier2ProfileChange(){
 function renderTier2StatusChips(inst){
   if(!inst) return;
   const sched = inst.principalSchedule || [];
-  const fmt = a => '$' + (a/1e6).toFixed(2) + 'm';
+  const fmt = a => ccySymbol(inst.currency || activeCcy()) + (a/1e6).toFixed(2) + 'm';
 
   // #13 Loan Sale
   const sale = sched.find(e => e.type === 'loanSale');
@@ -19569,8 +19635,9 @@ function clearTier1Events(eventType){
 function renderTier1StatusChips(inst){
   if(!inst) return;
   const sched = inst.principalSchedule || [];
-  const fmt = a => '$' + (a/1e6).toFixed(2) + 'm';
-  const fmtK = a => '$' + (a/1e3).toFixed(2) + 'k';
+  const _sym = ccySymbol(inst.currency || activeCcy());
+  const fmt  = a => _sym + (a/1e6).toFixed(2) + 'm';
+  const fmtK = a => _sym + (a/1e3).toFixed(2) + 'k';
 
   // #3 Trade accrued interest
   const chip3 = $('t3-status-chip');
@@ -28770,8 +28837,10 @@ function renderAcctTranchesStrip(){
   const tranches = (typeof B !== 'undefined' && Array.isArray(B.tranches)) ? B.tranches : [];
   if(tranches.length <= 1){ host.style.display = 'none'; host.innerHTML = ''; return; }
   host.style.display = 'block';
-  const fmtAud = (window.PCS && PCS.fmtAud) ? PCS.fmtAud
-    : (v => v == null ? '—' : ('$' + Math.round(v).toLocaleString('en-AU')));
+  // Was PCS.fmtAud, which stamps A$ on every deal. The accounting tranche strip
+  // is generic, so it follows the deal currency like the rest of the screen.
+  const _tSym = ccySymbol(activeCcy());
+  const fmtAud = v => v == null ? '—' : (_tSym + Math.round(v).toLocaleString('en-GB'));
   const chips = tranches.map(t => {
     const face = +t.face || 0;
     const draw = +t.drawnInitially || 0;
@@ -33121,12 +33190,13 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
       debtEquitySwap:      { color:'#7C3AED', short:'D-for-E',    pos:'down' },
       participation:       { color:'#9333EA', short:'Part.',      pos:'down' }
     };
-    // Compact money helper: $10.5M, $500k, $1,000.
+    // Compact money helper: £10.5M, £500k, £1,000 — symbol from the deal.
+    const _cSym = ccySymbol(activeCcy());
     const fmtCompact = v => {
       const n = Math.abs(+v || 0);
-      if(n >= 1e6)  return '$' + (v/1e6).toFixed(v % 1e6 === 0 ? 0 : 1).replace(/\.0$/,'') + 'M';
-      if(n >= 1e3)  return '$' + Math.round(v/1e3) + 'k';
-      return '$' + Math.round(v);
+      if(n >= 1e6)  return _cSym + (v/1e6).toFixed(v % 1e6 === 0 ? 0 : 1).replace(/\.0$/,'') + 'M';
+      if(n >= 1e3)  return _cSym + Math.round(v/1e3) + 'k';
+      return _cSym + Math.round(v);
     };
     // ── Build a proper stepped balance polyline from the actual event dates
     // instead of the quarterly-aggregated endBalance. This makes intra-quarter
@@ -34187,6 +34257,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       terms: [ newTerm() ],
       spreads: [ { from:'', to:'', bps: 250, note:'Initial margin' } ],
       ratchet: { kpi:'none', tiers:[] },
+      // Blank means "inherit the tranche default" for both — a new component
+      // should not silently assert a settlement basis nobody chose.
+      settlementType: '',
+      firstSettlementDate: '',
       esgAdjustmentBps: 0,
       // RFR fixings — daily observed benchmark rates. Empty by default; when
       // populated the engine's computeCompoundedRFR consumes them per its
@@ -34490,6 +34564,20 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             ${[['','Facility default'],['weekly','Weekly'],['monthly','Monthly'],['quarterly','Quarterly'],['semi-annual','Semi-annual'],['annual','Annual'],['at-maturity','At maturity']]
               .map(([v,l]) => `<option ${ (ic.accrualFreq || '') === v ? 'selected' : '' } value="${v}">${l}</option>`).join('')}
           </select>
+          <!-- Settlement terms, per component for the same reason accrual is:
+               a tranche can run a cash-settled floating leg beside a fixed leg
+               that capitalises. The tranche-level PIK switch cannot express
+               that split. Blank inherits the tranche default, so existing
+               deals are unaffected. -->
+          <label class="text-[10px] text-gray-600" title="How this component settles. Cash is paid away; Capitalised is added to principal; PIK is paid in kind. Inherits the tranche default when left blank.">Settles</label>
+          <select data-ic-field="settlementType" data-tidx="${tidx}" data-icidx="${ici}" class="border border-gray-300 rounded px-2 py-0.5 text-[11px] bg-white">
+            ${[['','Tranche default'],['cash','Cash'],['capitalised','Capitalised'],['pik','PIK']]
+              .map(([v,l]) => `<option ${ (ic.settlementType || '') === v ? 'selected' : '' } value="${v}">${l}</option>`).join('')}
+          </select>
+          <label class="text-[10px] text-gray-600" title="First date this component settles. Leave blank to derive it from the facility schedule.">First settlement</label>
+          <input data-ic-field="firstSettlementDate" data-tidx="${tidx}" data-icidx="${ici}" type="date"
+                 value="${ic.firstSettlementDate || ''}"
+                 class="border border-gray-300 rounded px-2 py-0.5 text-[11px] bg-white"/>
           <button data-t-action="rmIC" data-tidx="${tidx}" data-icidx="${ici}" class="ml-auto text-red-600 underline text-[10px]">remove</button>
         </div>
         <!-- Terms -->
@@ -36318,8 +36406,29 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.deal.le          = $b('b-le')?.value || '';
     B.deal.currency    = $b('b-currency')?.value || 'USD';
     B.deal.framework   = $b('b-framework')?.value || 'IFRS';
+    B.deal.signingDate = $b('b-signing')?.value || '';
     B.deal.settle      = $b('b-settle')?.value || '';
     B.deal.maturity    = $b('b-maturity')?.value || '';
+    B.deal.agentName   = ($b('b-agent-name')?.value || '').trim();
+
+    // Signing after settlement is almost always a mistyped year, and it would
+    // pass silently — nothing computes on signing date, so nothing else would
+    // ever object. Flagged inline rather than blocking the save, because a
+    // genuine forward-dated execution is unusual but not impossible.
+    (function(){
+      const hint = $b('b-signing-hint');
+      if(!hint) return;
+      const sd = B.deal.signingDate, st = B.deal.settle;
+      if(sd && st && sd > st){
+        hint.textContent = 'Signing is after settlement — check the date.';
+        hint.className = 'text-[10px] mt-1';
+        hint.style.color = '#B45309';
+      } else {
+        hint.textContent = 'Execution date. Interest accrues from Settlement.';
+        hint.className = 'text-[10px] text-gray-500 mt-1';
+        hint.style.color = '';
+      }
+    })();
     // Facility name is optional — blank means "use the deal name" downstream,
     // so store '' rather than falling back here (the fallback belongs at the
     // point of use, not at capture, or an edit to the deal name would stop
@@ -36986,7 +37095,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       position: 'v2 builder · ' + B.deal.name,
       incomeSecurity: B.deal.name,
       counterpartyId: B.deal.counterparty || 'V2', transactionId: id,
-      bilateralFlag: 'Bilateral', agentName: 'Bank',
+      // agentName was hard-coded to 'Bank' before the Deal Setup field existed.
+      // Falls back to that placeholder only when no agent has been entered.
+      bilateralFlag: 'Bilateral', agentName: (B.deal.agentName || '').trim() || 'Bank',
+      // Carried for display and export only. The engine dates everything off
+      // settle — signing must never reach an accrual calculation.
+      signingDate: B.deal.signingDate || null,
       currency: B.deal.currency,
       accountingFramework: B.deal.framework,
       faceValue: totalFace,
@@ -37312,6 +37426,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           .sort((a, b) => a - b)[0];
         if(finest != null && finest >= 0) inst.couponFrequency = _accOrder[finest];
       }
+
+      /* Per-component settlement terms, handed over on the same footing as the
+         accrual map. Carried, not acted on: the engine still settles from the
+         tranche-level PIK switch. Until it is taught to read this, a component
+         set to Capitalised will DISPLAY as capitalising but still be settled
+         however its tranche says — so the map is exposed for the engine work
+         rather than pretended to be live. */
+      const _setMap = [];
+      (B.tranches || []).forEach(t => (t.interestComponents || []).forEach(ic => {
+        if(ic && (ic.settlementType || ic.firstSettlementDate)){
+          _setMap.push({
+            trancheId: t.id, componentId: ic.id, componentName: ic.name,
+            settlementType: ic.settlementType || null,
+            firstSettlementDate: ic.firstSettlementDate || null
+          });
+        }
+      }));
+      if(_setMap.length) inst.componentSettlement = _setMap;
     }
     // Preserve Builder tranches shape (with face + isPikToggle + interestComponents)
     // for the PIK-coupon estimator inside covenantKpiValue. Stored on
@@ -39211,6 +39343,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     $b('b-framework').value     = B.deal.framework;
     $b('b-settle').value        = B.deal.settle;
     $b('b-maturity').value      = B.deal.maturity;
+    var _sg = $b('b-signing');
+    if(_sg) _sg.value = B.deal.signingDate || '';
+    var _ag = $b('b-agent-name');
+    if(_ag) _ag.value = B.deal.agentName || '';
     var _fn = $b('b-facility-name');
     if(_fn) _fn.value = B.facility.name || '';
     $b('b-commitment').value    = B.facility.commitment || '';
@@ -40228,7 +40364,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!$b('builder')){ return; }   // safety — v1 doesn't have this section
     // Wire top-level deal/facility inputs
     ['b-deal-name','b-deal-id','b-counterparty','b-le','b-currency','b-framework',
-     'b-settle','b-maturity','b-facility-name','b-commitment','b-avail-end','b-day-basis','b-holiday',
+     'b-signing','b-settle','b-maturity','b-agent-name',
+     'b-facility-name','b-commitment','b-avail-end','b-day-basis','b-holiday',
      'b-repayment','b-facility-type',
      // Mezz support — new construction/arranger inputs
      'b-structure','b-lender-role','b-senior-provider','b-senior-limit',
@@ -41280,9 +41417,18 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     return out;
   };
 
-  function fmt(n){
-    return (n == null || isNaN(n)) ? '—'
-      : '$' + Math.round(+n).toLocaleString('en-AU');
+  /* Named fmtAud because it was written for the Australian mezz and
+     borrowing-base work, but it is called from ~10 generic places, so it hard-
+     stamped a dollar sign on GBP and EUR deals. It now follows the deal
+     currency. The name is kept — renaming every call site is a bigger change
+     than the bug warrants — but it is no longer AUD-specific.
+     An explicit ccy argument still wins, for the few callers that know better. */
+  function fmt(n, ccy){
+    if(n == null || isNaN(n)) return '—';
+    const sym = (typeof ccySymbol === 'function')
+      ? ccySymbol(ccy || (typeof activeCcy === 'function' ? activeCcy() : ''))
+      : '$';
+    return sym + Math.round(+n).toLocaleString('en-GB');
   }
   PCS.fmtAud = fmt;
 
@@ -42551,7 +42697,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
 
     return res;
 
-    function fmt(n){ return '$' + Math.round(n).toLocaleString('en-AU'); }
+    function fmt(n){ return ccySymbol(activeCcy()) + Math.round(n).toLocaleString('en-GB'); }
   };
 })();
 </script>
@@ -42571,7 +42717,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   let _bbCertificates = [];
 
   // Helpers
-  const fmt = n => (n == null || isNaN(n)) ? '—' : '$' + Math.round(+n).toLocaleString('en-AU');
+  const fmt = n => (n == null || isNaN(n)) ? '—' : ccySymbol(activeCcy()) + Math.round(+n).toLocaleString('en-GB');
   const escape = s => (s == null ? '' : String(s).replace(/"/g,'&quot;'));
 
   // Which deals should appear in the picker? Any deal whose facility.type is
@@ -43006,7 +43152,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       '</div>';
   };
 
-  function _fmt(n){ return (n == null || isNaN(n)) ? '—' : '$' + Math.round(+n).toLocaleString('en-AU'); }
+  function _fmt(n){ return (n == null || isNaN(n)) ? '—' : ccySymbol(activeCcy()) + Math.round(+n).toLocaleString('en-GB'); }
 })();
 </script>
 
@@ -45507,7 +45653,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     tabl.style.display = 'table';
     empt.style.display = 'none';
-    const fmtAmt = v => (v == null || !+v) ? '—' : ('$' + Math.round(+v).toLocaleString('en-US'));
+    // Was hard-coded to '$' and en-US, so every deal read as dollars whatever
+    // its currency. Resolved once per render from the deal, not per row.
+    const _ccy = (B_ && B_.deal && B_.deal.currency) || activeCcy();
+    const fmtAmt = v => (v == null || !+v) ? '—' : (ccySymbol(_ccy) + Math.round(+v).toLocaleString('en-GB'));
     const typeColor = t => t === 'Credit' ? '#4338CA' : (t === 'Debit' ? '#B45309' : '#6B7280');
     const statusPill = s => {
       const map = {
@@ -46278,7 +46427,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
 (function(){
   const $ = id => document.getElementById(id);
   const esc = s => (s == null ? '' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
-  const fmt$ = n => (n == null || isNaN(n)) ? '—' : (n < 0 ? '−' : '') + '$' + Math.abs(Math.round(+n)).toLocaleString('en-AU');
+  const fmt$ = n => (n == null || isNaN(n)) ? '—' : (n < 0 ? '−' : '') + ccySymbol(activeCcy()) + Math.abs(Math.round(+n)).toLocaleString('en-GB');
   const fmtD = d => d ? new Date(d).toISOString().slice(0,10) : '—';
 
   // Curated event-type list — dropdown labels + implied sign for the amount.
@@ -46496,7 +46645,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
 <script>
 (function(){
   const escape = s => (s == null ? '' : String(s).replace(/"/g,'&quot;'));
-  const fmt    = n => (n == null || isNaN(n)) ? '—' : '$' + Math.round(+n).toLocaleString('en-AU');
+  const fmt    = n => (n == null || isNaN(n)) ? '—' : ccySymbol(activeCcy()) + Math.round(+n).toLocaleString('en-GB');
 
   // Resolve the active deal's UUID via the same 4-tier lookup used elsewhere.
   function _dealUuid(){
