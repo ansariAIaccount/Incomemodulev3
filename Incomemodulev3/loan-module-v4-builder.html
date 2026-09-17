@@ -8690,6 +8690,35 @@ window.SB = (function(){
   // the Supabase client and leaves the session permanently broken. Any code
   // doing a bulk write wraps it in SB.withHeavyWrite() to pause health checks.
   let _heavyWriteDepth = 0;
+  // A bulk write releases the pool gradually — the last inserts are still
+  // draining server-side when depth hits 0, so a read that started just before
+  // the end can still time out because of it. This grace window keeps those
+  // from being blamed on the connection.
+  let _lastHeavyWriteEndedAt = 0;
+  const HEAVY_WRITE_GRACE_MS = 5000;
+  // How long a read will wait for a bulk write to finish before going anyway.
+  // Capped: waiting forever would turn a stuck write into a frozen UI.
+  const HEAVY_WRITE_WAIT_MS = 12000;
+
+  /* Reads call this first. PCS Sync already did exactly this (it was the fix
+     for the same problem in one place); every read now gets it, because
+     queueing behind a bulk write costs a second or two while racing it costs
+     the read's whole timeout budget and a false strike against the session. */
+  async function _awaitHeavyWrite(label){
+    if(_heavyWriteDepth <= 0) return;
+    const started = Date.now();
+    console.log('[SB] ' + label + ' waiting for bulk write to finish (depth ' + _heavyWriteDepth + ')');
+    while(_heavyWriteDepth > 0 && (Date.now() - started) < HEAVY_WRITE_WAIT_MS){
+      await new Promise(r => setTimeout(r, 150));
+    }
+    const waited = Date.now() - started;
+    if(_heavyWriteDepth > 0){
+      console.warn('[SB] ' + label + ' waited ' + Math.round(waited/1000) + 's and the bulk write is ' +
+        'still running — proceeding anyway rather than blocking the UI.');
+    } else {
+      console.log('[SB] ' + label + ' resumed after ' + Math.round(waited/1000) + 's');
+    }
+  }
 
   function updateStatusChip(){
     const chip = document.getElementById('sb-status-chip');
@@ -9608,6 +9637,12 @@ window.SB = (function(){
   // rejected at 8s and never learned whether the request completed at 8.5s —
   // so "hung" and "slow" were indistinguishable, and every diagnosis of this
   // bug was guesswork. Now a late completion is logged explicitly.
+  /* NOTE ON ORDERING: the wait for a bulk write happens in _dbRead below, not
+     here. By the time _withDbTimeout is called the caller has already built
+     the PostgREST promise, so the request is in flight and the clock is
+     running — waiting at this point would burn the budget it is meant to
+     protect. Anything that wants the queueing behaviour must go through
+     _dbRead. This wrapper only classifies the outcome. */
   function _withDbTimeout(label, promise, ms, opts){
     ms = ms || DB_CALL_BUDGET_MS;
     const critical = !(opts && opts.critical === false);
@@ -9637,7 +9672,18 @@ window.SB = (function(){
       .then(v => { _recordDbSuccess(); return v; })
       .catch(err => {
         if(/timed out/i.test(err && err.message || '')){
-          if(critical) _recordDbTimeout(label);
+          // A read that times out WHILE WE ARE DELIBERATELY SATURATING THE POOL
+          // ourselves is not evidence of a dead connection — it is evidence of
+          // a busy one, which is the expected cost of a bulk write. Counting it
+          // was how a successful 448-row accounting run could push the 3-strike
+          // counter to a forced reconnect and break the session it had just
+          // written through. Self-inflicted slowness never condemns the link.
+          if(_heavyWriteDepth > 0 || (Date.now() - _lastHeavyWriteEndedAt) < HEAVY_WRITE_GRACE_MS){
+            console.warn('[SB] ' + label + ' timed out after ' + Math.round(ms/1000) +
+              's during a bulk write — not counted against connection health ' +
+              '(depth=' + _heavyWriteDepth + ').');
+          }
+          else if(critical) _recordDbTimeout(label);
           else console.warn('[SB] ' + label + ' timed out after ' + Math.round(ms/1000) +
             's — not counted against connection health (non-critical read)');
         }
@@ -9677,6 +9723,8 @@ window.SB = (function(){
   // worth maintaining alongside schema changes.
   async function fetchNotices(dealIds){
     if(!_client || !_connected || _authKicked) return [];
+    // Queue behind any bulk write rather than racing it — see _awaitHeavyWrite.
+    await _awaitHeavyWrite('fetchNotices');
     const dedupeKey = 'fetchNotices:' + (Array.isArray(dealIds) && dealIds.length ? dealIds.slice().sort().join(',') : 'ALL');
     return _dedupe(dedupeKey, async () => {
       const _run = async () => {
@@ -10144,6 +10192,7 @@ window.SB = (function(){
   // ═══════════════════════════════════════════════════════════════════
   async function listFixings(rfrIndex, fromDate, toDate){
     if(!_client || !_connected || !rfrIndex) return [];
+    await _awaitHeavyWrite('listFixings');
     try {
       let q = _client.from('rfr_index_fixings')
         .select('id, rfr_index, fix_date, rate, source, imported_at')
@@ -12912,6 +12961,7 @@ window.SB = (function(){
     return _dedupe('fetchUserDeals', () => _fetchUserDealsImpl());
   }
   async function _fetchUserDealsImpl(){
+    await _awaitHeavyWrite('fetchUserDeals');
     try {
       const q = _client
         .from('deals')
@@ -13320,6 +13370,11 @@ window.SB = (function(){
         return {
           key:         'db-' + row.deal_code,
           label:       row.name,
+          // Externally-calculated deals have no rows in tranches/fees/etc —
+          // their data lives in external_snapshots. Flagged here so the loader
+          // routes them to loadExternalDeal instead of building an empty shell.
+          isExternal:  row.source === 'external',
+          externalSystem: row.external_system || null,
           team:        row.team_id ? 'DB-Saved' : 'DB-Saved',
           tag:         'Saved (DB)',
           complexity:  row.complexity || 3,
@@ -13688,6 +13743,7 @@ window.SB = (function(){
         return await fn();
       } finally {
         _heavyWriteDepth = Math.max(0, _heavyWriteDepth - 1);
+        if(_heavyWriteDepth === 0) _lastHeavyWriteEndedAt = Date.now();
         console.log('[SB] heavy-write END · ' + label + ' (depth ' + _heavyWriteDepth + ')');
         // Reset the fail streak — any ping failures recorded while a bulk
         // write held the pool were false positives.
@@ -21539,6 +21595,26 @@ function closeActiveDealModal(){
 // load + auto-accounting + chip-refresh path.
 function loadActiveDealByKey(key){
   console.log('[V3] loadActiveDealByKey:', key);
+  /* External deals do not live in the relational tables, so the DB path below
+     would load a shell with no tranches or fees — which is exactly what it did
+     before this branch existed. Route them to the snapshot loader instead. */
+  const _extCand = (window.PRESETS || []).find(p => p && p.key === key && p.isExternal);
+  if(_extCand && _extCand.dealId && typeof window.loadExternalDeal === 'function'){
+    console.log('[V3] external deal — loading from snapshot:', _extCand.dealId);
+    window.loadExternalDeal(_extCand.dealId)
+      .then(() => {
+        if(typeof closeActiveDealModal === 'function') closeActiveDealModal();
+        if(typeof window.registerBuilderInstrument === 'function'){
+          try { window.registerBuilderInstrument(); } catch(e){ console.warn('[V3] registerBuilderInstrument threw:', e); }
+        }
+        if(typeof refreshActiveDealChip === 'function') refreshActiveDealChip();
+      })
+      .catch(e => {
+        console.error('[V3] external deal load failed:', e);
+        if(typeof toast === 'function') toast('Could not load external deal: ' + (e.message || e));
+      });
+    return;
+  }
   // V3 — DB-saved deals (key prefix 'db-') get loaded directly via
   // window.loadPresetByObject. This bypasses the sel-instrument dispatch which
   // historically routes through the IIFE's inner loadPresetByKey that can't
@@ -22090,11 +22166,28 @@ window.__portfImportCommit = async function(){
     go.style.display = 'none';
     document.getElementById('portf-import-done-msg').textContent =
       (out.created ? 'Created ' : 'Updated ') + (S.snapshot.facility.company || S.snapshot.externalDealId);
+    const _snap = S.snapshot;
     document.getElementById('portf-import-done-sub').innerHTML =
-      `${out.cashflowRows.toLocaleString()} cashflow rows stored` +
+      `${_snap.tranches.length} tranche${_snap.tranches.length===1?'':'s'} · ` +
+      `${_snap.components.length} components · ${out.cashflowRows.toLocaleString()} cashflow rows` +
       (out.changes ? ` · ${out.changes} change${out.changes===1?'':'s'} against the previous snapshot` : '') +
       (out.postedAffected ? `<br><b style="color:#B45309;">${out.postedAffected} restated period(s) have already been posted to Investran — review before re-running accounting.</b>` : '') +
-      `<br>The deal is read-only in the module. Run accounting from the Accounting tab.`;
+      `<br>Opening it in the Loan Builder…`;
+
+    // Open it straight away. Importing and then leaving the user to hunt for
+    // the deal is how the last round ended with an apparently empty shell.
+    try {
+      await window.loadExternalDeal(out.dealId);
+      document.getElementById('portf-import-done-sub').innerHTML =
+        `${_snap.tranches.length} tranche${_snap.tranches.length===1?'':'s'} · ` +
+        `${_snap.components.length} components · ${out.cashflowRows.toLocaleString()} cashflow rows imported.` +
+        `<br>Loaded into the Loan Builder, read-only. Close this to review it.`;
+    } catch(e){
+      console.error('[portf] import succeeded but load failed', e);
+      document.getElementById('portf-import-done-sub').innerHTML =
+        `Imported, but could not open it automatically: ${e.message || e}` +
+        `<br>The data is saved — pick the deal from the deal menu.`;
+    }
     foot.textContent = 'Done.';
     // Refresh the deal library so the new external deal is pickable without
     // a reload. Best-effort — a failure here must not read as a failed import.
@@ -22103,6 +22196,508 @@ window.__portfImportCommit = async function(){
     console.error('[portf] import failed', e);
     foot.textContent = 'Import failed: ' + (e.message || e);
     go.disabled = false;
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   External snapshot → Builder shape
+   ───────────────────────────────────────────────────────────────────────────
+   Piece 4. An external deal is NOT copied into the relational tables — that
+   would make a second master that can drift from the snapshot. Instead the
+   snapshot is mapped to the object `loadPresetByObject` already expects, so
+   Deal Setup, Tranches and Fees render through the same path DB deals use and
+   `external_snapshots` stays the only source of truth.
+
+   The two shapes differ in one structural way worth stating: a snapshot lists
+   components flat, each naming its tranche; the Builder nests them inside
+   their tranche. So this regroups rather than merely renames.
+
+   Cashflows are deliberately NOT mapped. PortF's schedule is given, not
+   computed, and feeding it through the Builder's tranche/drawdown model would
+   make the engine recompute it — putting our arithmetic on screen while
+   claiming to show theirs. The Cashflow tab reads external_cashflows directly.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Snapshot vocabulary → the values the Builder's <select>s actually carry.
+// Anything unmapped falls through to a sane default rather than writing a
+// value no dropdown can display.
+const _EXT_DAYBASIS  = { 'ACT/360':'ACT/360', 'ACT/365':'ACT/365', 'ACT/ACT':'ACT/ACT',
+                         '30/360':'30/360', '30E/360':'30E/360' };
+const _EXT_HOLIDAY   = { 'none':'none', 'us federal':'usFederal', 'uk bank':'ukBank',
+                         'target (eur)':'target', 'australian notional':'auFederal' };
+const _EXT_REPAYMENT = { 'bullet at maturity':'AtMaturity', 'periodic (amortising)':'Periodic' };
+const _EXT_FACTYPE   = { 'term loan':'termLoan', 'revolving credit facility':'revolver',
+                         'delayed-draw term loan':'delayedDraw',
+                         'revolving borrowing base (livestock/ commodities)':'revolvingBorrowingBase',
+                         'revolving borrowing base (livestock/commodities)':'revolvingBorrowingBase' };
+const _EXT_ACCRUAL   = { 'weekly':'weekly', 'monthly':'monthly', 'quarterly':'quarterly',
+                         'semiAnnual':'semi-annual', 'annual':'annual', 'atMaturity':'at-maturity' };
+const _EXT_FEEFREQ   = { 'oneOff':'oneOff', 'monthly':'monthly', 'quarterly':'quarterly',
+                         'semiAnnual':'semi', 'annual':'annual', 'atMaturity':'oneOff' };
+const _EXT_FEEBASE   = { 'commitment':'commitment', 'principalBalance':'funded',
+                         'unfundedBalance':'unfunded', 'faceValue':'tranche-face' };
+const _EXT_SETTLE    = { 'cash':'cash', 'capitalised':'capitalised', 'pik':'pik' };
+/* deals.deal_structure and deals.framework store codes, not the Lookup values
+   wording. The importer wrote neither until 2026-09, so an imported deal showed
+   a blank counterparty and agent everywhere that reads the deals row — the deal
+   picker, Portfolio, the DIU push and the regulatory filters — while the Builder
+   looked complete, because the Builder reads the snapshot JSON instead. */
+const _EXT_STRUCTURE = { 'corporate term loan':'corporate_term',
+                         'construction/mezzanine finance':'construction_mezz',
+                         'construction/mezzanine fin':'construction_mezz',
+                         'revolving borrowing base':'revolving_borrowing_base',
+                         'bilateral facility':'bilateral', 'other':'other' };
+const _EXT_FRAMEWORK = { 'ifrs':'IFRS', 'us gaap (cecl)':'USGAAP', 'us gaap':'USGAAP',
+                         'canadian aspe':'ASPE', 'aspe':'ASPE',
+                         'aasb (australian)':'AASB', 'aasb':'AASB' };
+
+function _extPick(map, v, fallback){
+  if(v === null || v === undefined || v === '') return fallback;
+  const hit = map[v] !== undefined ? map[v] : map[String(v).toLowerCase()];
+  return hit === undefined ? fallback : hit;
+}
+
+window.externalSnapshotToBuilder = function(snap){
+  if(!snap) return null;
+  const f = snap.facility || {};
+  const comps = snap.components || [];
+
+  const deal = {
+    name:        f.company || snap.externalDealId,
+    dealId:      snap.externalDealId,
+    counterparty: f.counterparty || '',
+    le:          '',
+    currency:    f.currency || 'GBP',
+    framework:   (f.accountingFramework || '').indexOf('US GAAP') === 0 ? 'USGAAP'
+               : /ASPE/i.test(f.accountingFramework || '') ? 'ASPE'
+               : /AASB/i.test(f.accountingFramework || '') ? 'AASB' : 'IFRS',
+    settle:      f.loanStartDate || '',
+    maturity:    f.loanEndDate || '',
+    signingDate: f.signingDate || '',
+    agentName:   f.agentName || '',
+    structure:   f.dealStructure || '',
+    participationPct: 100,
+    // The flag every read-only gate keys off.
+    source:      'external',
+    externalSystem: snap.externalSystem || 'portf',
+    externalSnapshotId: snap.snapshotId || null
+  };
+
+  const facility = {
+    name:       f.facilityName || '',
+    commitment: +f.committedAmount || 0,
+    availEnd:   f.availabilityEnd || '',
+    dayBasis:   _extPick(_EXT_DAYBASIS,  f.dayCountConvention, 'ACT/365'),
+    holiday:    _extPick(_EXT_HOLIDAY,   f.holidayCalendar, 'none'),
+    repayment:  _extPick(_EXT_REPAYMENT, f.repaymentType, 'AtMaturity'),
+    type:       _extPick(_EXT_FACTYPE,   f.facilityType, 'termLoan'),
+    interestAccrualFreq: _extPick(_EXT_ACCRUAL, f.interestAccrualPeriod, 'monthly')
+  };
+
+  // Events, grouped by tranche, so each tranche gets its own draws/repayments
+  // rather than the deal's combined list.
+  const evByTranche = {};
+  (snap.events || []).forEach(e => {
+    const k = e.externalTrancheId || '(facility)';
+    (evByTranche[k] = evByTranche[k] || []).push(e);
+  });
+
+  const tranches = (snap.tranches || []).map(t => {
+    const mine = comps.filter(c => c.scope === 'tranche' && c.externalTrancheId === t.externalTrancheId);
+    const ev   = evByTranche[t.externalTrancheId] || [];
+
+    const interestComponents = mine.filter(c => c.postingType === 'interest').map(c => ({
+      id: c.externalComponentId,
+      name: c.name,
+      baseIndex: c.index || (c.rateStructure === 'fixed' ? 'FIXED' : 'SOFR'),
+      baseValue: c.rate == null ? 0 : +c.rate,
+      terms: [{
+        tenor: c.terms || '3M',
+        lookbackDays: c.lookbackDays == null ? 0 : +c.lookbackDays,
+        observationShift: c.observationShift == null ? 0 : +c.observationShift,
+        lockoutDays: c.lockoutDays == null ? 0 : +c.lockoutDays,
+        dailyCompounding: true, weighted: false
+      }],
+      // PortF sends an all-in rate, not base + margin. Emitting a zero-bps
+      // band keeps the Builder's spread model satisfied without inventing a
+      // margin the workbook never stated.
+      spreads: [{ from: c.spreadBandStart || '', to: c.spreadBandEnd || '', bps: 0,
+                  note: 'All-in rate supplied by PortF' }],
+      ratchet: { kpi: 'none', tiers: [] },
+      accrualFreq: _extPick(_EXT_ACCRUAL, c.accrualFrequency, ''),
+      settlementType: _extPick(_EXT_SETTLE, c.settlementType, ''),
+      firstSettlementDate: c.firstSettlementDate || '',
+      esgAdjustmentBps: +c.esgAdjustmentBps || 0,
+      floorBps: +c.floorBps || 0,
+      capBps: +c.capBps || 0,
+      rfrFixings: []
+    }));
+
+    /* The initial draw's DATE comes from the initialPurchase event, not from
+       the tranche's commitment row. They are different dates — the commitment
+       is effective from the facility start, the money moves later (2025-11-04
+       vs 2026-07-31 in the sample) — and using the wrong one would date the
+       first accrual period from a day nothing was drawn. */
+    const initEv = ev.filter(e => e.eventType === 'initialPurchase')
+                     .sort((a, b) => (a.eventDate < b.eventDate ? -1 : 1))[0];
+
+    return {
+      id: t.externalTrancheId,
+      name: t.name,
+      currency: t.currency || deal.currency,
+      face: +t.commitment || 0,
+      drawnInitially: initEv ? (+initEv.amount || 0) : (+t.initialDrawdown || 0),
+      drawnInitiallyDate: (initEv && initEv.eventDate) || t.startDate || '',
+      drawdowns:  ev.filter(e => e.eventType === 'drawdown')
+                    .map(e => ({ date: e.eventDate, amount: +e.amount || 0, reason: 'PortF drawdown' })),
+      repayments: ev.filter(e => e.eventType === 'principalPayment')
+                    .map(e => ({ date: e.eventDate, amount: +e.amount || 0, kind: 'scheduled' })),
+      interestComponents: interestComponents.length ? interestComponents : []
+    };
+  });
+
+  // Fees — facility-level and tranche-level both land in B.fees, which is how
+  // the Builder models them; the tranche link is carried on trancheId.
+  const fees = comps.filter(c => c.postingType === 'fee').map(c => ({
+    id: c.externalComponentId,
+    label: c.name,
+    kind: c.feeType || 'other',
+    mode: 'fixPct',
+    pct: c.rate == null ? 0 : +c.rate,
+    bps: 0,
+    flatAmount: 0,
+    base: _extPick(_EXT_FEEBASE, c.calculationBasis, 'commitment'),
+    linkedComponentId: '',
+    frequency: _extPick(_EXT_FEEFREQ, c.settlementFrequency, 'oneOff'),
+    paymentDate: c.firstSettlementDate || '',
+    accrueFrom: '', accrueTo: '',
+    ifrs: /IFRS 9/i.test(c.revenueTreatment || '') ? 'IFRS9-EIR'
+        : /over time/i.test(c.revenueTreatment || '') ? 'IFRS15-overTime'
+        : 'IFRS15-pointInTime',
+    trancheId: c.externalTrancheId || ''
+  }));
+
+  return { deal, facility, tranches, fees };
+};
+
+/* Load an external deal into the Builder. Reads the current snapshot, maps it,
+   and hands it to the same loader DB deals use. */
+window.loadExternalDeal = async function(dealId){
+  if(!window.SB || !SB.isConnected) throw new Error('Not connected to the database');
+  const sb = SB.client;
+  const { data: snapRow, error } = await sb.from('external_snapshots')
+    .select('id, snapshot_id, external_deal_id, facility_jsonb, components_jsonb, tranches_jsonb, events_jsonb, received_at')
+    .eq('deal_id', dealId).eq('is_current', true).maybeSingle();
+  if(error) throw error;
+  if(!snapRow) throw new Error('No current snapshot for this deal — re-import the workbook.');
+
+  const snap = {
+    snapshotId: snapRow.snapshot_id,
+    externalDealId: snapRow.external_deal_id,
+    externalSystem: 'portf',
+    facility:   snapRow.facility_jsonb   || {},
+    components: snapRow.components_jsonb || [],
+    tranches:   snapRow.tranches_jsonb   || [],
+    events:     snapRow.events_jsonb     || []
+  };
+
+  const built = window.externalSnapshotToBuilder(snap);
+  if(!built) throw new Error('Snapshot could not be mapped');
+
+  /* Pull the received schedule now rather than on first render, so the
+     Cashflow tab never has to show a spinner mid-review. Capped: a 50-tranche
+     daily deal runs to millions of rows and the tab is for inspection, not
+     bulk export — the cap is reported rather than silently truncating. */
+  const CF_VIEW_CAP = 20000;
+  /* PostgREST enforces its own max-rows ceiling (1,000 on this project) and
+     silently returns a short page — .limit() above that is ignored, not
+     honoured. Asking for 20,001 rows therefore yielded 1,000 with no error
+     and no truncation flag, so the totals and per-tranche counts below were
+     computed on a partial schedule and shown as if complete. Page explicitly
+     with .range() and let the row count, not the limit, say when we are done. */
+  const CF_PAGE = 1000;
+  const rows = [];
+  let cfErr = null, truncated = false;
+  for(let from = 0; from <= CF_VIEW_CAP; from += CF_PAGE){
+    const to = Math.min(from + CF_PAGE - 1, CF_VIEW_CAP); // one past the cap proves truncation
+    const { data: page, error } = await sb.from('external_cashflows')
+      .select('flow_date, external_tranche_id, external_component_id, drawdown_lot_id, ' +
+              'posting_type, settlement_type, balance_basis, is_flat, ' +
+              'days_covered, basis_balance, rate, amount, cash_settled')
+      .eq('deal_id', dealId)
+      /* Scope to the snapshot we just read, not to the deal. Re-importing a
+         workbook writes a second set of rows and marks the older snapshot
+         is_current = false, but the old rows stay for history — so a fetch by
+         deal_id alone returns both generations. Suffolk, imported twice,
+         returned 726 + 646 rows and the tab totalled the arrangement fee
+         twice. The terms come from one snapshot; the schedule must too. */
+      .eq('snapshot_id', snapRow.id)
+      .order('flow_date', { ascending: true })
+      .order('id', { ascending: true })          // stable tie-break; page boundaries land mid-date
+      .range(from, to);
+    if(error){ cfErr = error; break; }
+    const got = page || [];
+    rows.push(...got);
+    if(got.length < (to - from + 1)) break;       // short page = end of data
+    if(rows.length > CF_VIEW_CAP){ truncated = true; rows.length = CF_VIEW_CAP; break; }
+  }
+  if(cfErr) console.warn('[ext] cashflow load failed:', cfErr);
+  /* A failure partway through leaves a partial schedule that looks whole.
+     Say so rather than letting the tab total a fragment. */
+  const cfLoadError = cfErr ? (cfErr.message || String(cfErr)) : null;
+
+  window._externalDealCtx = {
+    dealId: dealId,
+    snapshotRowId: snapRow.id,
+    snapshotId: snapRow.snapshot_id,
+    receivedAt: snapRow.received_at,
+    cashflows: rows,
+    cashflowsTruncated: truncated,
+    cashflowCap: CF_VIEW_CAP,
+    cashflowLoadError: cfLoadError,
+    // Component and tranche names, so the table can show "Monthly SONIA"
+    // rather than an opaque id.
+    componentNames: (snap.components || []).reduce((m, c) => { m[c.externalComponentId] = c.name; return m; }, {}),
+    trancheNames:   (snap.tranches   || []).reduce((m, t) => { m[t.externalTrancheId]   = t.name; return m; }, {})
+  };
+
+  window.loadPresetByObject({
+    key: 'ext-' + snapRow.external_deal_id,
+    label: built.deal.name,
+    participationPct: 100,
+    build: () => built
+  });
+
+  window.__applyExternalReadOnly();
+  return built;
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Received cashflow view
+   ───────────────────────────────────────────────────────────────────────────
+   Renders the schedule PortF sent, verbatim. Nothing here is computed: the
+   rate, the amount and the balance are theirs. The only inferred column is
+   days covered, which the workbook does not state — it is marked as inferred
+   so it is never mistaken for something they asserted.
+
+   A comparison against our own engine is deliberately NOT here yet. For this
+   deal we hold no SONIA fixings and no fee base, so most rows are not
+   recomputable, and a diff would present our missing inputs as their errors.
+   ═══════════════════════════════════════════════════════════════════════════ */
+window.__extCfFilter = 'all';
+
+window.__renderExternalCashflows = function(host, chip, kpis, status){
+  const ctx = window._externalDealCtx || {};
+  const all = ctx.cashflows || [];
+  const ccy = (window.B && B.deal && B.deal.currency) || '';
+  const sym = (typeof ccySymbol === 'function') ? ccySymbol(ccy) : '';
+  const esc = t => String(t == null ? '' : t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const money = v => (v == null || v === '') ? '—'
+    : sym + Number(v).toLocaleString('en-GB', { maximumFractionDigits: 2 });
+
+  if(!all.length){
+    host.innerHTML =
+      '<div class="v4-empty" style="padding:36px 20px;">' +
+        '<i class="ti ti-file-off" style="font-size:26px; color:var(--n-400);"></i>' +
+        '<div style="margin-top:8px; font-weight:600; color:var(--n-700);">No cashflows received</div>' +
+        '<div style="font-size:11.5px; color:var(--n-500); margin-top:4px;">' +
+          'This deal was imported without a cashflow schedule. Re-import the workbook, or ask ' +
+          ((window.B && B.deal && B.deal.externalSystem) || 'PortF') + ' to include one.</div>' +
+      '</div>';
+    if(chip) chip.textContent = '0 rows';
+    if(status){ status.textContent = 'No received cashflows'; status.className = 'chip gray self-center'; }
+    return;
+  }
+
+  // Tranche filter strip. Facility-level rows are their own bucket — they are
+  // not "unassigned", they belong to the facility.
+  const tranches = [];
+  all.forEach(r => {
+    const k = r.external_tranche_id || '(facility)';
+    if(tranches.indexOf(k) === -1) tranches.push(k);
+  });
+  const f = window.__extCfFilter;
+  const rows = (f === 'all') ? all : all.filter(r => (r.external_tranche_id || '(facility)') === f);
+
+  /* Totals split the way the ledger needs them: interest and fees separately,
+     and within each, paid versus capitalised. A single "interest" total would
+     hide the fact that PIK never touches cash. */
+  const tot = { interestCash:0, interestPik:0, feeCash:0, feePik:0, cashSettled:0 };
+  rows.forEach(r => {
+    const amt = +r.amount || 0;
+    const pik = (r.settlement_type === 'pik' || r.settlement_type === 'capitalised');
+    if(r.posting_type === 'interest')  tot[pik ? 'interestPik' : 'interestCash'] += amt;
+    else if(r.posting_type === 'fee')  tot[pik ? 'feePik' : 'feeCash'] += amt;
+    tot.cashSettled += (+r.cash_settled || 0);
+  });
+
+  const tabBtn = (key, label, n) =>
+    '<button type="button" onclick="window.__extCfSetFilter(\'' + esc(key).replace(/'/g,"\\'") + '\')" ' +
+    'style="padding:3px 9px; border-radius:5px; border:0; cursor:pointer; font-size:10.5px; font-weight:600; ' +
+    (f === key ? 'background:var(--brand-600,#4F46E5); color:#fff;' : 'background:transparent; color:var(--n-600);') +
+    '">' + esc(label) + ' <span style="opacity:.7;">' + n + '</span></button>';
+
+  let strip = tabBtn('all', 'All', all.length);
+  tranches.forEach(k => {
+    const label = k === '(facility)' ? 'Facility' : (ctx.trancheNames[k] || k);
+    strip += tabBtn(k, label, all.filter(r => (r.external_tranche_id || '(facility)') === k).length);
+  });
+
+  const th = (t, right) => '<th style="padding:6px 8px; text-align:' + (right ? 'right' : 'left') +
+    '; border-bottom:1px solid var(--n-200); position:sticky; top:0; background:var(--n-50,#FAFAFA); ' +
+    'font-size:9.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--n-500);">' + t + '</th>';
+  const td = (t, right) => '<td style="padding:5px 8px; border-bottom:0.5px solid var(--n-100);' +
+    (right ? ' text-align:right; font-variant-numeric:tabular-nums;' : '') + '">' + t + '</td>';
+
+  const VIEW_ROWS = 400;
+  const shown = rows.slice(0, VIEW_ROWS);
+
+  let html =
+    '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">' +
+      '<div style="display:inline-flex; gap:2px; padding:2px; background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:6px;">' + strip + '</div>' +
+      '<span style="margin-left:auto; font-size:10.5px; color:var(--n-500);">' +
+        'Received from ' + esc((window.B && B.deal && B.deal.externalSystem) || 'PortF') +
+        ' · snapshot ' + esc(ctx.snapshotId || '—') + '</span>' +
+    '</div>' +
+    '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">' +
+      '<span class="chip blue"   style="font-size:10.5px;" title="Interest settled in cash">Interest · cash ' + money(tot.interestCash) + '</span>' +
+      (tot.interestPik ? '<span class="chip amber" style="font-size:10.5px;" title="Interest capitalised or paid in kind — never touches cash">Interest · PIK ' + money(tot.interestPik) + '</span>' : '') +
+      '<span class="chip purple" style="font-size:10.5px;">Fees · cash ' + money(tot.feeCash) + '</span>' +
+      (tot.feePik ? '<span class="chip amber" style="font-size:10.5px;">Fees · PIK ' + money(tot.feePik) + '</span>' : '') +
+      '<span class="chip green"  style="font-size:10.5px;">Cash settled ' + money(tot.cashSettled) + '</span>' +
+    '</div>';
+
+  /* A partial load makes every total above a lie by omission. Red, not amber:
+     the numbers on screen are wrong, not merely incomplete. */
+  if(ctx.cashflowLoadError){
+    html += '<div style="margin-bottom:8px; padding:8px 12px; background:#FEF2F2; border:1px solid #FCA5A5; ' +
+      'border-radius:6px; font-size:11px; color:#991B1B;"><b>Schedule only partly loaded</b> — the totals and ' +
+      'row counts above cover the ' + (ctx.cashflows || []).length.toLocaleString() + ' rows that arrived, not the ' +
+      'whole schedule. Reload the deal before relying on them. (' + esc(ctx.cashflowLoadError) + ')</div>';
+  }
+
+  if(ctx.cashflowsTruncated){
+    html += '<div style="margin-bottom:8px; padding:8px 12px; background:#FFF8E6; border:1px solid #FCD34D; ' +
+      'border-radius:6px; font-size:11px; color:#92400E;">Showing the first ' +
+      ctx.cashflowCap.toLocaleString() + ' rows of a larger schedule. The full set is stored and posts in ' +
+      'full — this table is capped for display only.</div>';
+  }
+
+  html += '<div style="max-height:56vh; overflow:auto; border:0.5px solid var(--n-200); border-radius:8px;">' +
+    '<table style="width:100%; border-collapse:collapse; font-size:11px;"><thead><tr>' +
+      th('Date') + th('Days') + th('Tranche') + th('Component') + th('Posts as') + th('Settles') + th('Basis') +
+      th('Basis balance', true) + th('Rate', true) + th('Amount', true) + th('Cash settled', true) +
+    '</tr></thead><tbody>';
+
+  const BASIS_LABEL = {
+    principalBalance:'Principal', unfundedBalance:'Unfunded',
+    principalPlusCapitalised:'Principal + cap.', unfundedNetOfCapitalisations:'Unfunded net',
+    commitment:'Commitment', faceValue:'Face'
+  };
+
+  shown.forEach(r => {
+    const comp = ctx.componentNames[r.external_component_id] || r.external_component_id || '—';
+    // The importer stores the literal '(facility)' for facility-level rows so
+    // the column is never null; it is a sentinel, not a name, so it must not
+    // reach the screen.
+    const isFac = !r.external_tranche_id || r.external_tranche_id === '(facility)';
+    const tr = isFac ? 'Facility' : (ctx.trancheNames[r.external_tranche_id] || r.external_tranche_id);
+    const days = r.days_covered == null ? '—'
+      : '<span title="Inferred from the dates — the workbook does not state it">' + r.days_covered + '</span>';
+    html += '<tr>' +
+      td(esc(r.flow_date)) + td(days, true) + td(esc(tr)) + td(esc(comp)) +
+      td('<span class="chip ' + (r.posting_type === 'fee' ? 'purple' : 'blue') + '" style="font-size:9.5px;">' +
+         esc(r.posting_type || '—') + '</span>') +
+      td(r.settlement_type
+          ? '<span class="chip ' + (r.settlement_type === 'cash' ? 'green' : 'amber') + '" style="font-size:9.5px;">' +
+            esc(r.settlement_type) + '</span>'
+          : '<span style="color:var(--n-400);">—</span>') +
+      td('<span style="font-size:10px; color:var(--n-600);">' +
+         esc(BASIS_LABEL[r.balance_basis] || r.balance_basis || '—') + '</span>') +
+      td(money(r.basis_balance), true) +
+      td(r.rate == null ? '—' : (+r.rate * 100).toFixed(6) + '%', true) +
+      td(money(r.amount), true) +
+      td(+r.cash_settled ? money(r.cash_settled) : '<span style="color:var(--n-400);">—</span>', true) +
+    '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  if(rows.length > VIEW_ROWS){
+    html += '<div style="margin-top:8px; font-size:10.5px; color:var(--n-500);">Showing the first ' +
+      VIEW_ROWS + ' of ' + rows.length.toLocaleString() + ' rows for this selection. ' +
+      'Totals above cover the full selection, not just what is displayed.</div>';
+  }
+
+  host.innerHTML = html;
+  if(chip) chip.textContent = rows.length.toLocaleString() + ' received rows';
+  if(kpis) kpis.innerHTML = '';
+  if(status){
+    status.textContent = 'Received from ' + ((window.B && B.deal && B.deal.externalSystem) || 'PortF');
+    status.className = 'chip blue self-center';
+  }
+};
+
+window.__extCfSetFilter = function(k){
+  window.__extCfFilter = k;
+  if(typeof window.recomputeStage1 === 'function'){
+    // Re-render through the normal path so the chip and status stay in sync.
+    const host = document.getElementById('cf-stage1-host');
+    const chip = document.getElementById('cf-stage1-chip');
+    const kpis = document.getElementById('cf-stage1-kpis');
+    const status = document.getElementById('portf-status');
+    if(host) window.__renderExternalCashflows(host, chip, kpis, status);
+  }
+};
+
+/* Read-only gating. An external deal's numbers come from PortF; editing them
+   here would leave PCS and PortF disagreeing, with PCS's version being the one
+   that reaches Investran. Inputs are disabled rather than hidden so the values
+   stay readable, and a banner says where they came from. */
+window.__applyExternalReadOnly = function(){
+  const isExternal = !!(window.B && B.deal && B.deal.source === 'external');
+  const builder = document.getElementById('builder');
+  if(!builder) return;
+
+  // Deal Setup, Facility Setup, Tranches and Fees. The Accounting and
+  // Dashboard tabs are untouched — those are ours to compute.
+  builder.querySelectorAll('input, select, textarea').forEach(el => {
+    if(el.dataset.extAlwaysEditable === '1') return;
+    if(isExternal){
+      if(!el.dataset.extPrevDisabled) el.dataset.extPrevDisabled = el.disabled ? '1' : '0';
+      el.disabled = true;
+      el.style.cursor = 'not-allowed';
+    } else if(el.dataset.extPrevDisabled !== undefined){
+      el.disabled = el.dataset.extPrevDisabled === '1';
+      el.style.cursor = '';
+      delete el.dataset.extPrevDisabled;
+    }
+  });
+  // Buttons that would mutate the deal — add tranche, add fee, remove, etc.
+  builder.querySelectorAll('button[data-t-action], #btn-add-tranche, #btn-add-fee').forEach(b => {
+    b.disabled = isExternal;
+    b.style.opacity = isExternal ? '0.45' : '';
+    b.style.cursor = isExternal ? 'not-allowed' : '';
+  });
+
+  let banner = document.getElementById('ext-readonly-banner');
+  if(isExternal){
+    const ctx = window._externalDealCtx || {};
+    if(!banner){
+      banner = document.createElement('div');
+      banner.id = 'ext-readonly-banner';
+      banner.style.cssText = 'margin:0 0 12px; padding:10px 14px; border-radius:8px; ' +
+        'background:#EEF2FF; border:1px solid #C7D2FE; color:#3730A3; font-size:12px; line-height:1.55;';
+      builder.insertBefore(banner, builder.firstChild);
+    }
+    const when = ctx.receivedAt ? new Date(ctx.receivedAt).toLocaleString() : 'unknown';
+    banner.innerHTML =
+      '<b>Externally calculated deal — read-only.</b> Setup, events and cashflows are supplied by ' +
+      (B.deal.externalSystem || 'PortF') + '. PCS performs the accounting only.<br>' +
+      '<span style="font-size:11px; opacity:.85;">Snapshot ' + (ctx.snapshotId || '—') +
+      ' · received ' + when + ' · editing is disabled so PCS and ' +
+      (B.deal.externalSystem || 'PortF') + ' cannot disagree.</span>';
+  } else if(banner){
+    banner.remove();
   }
 };
 
@@ -22125,6 +22720,22 @@ async function _importExternalSnapshotInner(snap, opts){
 
   const system = snap.externalSystem || 'portf';
 
+  /* created_by is REQUIRED by the RLS policy on deals:
+       (created_by = auth.uid() AND (team_id IS NULL OR in_team(team_id))) OR is_admin()
+     Omitting it leaves it NULL, the check fails, and the whole import rolls up
+     as "new row violates row-level security policy" — which is what made an
+     import appear to do nothing at all.
+
+     Read from auth.getUser() rather than SB.currentUser: the cached object can
+     have a null id even on a live session, and the is_admin() fallback cannot
+     be relied on either — it reads false here for an account that shows as an
+     admin elsewhere. */
+  const { data: _authData, error: _authErr } = await sb.auth.getUser();
+  const uid = _authData && _authData.user && _authData.user.id;
+  if(_authErr || !uid){
+    throw new Error('Not signed in — cannot import. The deal row must record who created it.');
+  }
+
   // 1 · Deal row. Matched on (external_system, external_deal_id) — never on
   //     name, which users rename.
   let created = false;
@@ -22140,17 +22751,31 @@ async function _importExternalSnapshotInner(snap, opts){
     currency: snap.facility.currency,
     settlement_date: snap.facility.loanStartDate,
     maturity_date: snap.facility.loanEndDate,
+    /* These four arrive in every workbook and have had columns on deals since
+       2026-09, but were never mapped — so the Builder (which reads the snapshot
+       JSON) showed them while the deal picker, Portfolio, DIU push and
+       regulatory filters (which read this row) showed blanks. */
+    counterparty:    snap.facility.counterparty || null,
+    agent_name:      snap.facility.agentName    || null,
+    signing_date:    snap.facility.signingDate  || null,
+    deal_structure:  _extPick(_EXT_STRUCTURE, snap.facility.dealStructure, null),
     source: 'external',
     external_system: system,
     external_deal_id: snap.externalDealId
   };
+  /* Framework comes from the workbook when it states one the app knows; the
+     caller's choice is the fallback, not the override — the accounting basis is
+     the sender's fact, not the importer's preference. */
+  const _fw = _extPick(_EXT_FRAMEWORK, snap.facility.accountingFramework, null);
 
   if(deal){
     const { error } = await sb.from('deals').update(dealFields).eq('id', deal.id);
     if(error) throw error;
   } else {
     const { data, error } = await sb.from('deals')
-      .insert({ ...dealFields, deal_code: snap.externalDealId, framework: opts.framework || 'IFRS' })
+      .insert({ ...dealFields, deal_code: snap.externalDealId,
+                framework: _fw || opts.framework || 'IFRS',
+                created_by: uid })          // required by the RLS insert policy
       .select('id').single();
     if(error) throw error;
     deal = data; created = true;
@@ -22196,6 +22821,12 @@ async function _importExternalSnapshotInner(snap, opts){
     external_component_id: r.externalComponentId,
     drawdown_lot_id: r.drawdownLotId,
     posting_type: r.postingType,
+    // Which section of the workbook the row came from. Dropping this was a
+    // real defect — without it, interest that capitalises is indistinguishable
+    // from interest that is paid, and the GL needs exactly that distinction.
+    settlement_type: r.settlementType || null,
+    balance_basis: r.balanceBasis || null,
+    is_flat: !!r.isFlat,
     days_covered: r.daysCovered == null ? 1 : r.daysCovered,
     basis_balance: r.basisBalance,
     rate: r.rate,
@@ -24193,9 +24824,26 @@ window.refreshNotices = async function(opts){
     return;
   }
 
+  /* The modal's own stopwatch. It has to allow for the read queueing behind a
+     bulk write, otherwise the guard that stops notices racing an accounting run
+     just moves the failure here instead of removing it: the read waits politely,
+     and this timer kills it anyway. Budget stretches while a write is in flight
+     and each time one is still running when it fires. */
   let hardTimer;
+  const NOTICES_BUDGET_MS = 15000;
+  const NOTICES_BUSY_BUDGET_MS = 30000;
   const hardStop = new Promise((_, rj) => {
-    hardTimer = setTimeout(() => rj(new Error('Notices refresh exceeded 15s — using cached data')), 15000);
+    const arm = (ms) => {
+      hardTimer = setTimeout(() => {
+        const busy = !!(window.SB && window.SB.heavyWriteDepth > 0);
+        if(busy){
+          console.log('[notices] budget reached but a bulk write is still running — extending.');
+          return arm(NOTICES_BUSY_BUDGET_MS);
+        }
+        rj(new Error('Notices refresh exceeded ' + Math.round(ms/1000) + 's — using cached data'));
+      }, ms);
+    };
+    arm((window.SB && window.SB.heavyWriteDepth > 0) ? NOTICES_BUSY_BUDGET_MS : NOTICES_BUDGET_MS);
   });
 
   const run = async () => {
@@ -39674,6 +40322,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const kpis = $b('cf-stage1-kpis');
     const status = document.getElementById('portf-status');
     if(!host) return;
+    /* External deals show the schedule they SENT us, not one we computed.
+       Running the engine here and presenting the result would put our
+       arithmetic on screen under a heading that says it came from PortF. */
+    if(window.B && B.deal && B.deal.source === 'external' &&
+       typeof window.__renderExternalCashflows === 'function'){
+      window.__renderExternalCashflows(host, chip, kpis, status);
+      return;
+    }
     // Refresh the tranche toggle strip (idempotent).
     renderCfTrancheFilter();
     // Apply tranche filter if set.
