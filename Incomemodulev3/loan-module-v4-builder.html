@@ -2055,6 +2055,14 @@
     document.getElementById('v4-deal-menu').style.display = 'none';
     const p = (window.PRESETS || []).find(x => (x.key || x.dealCode || x.label) === key);
     if(!p) return;
+    /* Route through loadActiveDealByKey, the same entry point the "Select an
+       active deal" modal uses. Calling loadPresetByObject directly skipped its
+       external-deal branch, so picking an externally-calculated deal from this
+       Recent list ran p.build() — which for an external deal returns an empty
+       shell, because its tranches and fees live in external_snapshots, not in
+       the relational tables. Deal Setup filled in and the tranches and fees
+       came back empty, which is exactly what this list was doing. */
+    if(typeof window.loadActiveDealByKey === 'function'){ window.loadActiveDealByKey(p.key || key); return; }
     if(typeof window.loadPresetByObject === 'function') window.loadPresetByObject(p);
     else if(typeof window.loadPresetByKey === 'function') window.loadPresetByKey(p.key);
   };
@@ -21590,6 +21598,85 @@ function closeActiveDealModal(){
   if(m) m.style.display = 'none';
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Deal-load progress
+   ───────────────────────────────────────────────────────────────────────────
+   Loading a deal can run to several seconds — an external deal reads its
+   snapshot, pages a few hundred to a few thousand cashflow rows, rebuilds the
+   Builder, then recomputes. Until now none of that was visible, so the app
+   looked frozen and the natural response was to click again, which starts a
+   second load on top of the first.
+
+   The steps below are the real stages, so the bar advances on actual progress
+   rather than on a timer. It deliberately does NOT claim a percentage within a
+   step — we do not know how long a page of rows will take, and a bar that
+   creeps to 90% and sits there is worse than one that moves honestly.
+   ═══════════════════════════════════════════════════════════════════════════ */
+window.PCSLoad = (function(){
+  let el = null, total = 1, done = 0, startedAt = 0;
+  function ensure(){
+    if(el) return el;
+    el = document.createElement('div');
+    el.id = 'pcs-load-overlay';
+    el.style.cssText =
+      'position:fixed; inset:0; z-index:99999; display:none; align-items:center; justify-content:center;' +
+      'background:rgba(15,23,42,0.28); backdrop-filter:saturate(140%) blur(2px);';
+    el.innerHTML =
+      '<div role="status" aria-live="polite" style="min-width:320px; max-width:420px; background:var(--n-0,#fff); ' +
+        'border-radius:12px; box-shadow:0 18px 48px rgba(15,23,42,0.22); padding:18px 20px 16px;">' +
+        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">' +
+          '<i class="ti ti-loader-2" style="font-size:18px; color:var(--brand-600,#4f46e5); animation:pcsSpin 0.9s linear infinite;"></i>' +
+          '<div id="pcs-load-title" style="font-size:13px; font-weight:600; color:var(--n-900,#18181b);">Loading deal</div>' +
+        '</div>' +
+        '<div style="height:6px; border-radius:99px; background:var(--n-100,#f4f4f5); overflow:hidden;">' +
+          '<div id="pcs-load-bar" style="height:100%; width:0%; border-radius:99px; ' +
+               'background:var(--brand-600,#4f46e5); transition:width .25s ease;"></div>' +
+        '</div>' +
+        '<div id="pcs-load-step" style="margin-top:9px; font-size:11.5px; color:var(--n-500,#71717a);">Starting…</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    if(!document.getElementById('pcs-load-kf')){
+      const s = document.createElement('style'); s.id = 'pcs-load-kf';
+      s.textContent = '@keyframes pcsSpin{to{transform:rotate(360deg)}}';
+      document.head.appendChild(s);
+    }
+    return el;
+  }
+  return {
+    start(title, steps){
+      ensure();
+      total = Math.max(1, steps || 1); done = 0; startedAt = Date.now();
+      el.querySelector('#pcs-load-title').textContent = title || 'Loading deal';
+      el.querySelector('#pcs-load-bar').style.width = '0%';
+      el.querySelector('#pcs-load-step').textContent = 'Starting…';
+      el.style.display = 'flex';
+    },
+    step(msg){
+      if(!el || el.style.display === 'none') return;
+      done = Math.min(total, done + 1);
+      el.querySelector('#pcs-load-bar').style.width = Math.round((done / total) * 100) + '%';
+      el.querySelector('#pcs-load-step').textContent = msg || '';
+    },
+    /* note() updates the wording without advancing the bar — for progress
+       inside a step, e.g. which page of cashflows is being read. */
+    note(msg){
+      if(!el || el.style.display === 'none') return;
+      const n = el.querySelector('#pcs-load-step'); if(n) n.textContent = msg || '';
+    },
+    done(){
+      if(!el) return;
+      el.querySelector('#pcs-load-bar').style.width = '100%';
+      const ms = Date.now() - startedAt;
+      setTimeout(() => { if(el) el.style.display = 'none'; }, ms < 400 ? 0 : 180);
+    },
+    fail(msg){
+      if(!el) return;
+      el.querySelector('#pcs-load-step').textContent = msg || 'Load failed';
+      setTimeout(() => { if(el) el.style.display = 'none'; }, 1600);
+    }
+  };
+})();
+
 // Load a specific preset by key — sets the hidden sel-instrument value and
 // dispatches a change event so the existing change handler runs the full
 // load + auto-accounting + chip-refresh path.
@@ -21601,16 +21688,21 @@ function loadActiveDealByKey(key){
   const _extCand = (window.PRESETS || []).find(p => p && p.key === key && p.isExternal);
   if(_extCand && _extCand.dealId && typeof window.loadExternalDeal === 'function'){
     console.log('[V3] external deal — loading from snapshot:', _extCand.dealId);
+    // 5 stages: snapshot read · map · cashflows · build · register.
+    window.PCSLoad.start('Loading ' + (_extCand.label || 'deal'), 5);
     window.loadExternalDeal(_extCand.dealId)
       .then(() => {
+        window.PCSLoad.step('Finishing up…');
         if(typeof closeActiveDealModal === 'function') closeActiveDealModal();
         if(typeof window.registerBuilderInstrument === 'function'){
           try { window.registerBuilderInstrument(); } catch(e){ console.warn('[V3] registerBuilderInstrument threw:', e); }
         }
         if(typeof refreshActiveDealChip === 'function') refreshActiveDealChip();
+        window.PCSLoad.done();
       })
       .catch(e => {
         console.error('[V3] external deal load failed:', e);
+        window.PCSLoad.fail(e && (e.message || String(e)));
         if(typeof toast === 'function') toast('Could not load external deal: ' + (e.message || e));
       });
     return;
@@ -22385,11 +22477,14 @@ window.externalSnapshotToBuilder = function(snap){
 window.loadExternalDeal = async function(dealId){
   if(!window.SB || !SB.isConnected) throw new Error('Not connected to the database');
   const sb = SB.client;
+  const _P = window.PCSLoad || { step(){}, note(){} };
+  _P.note('Reading the latest snapshot…');
   const { data: snapRow, error } = await sb.from('external_snapshots')
     .select('id, snapshot_id, external_deal_id, facility_jsonb, components_jsonb, tranches_jsonb, events_jsonb, received_at')
     .eq('deal_id', dealId).eq('is_current', true).maybeSingle();
   if(error) throw error;
   if(!snapRow) throw new Error('No current snapshot for this deal — re-import the workbook.');
+  _P.step('Mapping deal, tranches and fees…');
 
   const snap = {
     snapshotId: snapRow.snapshot_id,
@@ -22403,6 +22498,7 @@ window.loadExternalDeal = async function(dealId){
 
   const built = window.externalSnapshotToBuilder(snap);
   if(!built) throw new Error('Snapshot could not be mapped');
+  _P.step('Loading the received cashflow schedule…');
 
   /* Pull the received schedule now rather than on first render, so the
      Cashflow tab never has to show a spinner mid-review. Capped: a 50-tranche
@@ -22438,6 +22534,7 @@ window.loadExternalDeal = async function(dealId){
     if(error){ cfErr = error; break; }
     const got = page || [];
     rows.push(...got);
+    _P.note('Loading the received cashflow schedule — ' + rows.length.toLocaleString() + ' rows…');
     if(got.length < (to - from + 1)) break;       // short page = end of data
     if(rows.length > CF_VIEW_CAP){ truncated = true; rows.length = CF_VIEW_CAP; break; }
   }
@@ -22461,6 +22558,7 @@ window.loadExternalDeal = async function(dealId){
     trancheNames:   (snap.tranches   || []).reduce((m, t) => { m[t.externalTrancheId]   = t.name; return m; }, {})
   };
 
+  _P.step('Building the deal…');
   window.loadPresetByObject({
     key: 'ext-' + snapRow.external_deal_id,
     label: built.deal.name,
@@ -39116,6 +39214,16 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     try { renderCovenants();  console.log('[V3]   renderCovenants OK'); }  catch(e){ console.error('[V3]   renderCovenants FAILED:', e); }
     try { renderAllocations(); console.log('[V3]   renderAllocations OK'); } catch(e){ console.error('[V3]   renderAllocations FAILED:', e); }
     try { recompute();        console.log('[V3]   recompute OK'); }        catch(e){ console.error('[V3]   recompute FAILED:', e); }
+    /* Re-apply (or clear) the external-deal read-only gate on EVERY load, not
+       just external ones. It used to be called only at the end of
+       loadExternalDeal, so switching from an external deal to a normal one
+       never ran the clean-up branch: the "Externally calculated deal" banner
+       stayed on screen, and — worse — the Deal Setup and Facility Setup inputs
+       stayed disabled, because those live in static DOM that renderTranches /
+       renderFees never rebuild. The function keys off B.deal.source, so calling
+       it unconditionally here both applies and removes the gate correctly. */
+    try { if(typeof window.__applyExternalReadOnly === 'function') window.__applyExternalReadOnly(); }
+    catch(e){ console.error('[V3]   __applyExternalReadOnly FAILED:', e); }
     if(typeof renderMarketData === 'function') renderMarketData();
     if(typeof toast === 'function'){
       const viewLabel = viewMode === 'participation' && pct < 100 ? ' (' + pct + '% participation)' : '';
