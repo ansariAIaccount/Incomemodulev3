@@ -1097,6 +1097,19 @@
             '" is not one of ' + Object.keys(MOVEMENT_MAP).join(', ') + '.');
         return;
       }
+      /* Sign convention: every movement is a POSITIVE magnitude and its type
+         says which way the balance moves. A negative principal payment would
+         otherwise increase the balance — silently, and for the whole remaining
+         life of the tranche. Normalise and say so rather than guessing, because
+         the alternative reading (negative = the sender's own sign convention)
+         is equally plausible and produces the opposite schedule. */
+      if (amt < 0) {
+        warn(key + ': "' + typeRaw + '" on ' + d + ' is negative (' + amt.toLocaleString() +
+             '). Movements are recorded as positive magnitudes — the type says the direction — ' +
+             'so it has been read as ' + Math.abs(amt).toLocaleString() + '. If the sender means ' +
+             'something else by the minus sign, the schedule after this date is wrong.');
+        amt = Math.abs(amt);
+      }
       var trSrc = txt(gv(grid, r, t.col, 'Tranche ID'));
       var tr = trSrc ? trancheBySource[trSrc] : null;
       out.push({
@@ -1121,6 +1134,18 @@
       if (amt === null && !cSrc) return;
       var ps = iso(gv(grid, r, t.col, 'Period Start'));
       var pe = iso(gv(grid, r, t.col, 'Period End'));
+      /* An amount with no date at all cannot be posted to any period, and there
+         is nothing to infer one from. Stop and name the row: importing it is
+         impossible, and dropping it quietly would lose money. Period End on its
+         own is fine — that is a charge whose covered period was not stated,
+         which is the ordinary "unverified" case, not a broken row. */
+      if (!ps && !pe) {
+        err(ref(key, r, t.col['Period End'] || 0) + ': amount ' +
+            (amt === null ? '(blank)' : amt.toLocaleString()) +
+            ' has neither Period Start nor Period End, so it cannot be posted to a period. ' +
+            'Period End alone is enough where the period covered is not known.');
+        return;
+      }
       if (!ps || !pe) missingPeriod++;
       var comp = cSrc ? compBySource[cSrc] : null;
       if (cSrc && !comp) {
@@ -1134,12 +1159,18 @@
       var posting = norm(gv(grid, r, t.col, 'Posting Type')) || (comp ? comp.postingType : 'interest');
       posting = /fee/.test(posting) ? 'fee' : 'interest';
 
+      /* A one-off charge is dated, not accrued: an arrangement fee on the
+         settlement date has the same start and end. That is a point event with
+         no period to cover, NOT a zero-day accrual — and calling it zero days
+         is both wrong and rejected by the day-count check on the table. Keep
+         the dates, decline to derive a length from them. */
+      var pointDated = !!(ps && pe && ps === pe);
       var row = {
         rowNo: r + 1,
         date: pe || ps,
         periodStart: ps, periodEnd: pe,
-        daysCovered: (ps && pe) ? dayDiff(ps, pe) : null,
-        daysCoveredStated: !!(ps && pe),
+        daysCovered: (ps && pe && !pointDated) ? dayDiff(ps, pe) : null,
+        daysCoveredStated: !!(ps && pe && !pointDated),
         externalTrancheId: tr ? tr.externalTrancheId : (comp ? comp.externalTrancheId : null),
         externalComponentId: comp ? comp.externalComponentId : (cSrc ? externalDealId + '-' + slug(cSrc) : null),
         componentNames: comp ? [comp.name] : (cSrc ? [cSrc] : []),

@@ -20586,6 +20586,40 @@ function runAccountingImpl(){
   // fee treatment) since the last run must flow into the schedule before the
   // engine generates journals — otherwise the KPIs / JE rows are stale.
   M.schedule = buildSchedule(inst);
+
+  /* Externally-calculated deal: PortF's amounts replace the engine's interest
+     and fees before anything is summarised or journalised. The engine still
+     supplies what PortF does not send — deferred-fee accretion, carrying
+     value, ECL. Ordered here, before summarize(), because every KPI and every
+     journal downstream reads from the schedule. */
+  M.externalScheduleUse = null;
+  const _isExt = !!(window.B && B.deal && B.deal.source === 'external');
+  if(_isExt && window._externalDealCtx && typeof window.applyExternalScheduleToAccounting === 'function'){
+    try {
+      M.externalScheduleUse = window.applyExternalScheduleToAccounting(M.schedule, window._externalDealCtx);
+      const u = M.externalScheduleUse;
+      if(u && u.applied){
+        console.log('[ext-acct] posting PortF amounts ' + u.from + ' → ' + u.to +
+          ' · ' + u.daysFromPortF.toLocaleString() + ' days from PortF, ' +
+          u.daysFromPCS.toLocaleString() + ' computed by PCS outside that span');
+        if(u.daysFromPCS && typeof toast === 'function'){
+          toast('Accounting uses PortF amounts from ' + u.from + ' to ' + u.to +
+                '. ' + u.daysFromPCS.toLocaleString() + ' days outside that range are PCS-computed.', 9000);
+        }
+      } else {
+        console.warn('[ext-acct] received schedule NOT applied:', u && u.reason);
+        if(typeof toast === 'function'){
+          toast('This is an external deal but its received schedule could not be used (' +
+                ((u && u.reason) || 'unknown') + '). The accounting below is PCS-computed — ' +
+                'it will not tie to what PortF sent.', 11000);
+        }
+      }
+    } catch(e){
+      console.error('[ext-acct] failed to apply received schedule:', e);
+      if(typeof toast === 'function') toast('Could not apply the received schedule: ' + e.message, 9000);
+    }
+  }
+
   M.summary = summarize(M.schedule, inst.settlementDate, inst.maturityDate);
 
   // ─── Dual-book (secondary framework) ─────────────────────────────
@@ -20729,6 +20763,53 @@ function runAccountingImpl(){
   // effectiveDate). Filled value applies the same close date to every row.
   const glPostDate = $('opt-gl-date')?.value || null;
   M.acctJournals = generateDIU(inst, M.summary, { glDate: glPostDate });
+
+  /* External PIK — replace the engine's reclass with a real income entry.
+
+     The engine books PIK capitalisation as a RECLASS: it moves interest that
+     its own daily accrual already parked in Interest Receivable across into the
+     loan asset, which is why both legs are negative. That is correct when the
+     engine accrued the PIK itself.
+
+     Under the external overlay there is no such receivable — PortF sends the
+     capitalised amount as a fact and PCS never accrued it — so reversing a
+     receivable that was never raised leaves a lone debit to the asset and a
+     batch that does not balance. Ardersier came out £94,266,381.62 out, exactly
+     its PIK total.
+
+     What is economically true is simpler: the borrower owes more, and we earned
+     income. DR the loan asset, CR PIK interest income. Accounts are lifted from
+     the engine's own rows so any GL mapping already applied is preserved. */
+  if(_isExt && M.externalScheduleUse && M.externalScheduleUse.applied
+     && M.externalScheduleUse.capitalisedIntoBalance > 0.005){
+    try {
+      const cap = +M.externalScheduleUse.capitalisedIntoBalance.toFixed(2);
+      const pikRows = M.acctJournals.filter(j => /^PIK Investment$/i.test(j.transactionType || ''));
+      if(pikRows.length){
+        const tpl = pikRows[0];
+        const incomeRow = M.acctJournals.find(j => /Income - Daily Accrued Interest/i.test(j.transactionType || ''));
+        const assetAcct  = tpl.account || '141000';
+        const incomeAcct = (incomeRow && incomeRow.account) || '23000';
+        M.acctJournals = M.acctJournals.filter(j => !/^PIK Investment$/i.test(j.transactionType || ''));
+        const mk = (type, acct, isDebit) => Object.assign({}, tpl, {
+          transactionType: type, account: acct, isDebit: isDebit,
+          glAccountName: (isDebit ? (tpl.glAccountName || 'Loan Investment')
+                                  : ((incomeRow && incomeRow.glAccountName) || 'Interest Income')),
+          originalAmount: cap, amountLE: cap, amountLocal: cap,
+          transactionComments: 'PIK interest capitalised — amount supplied by ' +
+            ((window.B && B.deal && B.deal.externalSystem) || 'PortF') +
+            '; raises the loan asset and recognises income. Not a reclass: no receivable was raised.'
+        });
+        M.acctJournals.push(mk('PIK Interest Capitalised', assetAcct,  true));
+        M.acctJournals.push(mk('PIK Interest Income',      incomeAcct, false));
+        console.log('[ext-acct] replaced ' + pikRows.length + ' engine PIK reclass line(s) with a ' +
+                    'DR ' + assetAcct + ' / CR ' + incomeAcct + ' pair of ' + cap.toLocaleString());
+      }
+    } catch(e){
+      console.error('[ext-acct] PIK journal replacement failed — the batch will not balance:', e);
+      if(typeof toast === 'function') toast('PIK journals could not be rebuilt: ' + e.message, 9000);
+    }
+  }
   // ─── "Up until date" filter — drop any JE row with effectiveDate > cutoff.
   //     Applied post-generation so we don't have to refactor the engine.
   //     Cutoff is inclusive: rows with effectiveDate === cutoff are kept.
@@ -22443,7 +22524,14 @@ window.externalSnapshotToBuilder = function(snap){
       drawdowns:  ev.filter(e => e.eventType === 'drawdown')
                     .map(e => ({ date: e.eventDate, amount: +e.amount || 0, reason: 'PortF drawdown' })),
       repayments: ev.filter(e => e.eventType === 'principalPayment')
-                    .map(e => ({ date: e.eventDate, amount: +e.amount || 0, kind: 'scheduled' })),
+                    .map(e => ({ date: e.eventDate, amount: Math.abs(+e.amount || 0), kind: 'scheduled' })),
+      /* Capitalised coupon raises the balance it then accrues on, so a PIK
+         tranche whose capitalisations are dropped under-accrues for the rest of
+         its life. They are carried here as drawdowns because that is how the
+         Builder raises a balance; the engine does not yet distinguish the two
+         (#202), so this is deliberately visible rather than silently exact. */
+      pikCapitalisations: ev.filter(e => e.eventType === 'capitalisation')
+                    .map(e => ({ date: e.eventDate, amount: Math.abs(+e.amount || 0) })),
       interestComponents: interestComponents.length ? interestComponents : []
     };
   });
@@ -22777,6 +22865,164 @@ window.__extCfSetFilter = function(k){
   }
 };
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   External schedule → accounting
+   ───────────────────────────────────────────────────────────────────────────
+   For an externally-calculated deal, PortF's amounts ARE the interest and the
+   fees. Until now the engine rebuilt its own schedule from the terms and the
+   accounting posted that — so PCS was posting its own number to Investran
+   while PortF's number was the one the file said was true. The received rows
+   were displayed and nothing more.
+
+   This overlays the received amounts onto the engine's daily schedule. What
+   stays engine-computed is what PortF does not send and PCS genuinely owns:
+   deferred-fee accretion (the EIR piece), carrying value and ECL.
+
+   Two things it deliberately does NOT do:
+
+   · It does not spread an amount over days the sender did not give us. A row
+     with no period lands whole on its flow date, because inventing a period
+     to make the accrual look smooth would be inventing the day count.
+   · It does not silently mix sources. Outside the span PortF actually covers,
+     the engine's own figures remain, and the run reports the split rather than
+     presenting a blend as though it were all received.
+   ═══════════════════════════════════════════════════════════════════════════ */
+window.applyExternalScheduleToAccounting = function(schedule, ctx){
+  const rows = (ctx && ctx.cashflows) || [];
+  if(!schedule || !schedule.length || !rows.length){
+    return { applied: false, reason: !rows.length ? 'no received cashflows' : 'no engine schedule' };
+  }
+
+  const DAY = 86400000;
+  const d2s = d => d.toISOString().slice(0, 10);
+  const add = (map, date, key, amt) => {
+    if(!amt) return;
+    let e = map.get(date);
+    if(!e){ e = { cash: 0, pik: 0, fees: 0 }; map.set(date, e); }
+    e[key] += amt;
+  };
+
+  const byDate = new Map();
+  let spread = 0, pointDated = 0, minD = null, maxD = null;
+
+  rows.forEach(r => {
+    const amt = +r.amount || 0;
+    if(!amt) return;
+    const posting = r.posting_type || r.postingType;
+    const settle  = r.settlement_type || r.settlementType || 'cash';
+    const key = posting === 'fee' ? 'fees' : (settle === 'cash' ? 'cash' : 'pik');
+
+    const ps = r.period_start || r.periodStart;
+    const pe = r.period_end   || r.periodEnd;
+    const flow = r.flow_date  || r.date;
+
+    if(ps && pe && ps < pe){
+      /* Interest accrues daily. With a flat balance and rate inside a period,
+         an even spread IS the daily accrual — and it is what makes a period
+         straddling a month end split correctly at close. */
+      const s = new Date(ps + 'T00:00:00Z'), e = new Date(pe + 'T00:00:00Z');
+      const n = Math.max(1, Math.round((e - s) / DAY));
+      const per = amt / n;
+      for(let i = 0; i < n; i++) add(byDate, d2s(new Date(s.getTime() + i * DAY)), key, per);
+      spread++;
+      if(!minD || ps < minD) minD = ps;
+      if(!maxD || pe > maxD) maxD = pe;
+    } else if(flow){
+      add(byDate, flow, key, amt);
+      pointDated++;
+      if(!minD || flow < minD) minD = flow;
+      if(!maxD || flow > maxD) maxD = flow;
+    }
+  });
+
+  if(!byDate.size) return { applied: false, reason: 'received rows carry no dates' };
+
+  let replacedDays = 0, engineDays = 0;
+  let recvCash = 0, recvPik = 0, recvFees = 0, engCash = 0, engFees = 0;
+
+  schedule.forEach(row => {
+    const inSpan = row.date >= minD && row.date <= maxD;
+    const hit = byDate.get(row.date);
+    if(inSpan){
+      /* Inside the received span the sender is authoritative, including where
+         they say nothing happened — a day with no received amount accrues
+         nothing, rather than keeping a figure we computed. */
+      row._extSource = 'portf';
+      row.dailyCash = hit ? hit.cash : 0;
+      row.dailyPik  = hit ? hit.pik  : 0;
+      row.dailyFees = hit ? hit.fees : 0;
+      if(hit){ recvCash += hit.cash; recvPik += hit.pik; recvFees += hit.fees; }
+      replacedDays++;
+    } else {
+      row._extSource = 'pcs';
+      engCash += +row.dailyCash || 0;
+      engFees += +row.dailyFees || 0;
+      engineDays++;
+    }
+  });
+
+  /* Capitalisation.
+
+     The engine models PIK by accruing it and capitalising on an anchor date,
+     gated by a tranche-level switch — which is why a component set to PIK on a
+     mixed tranche was not honoured (#202). For an externally-calculated deal
+     that machinery is not needed for the INTEREST: PortF has already worked out
+     each period's amount on the grown balance and sent it. What is still ours
+     is the balance-sheet consequence — capitalised interest raises the asset.
+
+     So capitalise the received PIK amounts at their period end and carry that
+     into balance and carrying value from that date on. Taken from the PIK
+     cashflow rows, not from the capitalisation movements: PortF may send both
+     for the same coupon, and adding each twice would inflate the asset. The
+     schedule is the source of truth, so the schedule is what we capitalise. */
+  const capByDate = new Map();
+  rows.forEach(r => {
+    const posting = r.posting_type || r.postingType;
+    const settle  = r.settlement_type || r.settlementType;
+    if(posting === 'fee' || settle === 'cash' || !settle) return;
+    const amt = +r.amount || 0;
+    if(!amt) return;
+    const on = r.period_end || r.periodEnd || r.flow_date || r.date;
+    if(!on) return;
+    capByDate.set(on, (capByDate.get(on) || 0) + amt);
+  });
+
+  let cumCap = 0, capitalisedTotal = 0;
+  // Running totals have to follow the amounts they total.
+  let cumA = 0, cumE = 0, cumF = 0, cumP = 0;
+  schedule.forEach(row => {
+    const capToday = capByDate.get(row.date) || 0;
+    if(capToday){
+      row.capitalized = (+row.capitalized || 0) + capToday;
+      cumCap += capToday;
+      capitalisedTotal += capToday;
+    }
+    if(cumCap){
+      row.balance       = (+row.balance       || 0) + cumCap;
+      row.carryingValue = (+row.carryingValue || 0) + cumCap;
+    }
+    cumA += +row.dailyCash || 0;
+    cumE += +row.dailyCash || 0;
+    cumF += +row.dailyFees || 0;
+    cumP += +row.dailyPik  || 0;
+    row.cumInterestAccrued = cumA;
+    row.cumInterestEarned  = cumE;
+    if('cumFees' in row)     row.cumFees = cumF;
+    if('cumPikAccrued' in row) row.cumPikAccrued = cumP;
+    if('cumPikEarned' in row)  row.cumPikEarned  = cumP;
+  });
+
+  return {
+    applied: true,
+    from: minD, to: maxD,
+    rowsUsed: rows.length, periodRows: spread, pointDatedRows: pointDated,
+    daysFromPortF: replacedDays, daysFromPCS: engineDays,
+    receivedInterestCash: recvCash, receivedInterestPik: recvPik, receivedFees: recvFees,
+    capitalisedIntoBalance: capitalisedTotal,
+    engineInterestOutsideSpan: engCash, engineFeesOutsideSpan: engFees
+  };
+};
+
 /* Read-only gating. An external deal's numbers come from PortF; editing them
    here would leave PCS and PortF disagreeing, with PCS's version being the one
    that reaches Investran. Inputs are disabled rather than hidden so the values
@@ -22944,7 +23190,18 @@ async function _importExternalSnapshotInner(snap, opts){
              cashflowRows: snap.cashflows.length, changes: 0, postedAffected: 0 };
   }
 
-  // 3 · New snapshot row.
+  /* 3 · New snapshot row.
+
+     Everything from here on is cleaned up if it fails. Without that, a failed
+     import leaves a snapshot row with no cashflows and is_current still false —
+     and because snapshot_id is derived from the parse, RE-IMPORTING THE SAME
+     FILE then collides with the orphan on (deal_id, snapshot_id) and can never
+     succeed. The first failure becomes permanent, and the error you see is a
+     duplicate-key on the wreckage rather than the thing that actually broke.
+     Same failure shape as saveDeal before it learned to self-clean. */
+  let _snapRowId = null;
+  try {
+  // eslint-disable-next-line no-unused-vars
   const { data: snapRow, error: snapErr } = await sb.from('external_snapshots').insert({
     deal_id: deal.id,
     external_deal_id: snap.externalDealId,
@@ -22961,6 +23218,7 @@ async function _importExternalSnapshotInner(snap, opts){
                         sourceFilename: snap.sourceFilename || null, parseMeta: snap.parseMeta || null }
   }).select('id').single();
   if(snapErr) throw snapErr;
+  _snapRowId = snapRow.id;
 
   // 4 · Cashflows, chunked. A 40-year daily deal runs to ~260k rows and a
   //     single insert of that size is what starved the pool in the past.
@@ -23073,6 +23331,28 @@ async function _importExternalSnapshotInner(snap, opts){
 
   return { created, dealId: deal.id, snapshotRowId: snapRow.id, unchanged: false,
            cashflowRows: rows.length, changes, postedAffected };
+
+  } catch(err){
+    /* Roll back the snapshot and anything hanging off it. Leaving the wreckage
+       behind does not merely waste a row: snapshot_id is derived from the parse,
+       so the orphan blocks every retry of the same file on the unique
+       (deal_id, snapshot_id) — turning one transient failure into a permanent
+       one, and reporting it as a duplicate-key error that says nothing about
+       the original cause. */
+    if(_snapRowId){
+      try {
+        await sb.from('external_cashflows').delete().eq('snapshot_id', _snapRowId);
+        await sb.from('external_snapshot_changes').delete().eq('snapshot_id', _snapRowId);
+        await sb.from('external_snapshots').delete().eq('id', _snapRowId);
+        console.warn('[portf] import failed — rolled back snapshot ' + _snapRowId +
+                     ' so the same file can be retried. Cause:', err && (err.message || err));
+      } catch(cleanupErr){
+        console.error('[portf] rollback FAILED. Snapshot ' + _snapRowId + ' is orphaned and ' +
+                      'will block re-importing this file until it is deleted:', cleanupErr);
+      }
+    }
+    throw err;
+  }
 }
 
 // Public API — open/close.
