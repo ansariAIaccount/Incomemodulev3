@@ -22519,7 +22519,8 @@ window.loadExternalDeal = async function(dealId){
     const { data: page, error } = await sb.from('external_cashflows')
       .select('flow_date, external_tranche_id, external_component_id, drawdown_lot_id, ' +
               'posting_type, settlement_type, balance_basis, is_flat, ' +
-              'days_covered, basis_balance, rate, amount, cash_settled')
+              'days_covered, days_covered_stated, period_start, period_end, ' +
+              'verification_status, basis_balance, rate, amount, cash_settled')
       .eq('deal_id', dealId)
       /* Scope to the snapshot we just read, not to the deal. Re-importing a
          workbook writes a second set of rows and marks the older snapshot
@@ -22663,6 +22664,24 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
       '<span class="chip purple" style="font-size:10.5px;">Fees · cash ' + money(tot.feeCash) + '</span>' +
       (tot.feePik ? '<span class="chip amber" style="font-size:10.5px;">Fees · PIK ' + money(tot.feePik) + '</span>' : '') +
       '<span class="chip green"  style="font-size:10.5px;">Cash settled ' + money(tot.cashSettled) + '</span>' +
+      (function(){
+        /* How much of this schedule PCS could check if it recalculated it. An
+           amount we merely recorded and an amount we verified are different
+           things, and totalling them together without saying so is the quiet
+           way to imply assurance that does not exist. */
+        var v = { full:0, flat:0, unverified:0 };
+        rows.forEach(function(r){ var k = r.verification_status || 'unverified'; v[k] = (v[k]||0) + 1; });
+        var out = '';
+        if(v.unverified) out += '<span class="chip red" style="font-size:10.5px;" ' +
+          'title="Amount only — the file does not give enough to recalculate it, so PCS cannot check it.">' +
+          v.unverified.toLocaleString() + ' unverified</span>';
+        if(v.flat) out += '<span class="chip gray" style="font-size:10.5px;" ' +
+          'title="Flat amount by design — a fee with no rate. Recorded, not checkable.">' +
+          v.flat.toLocaleString() + ' flat</span>';
+        if(v.full && (v.unverified || v.flat)) out += '<span class="chip green" style="font-size:10.5px;" ' +
+          'title="Enough detail to recalculate and check.">' + v.full.toLocaleString() + ' checkable</span>';
+        return out;
+      })() +
     '</div>';
 
   /* A partial load makes every total above a lie by omission. Red, not amber:
@@ -22700,10 +22719,21 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
     // reach the screen.
     const isFac = !r.external_tranche_id || r.external_tranche_id === '(facility)';
     const tr = isFac ? 'Facility' : (ctx.trancheNames[r.external_tranche_id] || r.external_tranche_id);
+    /* Days covered is either stated by the sender or worked out by us. Saying
+       which is the difference between a fact and an inference, and the old
+       tooltip claimed "inferred" even where the file now states the period. */
     const days = r.days_covered == null ? '—'
-      : '<span title="Inferred from the dates — the workbook does not state it">' + r.days_covered + '</span>';
-    html += '<tr>' +
-      td(esc(r.flow_date)) + td(days, true) + td(esc(tr)) + td(esc(comp)) +
+      : (r.days_covered_stated
+          ? '<span title="Stated by the sender — period start and end are in the file">' + r.days_covered + '</span>'
+          : '<span style="border-bottom:1px dotted var(--n-400);" title="Inferred from the dates — the workbook does not state the period">' + r.days_covered + '</span>');
+    const vs = r.verification_status || 'unverified';
+    const vsMark = vs === 'unverified'
+      ? ' <span class="chip red" style="font-size:8.5px; padding:1px 5px;" title="The file gives an amount but not enough to recalculate it, so PCS cannot check this figure.">unverified</span>'
+      : vs === 'flat'
+        ? ' <span class="chip gray" style="font-size:8.5px; padding:1px 5px;" title="Flat amount by design — a fee with no rate.">flat</span>'
+        : '';
+    html += '<tr' + (vs === 'unverified' ? ' style="background:#FFFBFB;"' : '') + '>' +
+      td(esc(r.flow_date)) + td(days, true) + td(esc(tr)) + td(esc(comp) + vsMark) +
       td('<span class="chip ' + (r.posting_type === 'fee' ? 'purple' : 'blue') + '" style="font-size:9.5px;">' +
          esc(r.posting_type || '—') + '</span>') +
       td(r.settlement_type
@@ -22870,8 +22900,32 @@ async function _importExternalSnapshotInner(snap, opts){
     const { error } = await sb.from('deals').update(dealFields).eq('id', deal.id);
     if(error) throw error;
   } else {
+    /* deals.deal_code is globally unique, but an external deal is identified by
+       (external_system, external_deal_id) — the code is only a label. So a
+       PortF deal whose id matches a code someone already used internally used
+       to die here on a raw "duplicate key" from Postgres, with nothing to say
+       which deal was in the way. (Smokey SP015 collided with "Smokey_Marija",
+       built by hand on 14 Sept.)
+
+       Blocking is wrong: these may or may not be the same deal, and deciding
+       that automatically would either merge two deals or silently make an
+       editable one read-only. Take a distinct code, keep the real identity, and
+       say plainly what happened and what it collided with. */
+    let dealCode = snap.externalDealId;
+    const { data: clash } = await sb.from('deals')
+      .select('id, name, source').eq('deal_code', dealCode).maybeSingle();
+    if(clash){
+      dealCode = snap.externalDealId + '-EXT';
+      const msg = 'Deal code "' + snap.externalDealId + '" is already used by "' + clash.name +
+        '" (' + (clash.source || 'internal') + '), so this import was filed as "' + dealCode +
+        '". They are held as separate deals — if they are in fact the same loan, merge them ' +
+        'deliberately rather than relying on the code.';
+      console.warn('[portf] ' + msg);
+      if(Array.isArray(opts.warnings)) opts.warnings.push(msg);
+      if(typeof toast === 'function') toast(msg, 9000);
+    }
     const { data, error } = await sb.from('deals')
-      .insert({ ...dealFields, deal_code: snap.externalDealId,
+      .insert({ ...dealFields, deal_code: dealCode,
                 framework: _fw || opts.framework || 'IFRS',
                 created_by: uid })          // required by the RLS insert policy
       .select('id').single();
@@ -22926,6 +22980,16 @@ async function _importExternalSnapshotInner(snap, opts){
     balance_basis: r.balanceBasis || null,
     is_flat: !!r.isFlat,
     days_covered: r.daysCovered == null ? 1 : r.daysCovered,
+    /* Whether the sender stated the period, or we inferred it. Without this the
+       two are indistinguishable once stored, and an inferred day count reads on
+       screen as though PortF had supplied it. */
+    period_start: r.periodStart || null,
+    period_end: r.periodEnd || null,
+    days_covered_stated: !!r.daysCoveredStated,
+    /* full / flat / unverified — whether PCS can independently recalculate this
+       amount. Defaulted rather than assumed: a row that arrives without the
+       parser classifying it is treated as unverified, never as checked. */
+    verification_status: r.verificationStatus || 'unverified',
     basis_balance: r.basisBalance,
     rate: r.rate,
     amount: r.amount,
