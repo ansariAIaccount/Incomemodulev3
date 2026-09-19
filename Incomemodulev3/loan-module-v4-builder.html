@@ -3905,6 +3905,11 @@
       </button>
       <span style="font-size:10.5px; color:var(--n-500);">Click any row to expand</span>
     </div>
+    <!-- What we are entitled to claim about the floating rate under these
+         numbers. Populated by __renderRfrConventionNote from the schedule's
+         rfrConventions verdict; hidden entirely for fixed-rate deals and for
+         any deal not using the compounded path. -->
+    <div id="cf-rfr-conventions" style="display:none; margin-bottom:8px;"></div>
     <div id="cf-stage1-kpis" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2"></div>
     <!-- All-in yield chart — EIR over the deal period. Renders as inline SVG
          (no external chart lib). Populated by renderStage1AllInYield(). -->
@@ -12437,11 +12442,15 @@ window.SB = (function(){
               interest_component_id: icId,
               term_no:               i + 1,
               tenor:                 tr.tenor || '3M',
-              lookback_days:         tr.lookbackDays || 0,
-              observation_shift:     tr.observationShift || 0,
-              lockout_days:          tr.lockoutDays || 0,
-              daily_compounding:     !!tr.dailyCompounding,
-              weighted:              !!tr.weighted
+              // Preserve "not stated" as NULL rather than collapsing it to a
+              // zero-day lookback, which is a real convention and not an
+              // absence. See the conventions_source comment on the table.
+              lookback_days:         tr.lookbackDays     == null ? null : +tr.lookbackDays,
+              observation_shift:     tr.observationShift == null ? null : +tr.observationShift,
+              lockout_days:          tr.lockoutDays      == null ? null : +tr.lockoutDays,
+              daily_compounding:     tr.dailyCompounding == null ? null : !!tr.dailyCompounding,
+              weighted:              tr.weighted         == null ? null : !!tr.weighted,
+              conventions_source:    tr.conventionsSource || null
             }));
             const { error: trmErr } = await _client.from('interest_terms').insert(rows);
             if(trmErr){ console.error('[SB] saveDeal: terms:', trmErr); return { ok:false, reason: trmErr.message }; }
@@ -13106,11 +13115,16 @@ window.SB = (function(){
               capBps:              +ic.cap_bps   || 0,
               terms:               sort(ic.interest_terms, 'term_no').map(tr => ({
                 tenor: tr.tenor,
-                lookbackDays:     +tr.lookback_days     || 0,
-                observationShift: +tr.observation_shift || 0,
-                lockoutDays:      +tr.lockout_days      || 0,
-                dailyCompounding: !!tr.daily_compounding,
-                weighted:         !!tr.weighted
+                // null is load-bearing here: it means nobody told us the
+                // convention. `|| 0` would turn that into "zero-day lookback,
+                // no lockout, no shift" — not an absence but a specific
+                // convention, and the wrong one for most SONIA loans.
+                lookbackDays:     tr.lookback_days     == null ? null : +tr.lookback_days,
+                observationShift: tr.observation_shift == null ? null : +tr.observation_shift,
+                lockoutDays:      tr.lockout_days      == null ? null : +tr.lockout_days,
+                dailyCompounding: tr.daily_compounding == null ? null : !!tr.daily_compounding,
+                weighted:         tr.weighted          == null ? null : !!tr.weighted,
+                conventionsSource: tr.conventions_source || null
               })),
               spreads:             (ic.interest_spreads || []).map(sp => ({
                 from: sp.effective_from, to: sp.effective_to, bps: +sp.bps || 0, note: sp.note || ''
@@ -22487,12 +22501,19 @@ window.externalSnapshotToBuilder = function(snap){
       name: c.name,
       baseIndex: c.index || (c.rateStructure === 'fixed' ? 'FIXED' : 'SOFR'),
       baseValue: c.rate == null ? 0 : +c.rate,
+      // A convention PortF did not state stays null. Defaulting it to 0 would
+      // silently assert "no lookback, no lockout, no observation shift" — a
+      // specific and usually wrong recipe — and the resulting rate would look
+      // as authoritative as one we were actually told.
       terms: [{
         tenor: c.terms || '3M',
-        lookbackDays: c.lookbackDays == null ? 0 : +c.lookbackDays,
-        observationShift: c.observationShift == null ? 0 : +c.observationShift,
-        lockoutDays: c.lockoutDays == null ? 0 : +c.lockoutDays,
-        dailyCompounding: true, weighted: false
+        lookbackDays:     c.lookbackDays     == null ? null : +c.lookbackDays,
+        observationShift: c.observationShift == null ? null : +c.observationShift,
+        lockoutDays:      c.lockoutDays      == null ? null : +c.lockoutDays,
+        dailyCompounding: c.dailyCompounding == null ? null : !!c.dailyCompounding,
+        weighted:         c.weighted         == null ? null : !!c.weighted,
+        conventionsSource: (c.lookbackDays != null || c.lockoutDays != null || c.observationShift != null)
+                             ? 'stated' : null
       }],
       // PortF sends an all-in rate, not base + margin. Emitting a zero-bps
       // band keeps the Builder's spread model satisfied without inventing a
@@ -35363,8 +35384,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     };
   }
   function newTerm(){
-    return { tenor:'3M', lookbackDays: 5, observationShift: 0, lockoutDays: 0,
-             dailyCompounding: true, weighted: false };
+    // Deliberately blank. A brand-new term states no compounding convention,
+    // because nobody has told us one yet. The old defaults (5 / 0 / 0) were
+    // written onto every deal in the workspace and then read back as though
+    // the deal had chosen them — a lookback of 5 is a real term of a real loan
+    // agreement, not a sensible placeholder.
+    return { tenor:'3M', lookbackDays: null, observationShift: null, lockoutDays: null,
+             dailyCompounding: null, weighted: null, conventionsSource: null };
   }
   function newFee(){
     return {
@@ -35680,9 +35706,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             <select data-tm-field="tenor" data-tidx="${tidx}" data-icidx="${ici}" data-tidx2="${ti}" class="border rounded px-1 py-0.5 text-[10px] bg-white">
               ${['1M','3M','6M','12M','O/N'].map(x => `<option ${term.tenor===x?'selected':''} value="${x}">${x}</option>`).join('')}
             </select>
-            <label>Lookback</label><input data-tm-field="lookbackDays" data-tidx="${tidx}" data-icidx="${ici}" data-tidx2="${ti}" type="number" min="0" max="60" value="${term.lookbackDays}" class="border rounded px-1 py-0.5 text-[10px] bg-white w-14"/>
-            <label>Lockout</label><input data-tm-field="lockoutDays" data-tidx="${tidx}" data-icidx="${ici}" data-tidx2="${ti}" type="number" min="0" max="60" value="${term.lockoutDays}" class="border rounded px-1 py-0.5 text-[10px] bg-white w-14"/>
-            <label>Obs shift</label><input data-tm-field="observationShift" data-tidx="${tidx}" data-icidx="${ici}" data-tidx2="${ti}" type="number" min="0" max="10" value="${term.observationShift}" class="border rounded px-1 py-0.5 text-[10px] bg-white w-14"/>
+            <!-- Empty means "not stated", and is rendered empty rather than as
+                 0, because 0 is itself a convention (compound every day right
+                 up to period end, no notice to the borrower) and not the same
+                 claim. The placeholder says so. -->
+            <label>Lookback</label><input data-tm-field="lookbackDays" data-tidx="${tidx}" data-icidx="${ici}" data-tidx2="${ti}" type="number" min="0" max="60" value="${term.lookbackDays ?? ''}" placeholder="—" title="Business days. Leave blank if the loan agreement does not state it — blank is recorded as 'not stated', not as zero." class="border rounded px-1 py-0.5 text-[10px] bg-white w-14"/>
+            <label>Lockout</label><input data-tm-field="lockoutDays" data-tidx="${tidx}" data-icidx="${ici}" data-tidx2="${ti}" type="number" min="0" max="60" value="${term.lockoutDays ?? ''}" placeholder="—" title="Business days. Blank = not stated." class="border rounded px-1 py-0.5 text-[10px] bg-white w-14"/>
+            <label>Obs shift</label><input data-tm-field="observationShift" data-tidx="${tidx}" data-icidx="${ici}" data-tidx2="${ti}" type="number" min="0" max="10" value="${term.observationShift ?? ''}" placeholder="—" title="Business days. Blank = not stated." class="border rounded px-1 py-0.5 text-[10px] bg-white w-14"/>
             <button data-t-action="rmTerm" data-tidx="${tidx}" data-icidx="${ici}" data-tidx2="${ti}" class="ml-auto text-red-600 underline text-[10px]">x</button>
           </div>`).join('')}</div>
         <button data-t-action="addTerm" data-tidx="${tidx}" data-icidx="${ici}" class="mat-btn outline !py-0.5 !px-2 text-[10px] mt-1"><span class="material-icons-outlined text-[12px]">add</span>Add term</button>
@@ -35914,8 +35944,20 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         const ic = t.interestComponents[+el.dataset.icidx];
         const term = ic.terms[+el.dataset.tidx2];
         const f = el.dataset.tmField;
-        const val = (el.type === 'number') ? (parseFloat(el.value) || 0) : el.value;
+        // An empty numeric box means "not stated" and must stay null.
+        // `parseFloat('') || 0` would have written 0 — a different claim, and
+        // the one that made every unstated convention look decided.
+        const val = (el.type === 'number')
+          ? (el.value.trim() === '' ? null : (parseFloat(el.value) || 0))
+          : el.value;
         term[f] = val;
+        // Typing a convention in by hand is a person stating it. Clearing the
+        // last one drops the claim back to nothing.
+        if(['lookbackDays','lockoutDays','observationShift'].includes(f)){
+          const anyStated = ['lookbackDays','lockoutDays','observationShift']
+            .some(k => term[k] != null);
+          term.conventionsSource = anyStated ? 'stated' : null;
+        }
         recompute();
       };
     });
@@ -38228,11 +38270,16 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         index:            firstIC.baseIndex,                                     // 'SONIA' / 'SOFR' / 'TermSOFR' / 'ESTR' / 'BBSW' / etc.
         baseRate:         firstIC.baseIndex !== 'FIXED' ? firstIC.baseValue : 0, // current observed level (used as fallback when no fixings series)
         tenor:            firstIC.terms?.[0]?.tenor            || '3M',
-        lookbackDays:     +firstIC.terms?.[0]?.lookbackDays    || 0,
-        observationShift: +firstIC.terms?.[0]?.observationShift|| 0,
-        lockoutDays:      +firstIC.terms?.[0]?.lockoutDays     || 0,
-        dailyCompounding: !!firstIC.terms?.[0]?.dailyCompounding,
-        weighted:         !!firstIC.terms?.[0]?.weighted,
+        // null survives the projection. computeCompoundedRFR still treats a
+        // null as 0 when it has to produce a number, but rfrConventionStatus
+        // can now tell "we were told zero" apart from "we were told nothing",
+        // and the caller records which it was.
+        lookbackDays:     firstIC.terms?.[0]?.lookbackDays     ?? null,
+        observationShift: firstIC.terms?.[0]?.observationShift ?? null,
+        lockoutDays:      firstIC.terms?.[0]?.lockoutDays      ?? null,
+        dailyCompounding: firstIC.terms?.[0]?.dailyCompounding ?? null,
+        weighted:         firstIC.terms?.[0]?.weighted         ?? null,
+        conventionsSource: firstIC.terms?.[0]?.conventionsSource || null,
         // Optional fixings series for true compounding. Empty by default — the
         // helper falls back to `baseRate` for any day not covered. Format:
         // [{ date:'2026-01-15', rate: 0.0425 }, ...]
@@ -40771,12 +40818,58 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   }
 
   // ─── Stage 1 — Cashflow Generation view (consumes builder output) ───
+  /* States, on the Cashflow tab, what we are actually entitled to claim about
+     the floating rate underneath the numbers.
+
+     The reason this exists: a compounded rate built with lookback 0 / lockout 0
+     / shift 0 because nobody told us the conventions is arithmetically
+     identical to one where the borrower genuinely has none. Both render as a
+     percentage to four decimal places and look equally settled. The difference
+     between them is a basis point or two per period — and the difference
+     between "PortF is wrong" and "we guessed differently from PortF" when the
+     reconciliation finally runs. */
+  function renderRfrConventionNote(){
+    const el = $b('cf-rfr-conventions');
+    if(!el) return;
+    // `M` is a top-level `const` in another script block, so it is in the
+    // shared global lexical scope but is NOT a property of window — hence the
+    // typeof guard rather than `window.M`.
+    const sched = (typeof M !== 'undefined' && M && M.schedule) || null;
+    const v = (sched && sched.rfrConventions) || null;
+    // 'n/a' means fixed-rate or no fixings series — the question doesn't arise,
+    // so say nothing rather than adding noise to every deal in the book.
+    if(!v || v.status === 'n/a'){ el.style.display = 'none'; el.innerHTML = ''; return; }
+
+    const skin = v.status === 'stated'
+      ? { bg:'#F0FDF4', bd:'#BBF7D0', fg:'#166534', icon:'ti-circle-check',   lead:'Conventions stated' }
+      : v.status === 'assumed'
+      ? { bg:'#FFFBEB', bd:'#FDE68A', fg:'#92400E', icon:'ti-alert-triangle', lead:'Conventions assumed' }
+      : { bg:'#FEF2F2', bd:'#FECACA', fg:'#991B1B', icon:'ti-alert-circle',   lead:'Conventions not stated' };
+
+    el.style.display = '';
+    el.innerHTML =
+      '<div style="display:flex; gap:8px; align-items:flex-start; padding:8px 11px; background:' + skin.bg +
+      '; border:0.5px solid ' + skin.bd + '; border-radius:8px;">' +
+        '<i class="ti ' + skin.icon + '" style="font-size:14px; color:' + skin.fg + '; margin-top:1px;"></i>' +
+        '<div style="font-size:11px; line-height:1.45; color:' + skin.fg + ';">' +
+          '<b>' + skin.lead + '</b>' +
+          (v.describe ? ' · ' + escapeHtml(v.describe) : '') +
+          '<div style="margin-top:2px; opacity:0.85;">' + escapeHtml(v.reason) + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+  window.__renderRfrConventionNote = renderRfrConventionNote;
+
   function renderStage1Cashflows(rows){
     const host = $b('cf-stage1-host');
     const chip = $b('cf-stage1-chip');
     const kpis = $b('cf-stage1-kpis');
     const status = document.getElementById('portf-status');
     if(!host) return;
+    // Runs for external and internal alike — on an external deal the question
+    // is exactly as live, because the conventions decide whether PortF's
+    // floating figures could ever be checked.
+    renderRfrConventionNote();
     /* External deals show the schedule they SENT us, not one we computed.
        Running the engine here and presenting the result would put our
        arithmetic on screen under a heading that says it came from PortF. */

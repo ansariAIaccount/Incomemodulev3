@@ -1014,6 +1014,19 @@
     return out;
   }
 
+  /* A compounding convention expressed as a number of business days.
+     Accepts 5, "5", "5 days", "5 business days", "5BD". Returns null for an
+     empty cell and for anything with no number in it ("n/a", "none", "TBC") —
+     null means "not stated", which is NOT the same as 0. Zero is a real
+     convention (no lookback at all); the distinction is the whole point, so a
+     cell reading "0" returns 0 and an empty one returns null. */
+  function conventionDays(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return isFinite(v) ? Math.round(v) : null;
+    var m = String(v).match(/-?\d+/);
+    return m ? parseInt(m[0], 10) : null;
+  }
+
   function readComponentsV04(grids, key, externalDealId, trancheBySource, validate, warn, err) {
     var grid = grids[key];
     if (!grid) return [];
@@ -1040,10 +1053,13 @@
       /* A compounded RFR cannot be reproduced without these three. Saying so
          per component is far more actionable than one warning per file. */
       if (floating) {
-        var lb = txt(gv(grid, r, t.col, 'Lookback')),
-            lo = txt(gv(grid, r, t.col, 'Lockout')),
-            os = txt(gv(grid, r, t.col, 'Obs Shift'));
-        if (!lb || !lo || !os) {
+        /* Judged on the parsed value, not the raw text: "n/a" and "TBC" are
+           cells someone filled in, but they state nothing. A literal 0 does
+           state something and is not flagged. */
+        var lb = conventionDays(gv(grid, r, t.col, 'Lookback')),
+            lo = conventionDays(gv(grid, r, t.col, 'Lockout')),
+            os = conventionDays(gv(grid, r, t.col, 'Obs Shift'));
+        if (lb === null || lo === null || os === null) {
           warn(key + ': component "' + (nm || id) + '" is ' + itype + ' but does not state ' +
                'lookback / lockout / observation shift. A compounded rate cannot be reproduced ' +
                'without them, so its amounts can be recorded but not checked.');
@@ -1064,9 +1080,17 @@
         accrualFrequency: mapOrReport(FREQ_MAP, txt(gv(grid, r, t.col, 'Accrual Frequency')), 'accrual', key, warn),
         calculationBasis: mapOrReport(BASIS_MAP, txt(gv(grid, r, t.col, 'Balance Basis')), 'balance basis', key, warn),
         feeType: txt(gv(grid, r, t.col, 'Fee Types')) || null,
+        /* Raw text kept for the audit trail; the *Days fields below are what
+           the Builder and the engine actually consume. Until now only the raw
+           strings existed under these names, while the mapper looked for
+           lookbackDays / lockoutDays / observationShift — so every stated
+           convention was read, discarded, and silently replaced by zero. */
         lookback: txt(gv(grid, r, t.col, 'Lookback')) || null,
         lockout: txt(gv(grid, r, t.col, 'Lockout')) || null,
         obsShift: txt(gv(grid, r, t.col, 'Obs Shift')) || null,
+        lookbackDays:     conventionDays(gv(grid, r, t.col, 'Lookback')),
+        lockoutDays:      conventionDays(gv(grid, r, t.col, 'Lockout')),
+        observationShift: conventionDays(gv(grid, r, t.col, 'Obs Shift')),
         firstSettlementDate: iso(gv(grid, r, t.col, 'First Settlement Date')),
         rate: base
       });

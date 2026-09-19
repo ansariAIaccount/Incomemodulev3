@@ -1203,9 +1203,79 @@ function dayCountDenom(dayCount){
   return 360;
 }
 
+// ─── Are we entitled to believe the compounded rate we just produced? ───────
+//
+// computeCompoundedRFR will always hand back a number. That is the problem it
+// creates: a rate compounded with lookback 0 / lockout 0 / shift 0 because
+// nobody told us the conventions is arithmetically identical to one where the
+// counterparty genuinely uses none, and there is no way to tell them apart
+// downstream. A lookback of 5 vs 0 on the same fixings moves the rate by a
+// basis point or two — immaterial on one period, not immaterial across 210 of
+// them on a £1.4bn book, and fatal to a reconciliation, because a difference
+// against the counterparty can no longer be read as an error.
+//
+// So the number is separated from the claim. This reports what we actually
+// know, and callers record it next to the rate.
+//
+//   'stated'    — the conventions came from the loan agreement or the
+//                 counterparty. A difference against their number is a real
+//                 difference and worth investigating.
+//   'assumed'   — someone (a seeder, a default, a person filling a form)
+//                 supplied them. The rate is usable for our own accrual; it
+//                 cannot verify anyone else's figure.
+//   'unstated'  — no conventions recorded at all. The rate below is computed
+//                 as though there were none, which is itself a convention and
+//                 usually the wrong one.
+//   'n/a'       — not a compounded RFR, or no fixings series, so the question
+//                 does not arise.
+function rfrConventionStatus(instr){
+  const rfr = instr && instr.rfr;
+  if(!rfr || !Array.isArray(rfr.fixings) || rfr.fixings.length === 0){
+    return { status:'n/a', verifiable:false, describe:'',
+             reason:'No fixings series — the compounded path is not in use.' };
+  }
+  // A plain-English rendering of what we are using, so the UI does not need to
+  // reach back into the instrument to say it.
+  const bits = [];
+  if(rfr.index)                    bits.push(String(rfr.index));
+  if(rfr.dailyCompounding === true)  bits.push('compounded daily');
+  if(rfr.dailyCompounding === false) bits.push('simple average');
+  if(rfr.lookbackDays     != null) bits.push(rfr.lookbackDays + '-day lookback');
+  if(rfr.lockoutDays      != null) bits.push(rfr.lockoutDays + '-day lockout');
+  if(rfr.observationShift != null) bits.push(rfr.observationShift + '-day observation shift');
+  const describe = bits.join(' · ');
+
+  const missing = ['lookbackDays','observationShift','lockoutDays','dailyCompounding']
+                    .filter(k => rfr[k] == null);
+  if(missing.length === 4){
+    return {
+      status:'unstated', verifiable:false, missing, describe,
+      reason:'No compounding conventions recorded. The rate below is computed with '
+           + 'no lookback, no lockout and no observation shift — which is itself a '
+           + 'convention, not an absence — so it cannot be reconciled against the '
+           + 'counterparty.'
+    };
+  }
+  if(rfr.conventionsSource === 'stated'){
+    return { status:'stated', verifiable:true, missing, describe,
+             reason: missing.length
+               ? 'Supplied by the counterparty or the loan agreement. Not stated: ' + missing.join(', ') + '.'
+               : 'Supplied by the counterparty or the loan agreement — a difference against their figure is a real difference.' };
+  }
+  return {
+    status:'assumed', verifiable:false, missing, describe,
+    reason:'These conventions were assumed, not stated. Fine for our own accrual; '
+         + 'not evidence that anyone else\'s figure is wrong.'
+  };
+}
+
 function computeCompoundedRFR(asOfDate, instr){
   const rfr = instr && instr.rfr;
   if(!rfr || !Array.isArray(rfr.fixings) || rfr.fixings.length === 0) return null;
+  // `|| 0` is deliberate and safe HERE: this function's job is to produce a
+  // number, and with nothing stated, zero is the only defensible arithmetic.
+  // What must not happen is that choice being invisible — rfrConventionStatus
+  // above reports it, and the caller records it alongside the rate.
   const lookback   = +rfr.lookbackDays     || 0;
   const obsShift   = +rfr.observationShift || 0;
   const lockout    = +rfr.lockoutDays      || 0;
@@ -2067,6 +2137,11 @@ function lookupMarginBps(dateISO){
   // Phase A covenants — surface enriched covenant array for Dashboard / JE
   // generator to render breach banners + framework-aware memos.
   rows.covenants = enrichedCovenants;
+  // What we are entitled to claim about the floating rate underneath these
+  // rows. Carried on the schedule so the Cashflow tab, the accounting run and
+  // any future reconciliation all read the same verdict rather than each
+  // re-deriving it — or, worse, none of them asking.
+  rows.rfrConventions = rfrConventionStatus(instr);
   return rows;
 }
 
