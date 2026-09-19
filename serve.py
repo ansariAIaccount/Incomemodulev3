@@ -45,24 +45,30 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         self.send_header('Expires', '0')
         super().end_headers()
 
-    def send_response(self, *args, **kwargs):
-        # Suppress the default Last-Modified, which is what invites heuristic
-        # caching in the first place.
-        super().send_response(*args, **kwargs)
-
     def log_message(self, fmt, *args):
         # One line per request, without the date noise.
         sys.stderr.write("%s\n" % (fmt % args))
 
 
 if __name__ == '__main__':
-    os.chdir(os.path.dirname(os.path.abspath(__file__)) or '.')
+    # Serve the CURRENT directory, exactly like `python -m http.server` does —
+    # NOT the directory this file happens to live in. serve.py sits at the repo
+    # root while loan-module-v4-builder.html is a level down, so chdir'ing to
+    # the script's own folder would silently change every URL.
     srv = ThreadingHTTPServer(('127.0.0.1', PORT), NoCacheHandler)
+    here = os.getcwd()
+    app = os.path.join(here, 'loan-module-v4-builder.html')
     print('PCS Loan Module — no-cache static server')
-    print('  serving : %s' % os.getcwd())
+    print('  serving : %s' % here)
     print('  url     : http://localhost:%d/loan-module-v4-builder.html' % PORT)
     print('  caching : disabled (Cache-Control: no-store on every response)')
     print('  stop    : Ctrl-C')
+    if not os.path.exists(app):
+        print('')
+        print('  WARNING: loan-module-v4-builder.html is not in this directory.')
+        print('           You are almost certainly in the wrong folder — the URL')
+        print('           above will 404. cd to the folder holding the app first.')
+    print('')
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

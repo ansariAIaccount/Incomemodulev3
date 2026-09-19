@@ -6939,7 +6939,10 @@
           </select>
         </div>
         <div id="rfx-summary" style="font-size:11px; color:var(--n-600); padding:8px 12px; background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:8px; align-self:end;">—</div>
-        <div style="align-self:end;">
+        <div style="align-self:end; display:flex; gap:6px;">
+          <button id="rfx-pull-btn" onclick="window.__rfxPullPublished && window.__rfxPullPublished()" class="mat-btn primary !py-1 !px-3 text-[11px]" title="Fetch the published daily fixings straight from the issuing central bank">
+            <i class="ti ti-cloud-download" style="font-size:12px;"></i>Pull published
+          </button>
           <button onclick="window.__rfxSeedSample && window.__rfxSeedSample()" class="mat-btn outline !py-1 !px-2 text-[11px]" title="Seed 90 days of illustrative fixings for demo purposes">
             <i class="ti ti-flask" style="font-size:12px;"></i>Seed sample 90d
           </button>
@@ -47156,10 +47159,31 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     a.click(); URL.revokeObjectURL(url);
   };
 
+  // Indices we can fetch straight from the publisher. Anything not listed here
+  // still imports by CSV — the button just says so rather than pretending.
+  const RFX_PUBLISHED = {
+    SONIA: 'Bank of England',
+    SOFR:  'Federal Reserve Bank of New York'
+  };
+
+  function _rfxSyncPullBtn(){
+    const btn = $('rfx-pull-btn');
+    if(!btn) return;
+    const idx = $('rfx-index')?.value;
+    const pub = RFX_PUBLISHED[idx];
+    btn.disabled = !pub;
+    btn.style.opacity = pub ? '' : '0.45';
+    btn.style.cursor  = pub ? '' : 'not-allowed';
+    btn.title = pub
+      ? 'Fetch published ' + idx + ' fixings from the ' + pub
+      : 'No published feed wired up for ' + idx + ' yet — import a CSV instead';
+  }
+
   window.__rfxRefresh = async function(){
     const idx = $('rfx-index')?.value;
     const listEl = $('rfx-list');
     const sumEl  = $('rfx-summary');
+    _rfxSyncPullBtn();
     if(!listEl || !sumEl) return;
     listEl.innerHTML = '<div style="padding:14px; text-align:center; color:var(--n-500); font-size:11px;">Loading…</div>';
     if(!window.SB?.listFixings){ listEl.innerHTML = '<div style="padding:14px; text-align:center; color:var(--n-500); font-size:11px;">Not connected.</div>'; return; }
@@ -47278,11 +47302,77 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     try { if(typeof window.recompute === 'function') window.recompute(); } catch(_){}
   };
 
+  // Pull the real published fixings for the selected index.
+  //
+  // The fetch happens in the `rate-fixings-pull` edge function, not here. The
+  // Bank of England sends no CORS headers, so a fetch from this page never
+  // leaves the browser; routing both publishers through one function keeps the
+  // button's behaviour identical across indices.
+  window.__rfxPullPublished = async function(){
+    const idx = $('rfx-index')?.value;
+    const pub = RFX_PUBLISHED[idx];
+    if(!pub){
+      if(typeof toast === 'function') toast('No published feed for ' + idx + ' yet — import a CSV.', 4000, { kind:'warning' });
+      return;
+    }
+    const client = window.SB && window.SB.client;
+    if(!client){ if(typeof toast === 'function') toast('Not connected to the database.', 4000, { kind:'error' }); return; }
+
+    const btn = $('rfx-pull-btn');
+    const label = btn ? btn.innerHTML : '';
+    if(btn){ btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:12px;"></i>Pulling…'; }
+
+    try {
+      const { data, error } = await client.functions.invoke('rate-fixings-pull', { body:{ index: idx } });
+
+      // functions.invoke surfaces a non-2xx as `error` with the body unread, so
+      // the useful message is inside the response, not in error.message.
+      let res = data;
+      if(error && error.context && typeof error.context.json === 'function'){
+        try { res = await error.context.json(); } catch(_){}
+      }
+
+      if(!res || !res.ok){
+        const msg = (res && res.error) || (error && error.message) || 'Unknown failure.';
+        if(typeof toast === 'function') toast('Pull failed: ' + msg, 8000, { kind:'error' });
+        console.error('[RFX] pull failed:', res || error);
+        return;
+      }
+
+      if(typeof toast === 'function'){
+        toast('Pulled ' + res.saved + ' ' + idx + ' fixings (' + res.from + ' → ' + res.to + ') from the ' + pub,
+              5000, { kind:'success' });
+      }
+      await window.__rfxRefresh();
+      try { if(typeof window.recompute === 'function') window.recompute(); } catch(_){}
+
+    } catch(err){
+      if(typeof toast === 'function') toast('Pull failed: ' + (err.message || err), 8000, { kind:'error' });
+      console.error('[RFX] pull threw:', err);
+    } finally {
+      if(btn){ btn.innerHTML = label; }
+      _rfxSyncPullBtn();
+    }
+  };
+
   // Seed 90 days of illustrative fixings for the selected index. Uses the
   // active deal's current baseRate as the centre and adds daily noise
   // within ±5 bps so the compounded-RFR calc has variation to work with.
   window.__rfxSeedSample = async function(){
     const idx = $('rfx-index')?.value;
+    // Synthetic fixings upsert over real ones on the same date, and a made-up
+    // rate is indistinguishable from a published one once it is in the table.
+    // Seeded SONIA sat at 5.2–5.4% while the real fixing was 3.73%, and nothing
+    // in the UI said so. If a published curve is already loaded, say so first.
+    try {
+      const existing = await window.SB.listFixings(idx);
+      const real = existing.filter(r => (r.source || '') !== 'sample seed');
+      if(real.length && !confirm(
+          idx + ' already has ' + real.length + ' published fixings loaded ('
+          + real[0].fix_date + ' → ' + real[real.length-1].fix_date + ').\n\n'
+          + 'Seeding overwrites any of them that fall in the last 90 days with '
+          + 'made-up rates. Continue?')) return;
+    } catch(_){ /* fall through — a failed check should not block the seeder */ }
     // Guess a sensible centre rate per index
     const centres = { BBSY:0.0435, BBSW:0.0432, SOFR:0.0533, TermSOFR:0.0530, SONIA:0.0525, ESTR:0.0405, EURIBOR:0.0410 };
     const centre = centres[idx] || 0.05;
