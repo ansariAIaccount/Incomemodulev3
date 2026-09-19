@@ -197,16 +197,24 @@
   // proxy through another host.
   const GUARDED = /^(https?:\/\/[^/]+\.supabase\.co\/|https?:\/\/localhost:3033\/|https?:\/\/127\.0\.0\.1:3033\/)/i;
   const UPLOAD_PATH = /\/api\/(extract|notice)\//i;
+  // Calls that wait on a third party rather than on our own database. The
+  // fixings pull sits behind a central bank, and a central bank having a slow
+  // morning is not the same event as our DB being unreachable — killing it at
+  // 15s aborts a pull that was going to succeed and reports it as our outage.
+  const THIRD_PARTY_PATH = /\/functions\/v1\/rate-fixings-pull\b/i;
 
-  const DEFAULT_TIMEOUT_MS = 15000;   // reads, RPCs, auth calls
-  const UPLOAD_TIMEOUT_MS  = 45000;   // multipart file uploads
-  const SLOW_WARN_MS       = 8000;    // console.warn threshold
+  const DEFAULT_TIMEOUT_MS     = 15000;   // reads, RPCs, auth calls
+  const UPLOAD_TIMEOUT_MS      = 45000;   // multipart file uploads
+  const THIRD_PARTY_TIMEOUT_MS = 40000;   // we wait on someone else's server
+  const SLOW_WARN_MS           = 8000;    // console.warn threshold
 
   window.fetch = function(input, init){
     const url = (typeof input === 'string') ? input : (input && input.url) || '';
     if(!GUARDED.test(url)) return originalFetch(input, init);
 
-    const budget = UPLOAD_PATH.test(url) ? UPLOAD_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+    const budget = UPLOAD_PATH.test(url)      ? UPLOAD_TIMEOUT_MS
+                 : THIRD_PARTY_PATH.test(url) ? THIRD_PARTY_TIMEOUT_MS
+                 :                              DEFAULT_TIMEOUT_MS;
 
     // Respect any existing AbortSignal — chain ours behind it so callers
     // that already have their own controller keep their cancel path.
@@ -21490,7 +21498,10 @@ function openActiveDealModal(){
       const teamOk = isDB || team === 'All' || p.team === team;
       if(!teamOk) return false;
       if(!q) return true;
-      const hay = (p.label + ' ' + p.team + ' ' + (p.tag||'') + ' ' + p.key + ' ' + (p.dealCode||'')).toLowerCase();
+      // Include the calculation origin so "external" / "portf" / "pcs" narrow
+      // the list — the column is only half useful if you cannot filter on it.
+      const hay = (p.label + ' ' + p.team + ' ' + (p.tag||'') + ' ' + p.key + ' ' + (p.dealCode||'') +
+                   ' ' + (p.isExternal ? 'external ' + (p.externalSystem || '') : 'pcs internal')).toLowerCase();
       return hay.indexOf(q) >= 0;
     });
     // Extract cached metadata from each preset's built deal shape. Cheap
@@ -21531,20 +21542,60 @@ function openActiveDealModal(){
       return '<span style="background:' + c.bg + '; color:' + c.fg + '; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:700; letter-spacing:0.3px; white-space:nowrap;">' + c.label + '</span>';
     };
 
+    // Who produced the numbers — which is a different question from where the
+    // record is stored, and the more consequential one. An external deal's
+    // cashflows were calculated by the counterparty and are held read-only;
+    // PCS only does the accounting on top. Someone picking a deal to work on
+    // needs to know that before they open it, not after they find the Builder
+    // greyed out.
+    // deals.external_system stores a lowercase slug ('portf'). Display names
+    // are presentation, so they live here rather than in the data — but an
+    // unknown slug is shown as-is rather than guessed at, since inventing a
+    // capitalisation for a system nobody has heard of helps no one.
+    const SYSTEM_LABEL = { portf: 'PortF' };
+    const systemName = s => (s ? (SYSTEM_LABEL[String(s).toLowerCase()] || s) : null);
+
+    const calcBadge = p => {
+      if(p.isExternal){
+        const sys = systemName(p.externalSystem) || 'an external source';
+        return '<span title="Cashflows calculated by ' + String(sys).replace(/"/g,'&quot;') +
+               ' and loaded into PCS. Deal setup and cashflows are read-only; PCS does the accounting and posts to Investran." ' +
+               'style="background:#e0e7ff; color:#3730a3; padding:2px 7px; border-radius:6px; font-size:9.5px; font-weight:700; letter-spacing:0.3px; white-space:nowrap;">' +
+               '<i class="ti ti-file-import" style="font-size:10px; vertical-align:-1px; margin-right:3px;"></i>External' +
+               '</span>' +
+               (p.externalSystem
+                 ? '<div style="font-size:9.5px; color:#94a3b8; margin-top:2px; white-space:nowrap;">' + systemName(p.externalSystem) + '</div>'
+                 : '');
+      }
+      return '<span title="Built and calculated inside PCS. Cashflows, accounting and journals all come from the module\'s own engine." ' +
+             'style="background:#f0fdf4; color:#166534; padding:2px 7px; border-radius:6px; font-size:9.5px; font-weight:700; letter-spacing:0.3px; white-space:nowrap;">' +
+             '<i class="ti ti-calculator" style="font-size:10px; vertical-align:-1px; margin-right:3px;"></i>PCS' +
+             '</span>';
+    };
+
+    const STRUCTURE_STYLE = {
+      construction_mezz:       { bg:'#f3e8ff', fg:'#6b21a8', label:'Construction mezz' },
+      revolving_borrowing_base:{ bg:'#dcfce7', fg:'#166534', label:'Revolving BB' },
+      revolver:                { bg:'#e0f2fe', fg:'#075985', label:'Revolver' },
+      corporate_term:          { bg:'#f1f5f9', fg:'#334155', label:'Corporate term' },
+      bilateral:               { bg:'#fef3c7', fg:'#92400e', label:'Bilateral' },
+      term:                    { bg:'#f1f5f9', fg:'#334155', label:'Term' },
+      delayed_draw:            { bg:'#e0e7ff', fg:'#3730a3', label:'Delayed-draw' },
+      borrowing_base:          { bg:'#dcfce7', fg:'#166534', label:'Borrowing base' }
+    };
+    // Prefer the deal.structure label; fall back to facility.type for older deals.
+    const structureKey = (structure, facType) =>
+      structure || (facType === 'revolvingBorrowingBase' ? 'revolving_borrowing_base'
+                  : facType === 'revolver' ? 'revolver' : null);
+    // The sort must order by what the user can SEE, not by the underlying slug —
+    // "Revolving BB" and "revolving_borrowing_base" sort to different places, and
+    // a column that sorts by a hidden value looks broken.
+    const structureLabel = (structure, facType) => {
+      const c = STRUCTURE_STYLE[structureKey(structure, facType)];
+      return c ? c.label : '';
+    };
     const structureBadge = (structure, facType) => {
-      // Prefer the deal.structure label; fall back to facility.type for older deals
-      const key = structure || (facType === 'revolvingBorrowingBase' ? 'revolving_borrowing_base' : facType === 'revolver' ? 'revolver' : null);
-      const map = {
-        construction_mezz:       { bg:'#f3e8ff', fg:'#6b21a8', label:'Construction mezz' },
-        revolving_borrowing_base:{ bg:'#dcfce7', fg:'#166534', label:'Revolving BB' },
-        revolver:                { bg:'#e0f2fe', fg:'#075985', label:'Revolver' },
-        corporate_term:          { bg:'#f1f5f9', fg:'#334155', label:'Corporate term' },
-        bilateral:               { bg:'#fef3c7', fg:'#92400e', label:'Bilateral' },
-        term:                    { bg:'#f1f5f9', fg:'#334155', label:'Term' },
-        delayed_draw:            { bg:'#e0e7ff', fg:'#3730a3', label:'Delayed-draw' },
-        borrowing_base:          { bg:'#dcfce7', fg:'#166534', label:'Borrowing base' }
-      };
-      const c = map[key] || null;
+      const c = STRUCTURE_STYLE[structureKey(structure, facType)];
       if(!c) return '';
       return '<span style="background:' + c.bg + '; color:' + c.fg + '; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:600; white-space:nowrap;">' + c.label + '</span>';
     };
@@ -21571,15 +21622,56 @@ function openActiveDealModal(){
       return;
     }
 
-    // Flat, sortable data grid. DB-saved deals first, then everything else
-    // alphabetically. No complexity classification — just a professional table
-    // of the deals with the fields ops actually need.
-    filtered.sort((a, b) => {
-      const aDb = a.source === 'db' ? 0 : 1;
-      const bDb = b.source === 'db' ? 0 : 1;
-      if(aDb !== bDb) return aDb - bDb;
-      return (a.label || '').localeCompare(b.label || '');
-    });
+    // ─── Sorting ────────────────────────────────────────────────────────
+    // One value extractor per sortable column. Each returns either a number
+    // or a lower-cased string; mixing the two in one column would make the
+    // comparator's behaviour depend on the data, so each key sticks to one.
+    const SORT_VALUE = {
+      source:     p => (p.source === 'db' ? 0 : 1),
+      name:       p => (p.label || '').toLowerCase(),
+      calc:       p => (p.isExternal ? 0 : 1),
+      structure:  p => structureLabel(metaOf(p).structure, metaOf(p).facilityType).toLowerCase(),
+      framework:  p => (metaOf(p).framework || '').toLowerCase(),
+      team:       p => (p.team || '').toLowerCase(),
+      // null, not 0. The cell renders "—" when there is no commitment, which
+      // means "we don't know", and a deal of unknown size is not the smallest
+      // deal in the book — sorting it as zero puts it above a real £1m facility
+      // and quietly asserts something we were never told.
+      commitment: p => (+metaOf(p).commitment || null),
+      term:       p => metaOf(p).settle || null,        // ISO dates sort as strings
+      tfc:        p => { const m = metaOf(p); return (m.tranches||0) + (m.fees||0) + (m.covenants||0); }
+    };
+
+    const sort = window.__dealPickerSort;   // { col, dir } or null = natural order
+    if(sort && SORT_VALUE[sort.col]){
+      const get = SORT_VALUE[sort.col];
+      const blank = v => v === null || v === undefined || v === '';
+      filtered.sort((a, b) => {
+        const va = get(a), vb = get(b);
+        // Unknowns sink to the bottom in BOTH directions, before the direction
+        // multiplier is applied. A screen of "—" at the top of a descending
+        // sort tells you nothing and buries the rows that do have a value.
+        if(blank(va) && blank(vb)) return (a.label || '').localeCompare(b.label || '');
+        if(blank(va)) return 1;
+        if(blank(vb)) return -1;
+
+        const c = (typeof va === 'number' && typeof vb === 'number')
+          ? va - vb
+          : String(va).localeCompare(String(vb));
+        // Stable tie-break on name, so equal values keep a predictable order
+        // instead of shuffling between renders.
+        if(c === 0) return (a.label || '').localeCompare(b.label || '');
+        return c * sort.dir;
+      });
+    } else {
+      // Default: DB-saved deals first, then everything else alphabetically.
+      filtered.sort((a, b) => {
+        const aDb = a.source === 'db' ? 0 : 1;
+        const bDb = b.source === 'db' ? 0 : 1;
+        if(aDb !== bDb) return aDb - bDb;
+        return (a.label || '').localeCompare(b.label || '');
+      });
+    }
 
     // Build the grid — single table, sticky header, hover row highlight, current-deal row highlighted.
     const rows = filtered.map(p => {
@@ -21614,7 +21706,9 @@ function openActiveDealModal(){
               (m.dealCode || p.key) +
             '</div>' +
           '</td>' +
-          // 3. Structure
+          // 3. Calculated by — external counterparty, or PCS itself
+          '<td style="padding:8px 10px; vertical-align:middle;">' + calcBadge(p) + '</td>' +
+          // 4. Structure
           '<td style="padding:8px 10px; vertical-align:middle;">' +
             (structureBadge(m.structure, m.facilityType) || '<span style="color:#94a3b8; font-size:10.5px;">—</span>') +
           '</td>' +
@@ -21661,26 +21755,77 @@ function openActiveDealModal(){
       );
     }).join('');
 
+    // Header is generated rather than hand-written so the column list, the
+    // sort keys and the cell order cannot drift apart — adding a column to the
+    // table but forgetting its <th> is exactly the kind of silent mismatch this
+    // avoids. `col: null` marks a column that cannot be sorted.
+    const COLUMNS = [
+      { col:'source',     label:'Source',        align:'left',   width:'60px',
+        title:'Where the record lives. DB = saved in the database. PRESET = a built-in scenario.' },
+      { col:'name',       label:'Deal name',     align:'left' },
+      { col:'calc',       label:'Calculated by', align:'left',   width:'110px',
+        title:'Who calculated the cashflows. External = received from the counterparty and held read-only. PCS = built and calculated here.' },
+      { col:'structure',  label:'Structure',     align:'left' },
+      { col:'framework',  label:'Framework',     align:'left' },
+      { col:'team',       label:'Team',          align:'left' },
+      { col:'commitment', label:'Commitment',    align:'right' },
+      { col:'term',       label:'Term',          align:'left',
+        title:'Sorted by settlement date.' },
+      { col:'tfc',        label:'T / F / C',     align:'center',
+        title:'Tranches · Fees · Covenants. Sorted by the total of the three.' },
+      { col:null,         label:'Actions',       align:'right' }
+    ];
+
+    const headCells = COLUMNS.map(c => {
+      const active   = sort && sort.col === c.col;
+      const sortable = !!c.col;
+      // The arrow is drawn for the active column only. A permanent pair of
+      // faint arrows on every header is noise, and an arrow on a column that
+      // is not currently sorted is a lie about the row order.
+      const arrow = active
+        ? '<i class="ti ti-' + (sort.dir === 1 ? 'arrow-narrow-up' : 'arrow-narrow-down') +
+          '" style="font-size:12px; vertical-align:-2px; margin-left:2px;"></i>'
+        : '';
+      const tip = c.title ? c.title + (sortable ? ' · Click to sort.' : '')
+                          : (sortable ? 'Click to sort by ' + c.label + '.' : '');
+      return '<th ' + (sortable ? 'data-sort-col="' + c.col + '" ' : '') +
+             (tip ? 'title="' + tip.replace(/"/g,'&quot;') + '" ' : '') +
+             'style="padding:8px 10px; text-align:' + c.align + '; font-size:9.5px; ' +
+             'text-transform:uppercase; letter-spacing:0.4px; font-weight:700; ' +
+             'color:' + (active ? '#0f172a' : '#64748b') + '; ' +
+             (c.width ? 'width:' + c.width + '; ' : '') +
+             (sortable ? 'cursor:pointer; user-select:none; white-space:nowrap;' : '') + '">' +
+             c.label + arrow +
+             '</th>';
+    }).join('');
+
     body.innerHTML =
       '<div style="border:0.5px solid var(--n-200); border-radius:8px; overflow:hidden;">' +
         '<table style="width:100%; border-collapse:collapse; background:#ffffff;">' +
-          '<thead>' +
-            '<tr style="background:#f8fafc; border-bottom:1px solid #e2e8f0;">' +
-              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b; width:60px;">Source</th>' +
-              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Deal name</th>' +
-              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Structure</th>' +
-              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Framework</th>' +
-              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Team</th>' +
-              '<th style="padding:8px 10px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Commitment</th>' +
-              '<th style="padding:8px 10px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Term</th>' +
-              '<th style="padding:8px 10px; text-align:center; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;" title="Tranches · Fees · Covenants">T / F / C</th>' +
-              '<th style="padding:8px 10px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:#64748b;">Actions</th>' +
-            '</tr>' +
-          '</thead>' +
+          '<thead><tr style="background:#f8fafc; border-bottom:1px solid #e2e8f0;">' + headCells + '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>' +
       '</div>';
-    count.textContent = filtered.length + ' of ' + list.length + ' deals · team: ' + team;
+
+    // Wire the headers. Re-bound on every render because innerHTML above
+    // discards the previous elements along with their listeners.
+    body.querySelectorAll('th[data-sort-col]').forEach(th => {
+      th.onclick = () => {
+        const col = th.dataset.sortCol;
+        const cur = window.__dealPickerSort;
+        // First click ascending, second descending, third back to the default
+        // DB-first order — so there is always a way back without reopening.
+        if(!cur || cur.col !== col)      window.__dealPickerSort = { col, dir: 1 };
+        else if(cur.dir === 1)           window.__dealPickerSort = { col, dir: -1 };
+        else                             window.__dealPickerSort = null;
+        render(search ? search.value : '');
+      };
+    });
+
+    count.textContent = filtered.length + ' of ' + list.length + ' deals · team: ' + team +
+      (sort ? ' · sorted by ' + (COLUMNS.find(c => c.col === sort.col) || {}).label +
+              ' ' + (sort.dir === 1 ? '↑' : '↓') + ' (click again to reset)'
+            : '');
   }
   render(search ? search.value : '');
   if(search){ search.value=''; search.oninput = e => render(e.target.value); }
@@ -47252,11 +47397,19 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     a.click(); URL.revokeObjectURL(url);
   };
 
-  // Indices we can fetch straight from the publisher. Anything not listed here
-  // still imports by CSV — the button just says so rather than pretending.
+  // Indices we can fetch straight from the publisher, free and unrestricted.
+  //
+  // Deliberately absent, and not to be added without a licence in hand:
+  //   Term SOFR — CME. Licence required; free of charge only through Dec 2026,
+  //               and distributing it onward needs a separate agreement.
+  //   BBSW/BBSY — ASX. Subscription and fee schedule.
+  //   EURIBOR   — EMMI. The free tier is 24h-delayed and explicitly
+  //               NON-COMMERCIAL, so it cannot back a product feed.
+  // Those keep the CSV import path; the button says so rather than pretending.
   const RFX_PUBLISHED = {
     SONIA: 'Bank of England',
-    SOFR:  'Federal Reserve Bank of New York'
+    SOFR:  'Federal Reserve Bank of New York',
+    ESTR:  'European Central Bank'
   };
 
   function _rfxSyncPullBtn(){
@@ -47419,16 +47572,21 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const { data, error } = await client.functions.invoke('rate-fixings-pull', { body:{ index: idx } });
 
       // functions.invoke surfaces a non-2xx as `error` with the body unread, so
-      // the useful message is inside the response, not in error.message.
+      // the useful message is inside the response, not in error.message. When
+      // this was missing the console read "pull failed: Object" and the actual
+      // cause — the NY Fed not answering — was invisible.
       let res = data;
       if(error && error.context && typeof error.context.json === 'function'){
         try { res = await error.context.json(); } catch(_){}
       }
 
       if(!res || !res.ok){
-        const msg = (res && res.error) || (error && error.message) || 'Unknown failure.';
-        if(typeof toast === 'function') toast('Pull failed: ' + msg, 8000, { kind:'error' });
-        console.error('[RFX] pull failed:', res || error);
+        const msg = (res && res.error) || (error && error.message)
+                  || 'No response from the pull service.';
+        if(typeof toast === 'function') toast('Pull failed: ' + msg, 10000, { kind:'error' });
+        // Log the message as a STRING, not the object — an object collapses to
+        // "Object" in the console and the message is the whole point.
+        console.error('[RFX] ' + idx + ' pull failed: ' + msg, { response: res, invokeError: error });
         return;
       }
 
