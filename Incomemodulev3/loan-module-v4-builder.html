@@ -2828,6 +2828,10 @@
           <div><label class="b-label required">Accounting Framework</label>
             <select id="b-framework" class="b-input"><option value="IFRS">IFRS</option><option value="USGAAP">US GAAP (CECL)</option><option value="ASPE">Canadian ASPE</option><option value="AASB">AASB (Australian)</option></select>
           </div>
+          <!-- Floating-rate EIR policy lives on the Accounting Treatment page,
+               next to the other EIR controls, not here: Deal Setup describes
+               the loan's own terms, and this is a policy choice about how we
+               account for it. It also persists there, on treatment_overrides. -->
           <!-- Signing Date — when the deal was executed. Separate from
                Settlement Date, which remains the date cash moves, the position
                opens and interest starts accruing. The two are often weeks
@@ -3144,7 +3148,7 @@
           <div class="builder-section-subtitle">Ownership split across Investran legal entities. Journals post per entity at its share — anything unallocated is held elsewhere and isn't posted.</div>
         </div>
         <div style="display:flex; gap:6px;" onclick="event.stopPropagation()">
-          <button onclick="window.openManageFundsModal && window.openManageFundsModal()"
+          <button data-ext-safe="1" onclick="window.openManageFundsModal && window.openManageFundsModal()"
                   class="mat-btn outline !py-1 !px-2 text-[11px]" title="Browse the legal entities synced from Investran">
             <span class="material-icons-outlined text-[13px]" style="vertical-align:-2px;">tune</span> Manage legal entities
           </button>
@@ -3908,6 +3912,17 @@
       </button>
       <!-- Column picker dropdown — absolutely positioned relative to the toolbar. -->
       <div id="cf-column-picker" style="display:none; position:absolute; right:16px; top:60px; width:280px; max-height:70vh; overflow-y:auto; background:var(--n-0); border:0.5px solid var(--n-300); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.15); z-index:30; padding:10px;"></div>
+      <!-- External deals only. The Balance checkpoints sheet is the one
+           independent statement of what the balance should be on a given date;
+           everything else on this screen is derived cumulatively from the
+           movements. Shown by __renderExternalCashflows, hidden by the internal
+           path. -->
+      <button id="btn-cf-checkpoints" style="display:none; font-size:10.5px;"
+              onclick="window.__openCheckpointsModal && window.__openCheckpointsModal()"
+              class="mat-btn outline !py-1 !px-2"
+              title="Balance checkpoints as supplied on the imported workbook, against the balances PCS derived">
+        <i class="ti ti-checkup-list" style="font-size:12px;"></i>Balance checkpoints
+      </button>
       <button id="btn-cf-export-xlsx" onclick="window.__cfExportXlsx && window.__cfExportXlsx()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Download the current cashflow table as Excel (.xlsx)">
         <i class="ti ti-file-spreadsheet" style="font-size:12px;"></i>Export XLSX
       </button>
@@ -4451,6 +4466,27 @@
         Priority order if unspecified: <b>Override → PRICE → Generic → Custom</b>.
         IRR/XIRR removed per spec (Folder 1).
         IFRS / ASPE deals use the standard bisection solver and ignore this control.
+      </div>
+    </div>
+    <!-- Floating-rate EIR policy. Sits here rather than on Deal Setup because
+         it is an accounting treatment, not a term of the loan — the same
+         reason eir_method lives on this page. Applies under every framework,
+         so unlike the section above it is always shown. -->
+    <div class="bg-white border border-indigo-200 rounded p-2 mb-3">
+      <div class="flex items-center gap-3 flex-wrap mb-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wider text-gray-600">Floating-rate EIR policy</label>
+        <select id="opt-eir-floating-policy" class="border border-gray-300 rounded px-2 py-1 text-sm bg-white">
+          <option value="">Workspace default (hold rate at initial recognition)</option>
+          <option value="original">Hold the rate set at initial recognition</option>
+          <option value="revise">Re-estimate at each reset (IFRS 9 B5.4.5)</option>
+        </select>
+        <span id="opt-eir-floating-note" class="text-[11px] text-gray-500"></span>
+      </div>
+      <div class="text-[11px] text-gray-600">
+        Both treatments are permitted and neither can be inferred from the loan, so this is chosen rather than guessed.
+        Holding the original rate on a floating asset does <b>not</b> converge to par when the benchmark moves —
+        the carrying amount drifts and stays drifted. No effect on a fixed-rate deal, which has no resets to revise at.
+        IFRS 9 expects a policy to be applied consistently to like items, so treat a per-deal setting here as a deliberate override.
       </div>
     </div>
     <!-- Section 0-tris — OID / Premium treatment (Transtype #1) ──
@@ -12146,7 +12182,25 @@ window.SB = (function(){
     // — saveDeal coerces blank columns to a sensible default at the SQL layer.
     modification_type:        { allowed: ['substantial','non_substantial'], default: 'non_substantial', alias: { sub:'substantial', nonSub:'non_substantial', 'non-substantial':'non_substantial' } },
     hedge_designation_type:   { allowed: ['cfh','fvh','fx_hedge','none'], default: 'none', alias: { 'fx-hedge':'fx_hedge', cashFlowHedge:'cfh', fairValueHedge:'fvh' } },
-    eir_method:               { allowed: ['default','effectiveInterestPrice','effectiveInterestFormula','effectiveInterestIRR','override'], default: 'default' },
+    /* The UI offers method1 / method2 / method3 / override, and
+       computeEIRUSGAAP branches on exactly those. This allow-list held the
+       AMORTISATION vocabulary instead — effectiveInterestPrice and friends —
+       so every method the user could actually pick failed validation and was
+       written as 'default'.
+
+       The consequence was silent and material. 'default' falls through to the
+       Method 2 PRICE path, so Method 2 survived by accident, but Method 1 and
+       Method 3 were saved as 'default' and came back as Method 2: on a
+       $10m / 92.00 / 10% + 5% PIK deal that is 16.6798% or 17.2898% quietly
+       becoming 17.5302%. Every treatment_overrides row in the database is
+       either null or 'default' — no method choice has ever been stored.
+
+       The old amortisation names are kept as aliases so any legacy row still
+       loads rather than being rejected on read. */
+    eir_method:               { allowed: ['default','method1','method2','method3','override'], default: 'default',
+                                alias: { effectiveInterestPrice:'method2', effectiveInterestFormula:'method1',
+                                         effectiveInterestIRR:'method3', price:'method2', custom:'method1',
+                                         generic:'method3' } },
     oid_treatment_type:       { allowed: ['none','accrete','expense_immediately'], default: 'none', alias: { expenseImmediately:'expense_immediately', expense:'expense_immediately' } },
     trade_accounting_method:  { allowed: ['settleDate','tradeDate'], default: 'settleDate', alias: { settlement:'settleDate', trade:'tradeDate' } },
     revolver_cost_basis:      { allowed: ['maturity','commitment'], default: 'maturity' },
@@ -12350,7 +12404,17 @@ window.SB = (function(){
           pik_capitalisation_freq:     t.pikCapitalisationFreq || null,    // 'monthly' | 'quarterly' | 'semi' | 'annual'
           coupon_servicing_pct:        t.couponServicingPct        != null ? +t.couponServicingPct        : null,
           coupon_servicing_cap:        t.couponServicingCap        != null ? +t.couponServicingCap        : null,
-          coupon_servicing_start_year: t.couponServicingStartYear  != null ? +t.couponServicingStartYear  : null
+          coupon_servicing_start_year: t.couponServicingStartYear  != null ? +t.couponServicingStartYear  : null,
+          /* ─── Acquisition facts the EIR needs ───────────────────────────
+             Null is preserved deliberately. Coercing a blank consideration to
+             face would assert "acquired at par" on a deal nobody priced, and
+             the resulting yield would look as settled as one we were told. */
+          consideration_paid:             t.considerationPaid     != null ? +t.considerationPaid : null,
+          consideration_date:             t.considerationDate     || null,
+          transaction_costs:              t.transactionCosts      != null ? +t.transactionCosts  : null,
+          expected_redemption_date:       t.expectedRedemptionDate || null,
+          credit_impaired_at_acquisition: t.creditImpairedAtAcquisition == null
+                                            ? null : !!t.creditImpairedAtAcquisition
         };
         const { data: trRow, error: trErr } = await _client
           .from('tranches').insert(tranchePayload).select().single();
@@ -12620,6 +12684,11 @@ window.SB = (function(){
           q_factor:                     (ov.qFactor != null ? +ov.qFactor : null),
           eir_method:                   safeEnum('eir_method', ov.eirMethod, true),
           eir_override:                 (ov.eirOverride != null ? +ov.eirOverride : null),
+          // null = no per-deal override, so the workspace default applies.
+          // Only 'original'/'revise' are written; anything else is dropped
+          // rather than stored and later misread as a deliberate choice.
+          eir_floating_policy:          (ov.eirFloatingPolicy === 'original' || ov.eirFloatingPolicy === 'revise')
+                                          ? ov.eirFloatingPolicy : null,
           oid_treatment:                safeEnum('oid_treatment_type', ov.oidTreatment, true) || 'none',
           oid_method:                   ov.oidMethod || null,
           pik_rate_override:            (ov.pikRateOverride != null ? +ov.pikRateOverride : null),
@@ -13100,6 +13169,14 @@ window.SB = (function(){
             couponServicingPct:        t.coupon_servicing_pct         != null ? +t.coupon_servicing_pct        : null,
             couponServicingCap:        t.coupon_servicing_cap         != null ? +t.coupon_servicing_cap        : null,
             couponServicingStartYear:  t.coupon_servicing_start_year  != null ? +t.coupon_servicing_start_year : null,
+            // ─── Acquisition facts for the EIR. null survives the round trip:
+            // "not stated" must not come back as par / zero / No.
+            considerationPaid:           t.consideration_paid       != null ? +t.consideration_paid : null,
+            considerationDate:           t.consideration_date       || null,
+            transactionCosts:            t.transaction_costs        != null ? +t.transaction_costs  : null,
+            expectedRedemptionDate:      t.expected_redemption_date || null,
+            creditImpairedAtAcquisition: t.credit_impaired_at_acquisition == null
+                                           ? null : !!t.credit_impaired_at_acquisition,
             drawdowns:        sort(t.drawdowns, 'drawdown_no').map(d => ({
               date: d.draw_date, amount: +d.amount || 0, reason: d.reason || ''
             })),
@@ -13213,6 +13290,7 @@ window.SB = (function(){
               qFactor:                     o.q_factor != null ? +o.q_factor : null,
               eirMethod:                   o.eir_method,
               eirOverride:                 o.eir_override != null ? +o.eir_override : null,
+              eirFloatingPolicy:           o.eir_floating_policy || null,
               oidTreatment:                o.oid_treatment,
               oidMethod:                   o.oid_method,
               pikRateOverride:             o.pik_rate_override != null ? +o.pik_rate_override : null,
@@ -14083,6 +14161,24 @@ function frameworkOf(inst){
   const code = (inst && inst.accountingFramework) || 'IFRS';
   return FRAMEWORKS[code] || FRAMEWORKS.IFRS;
 }
+
+/* ─── Workspace accounting policy: floating-rate EIR ──────────────────────
+   The house policy, applied to every deal that does not carry a per-deal
+   override on the Accounting Treatment page.
+
+   'revise' — the effective rate is re-estimated at each reset (IFRS 9 B5.4.5),
+              so it tracks where the benchmark actually went and the carrying
+              amount converges on the balance outstanding.
+
+   Chosen over 'original' because holding the rate set at drawdown does not
+   converge when the benchmark moves: measured on a £60m five-year SONIA
+   facility bought at 97 with the index going 4.00% → 4.75% → 3.25%, 'original'
+   finished £660,519 above face and stayed there, against £33,823 under
+   'revise'.
+
+   No effect on fixed-rate deals — they have no resets — and none on a loan at
+   par with no fees, where no yield is solved at all. */
+window.__WORKSPACE_EIR_FLOATING_POLICY = 'revise';
 
 const M = {
   instrumentId: null,           // Active deal id
@@ -18447,6 +18543,21 @@ function applyTreatmentFromForm(){
       inst.eirOverride = isNaN(v) ? null : v;
     }
   }
+  // Floating-rate EIR policy. '' means no per-deal override — kept as null so
+  // "follows the workspace default" stays distinguishable from "someone chose
+  // the same value the default happens to be".
+  if($('opt-eir-floating-policy')){
+    const v = $('opt-eir-floating-policy').value;
+    inst.eirFloatingPolicy = (v === 'original' || v === 'revise') ? v : null;
+    const note = $('opt-eir-floating-note');
+    if(note){
+      const floating = !!(inst.coupon && inst.coupon.type && inst.coupon.type !== 'Fixed');
+      note.textContent = floating
+        ? (v ? 'Per-deal override in force.' : '')
+        : 'Fixed-rate deal — no resets, so this has no effect here.';
+      note.style.color = floating && v ? '#92400E' : '#64748B';
+    }
+  }
   // OID treatment + method (Section 0-tris)
   if($('opt-oid-treatment')) inst.oidTreatment = $('opt-oid-treatment').value;
   if($('opt-oid-method'))    inst.oidMethod    = $('opt-oid-method').value;
@@ -18716,6 +18827,24 @@ function loadTreatmentForm(){
   if($('opt-eir-method')) $('opt-eir-method').value = inst.eirMethod || 'method2';
   if($('opt-eir-override')) $('opt-eir-override').value =
       (typeof inst.eirOverride === 'number') ? inst.eirOverride : '';
+  // Floating-rate EIR policy — '' renders as "workspace default".
+  if($('opt-eir-floating-policy')){
+    /* Read the RAW override, not inst.eirFloatingPolicy: builderToInstrument
+       has already resolved the default, so the instrument always reads
+       'original' and the blank "workspace default" option could never be
+       shown — the form would silently promote "not chosen" to "chose the
+       default", which is the distinction this control exists to keep. */
+    const ov = (window.B && B.treatmentOverrides) || {};
+    const p = ov.eirFloatingPolicy;
+    $('opt-eir-floating-policy').value = (p === 'original' || p === 'revise') ? p : '';
+    const note = $('opt-eir-floating-note');
+    if(note){
+      const floating = !!(inst.coupon && inst.coupon.type && inst.coupon.type !== 'Fixed');
+      note.textContent = floating ? (p ? 'Per-deal override in force.' : '')
+                                  : 'Fixed-rate deal — no resets, so this has no effect here.';
+      note.style.color = floating && p ? '#92400E' : '#64748B';
+    }
+  }
   // OID dropdowns (Section 0-tris · US GAAP only)
   if($('opt-oid-treatment')) $('opt-oid-treatment').value = inst.oidTreatment || 'auto';
   if($('opt-oid-method'))    $('opt-oid-method').value    = inst.oidMethod || 'effective-interest';
@@ -20062,6 +20191,13 @@ function syncBuilderFromInstrument(inst){
   // EIR
   if(inst.eirMethod)                       o.eirMethod   = inst.eirMethod;
   if(inst.eirOverride != null)             o.eirOverride = inst.eirOverride;
+  /* Assigned unconditionally, including when cleared back to null. The other
+     fields above only copy truthy values, which is fine for them but would
+     make this one impossible to switch OFF: once someone picked an override,
+     clearing it to "workspace default" would leave the old value in place and
+     keep being saved. */
+  o.eirFloatingPolicy = (inst.eirFloatingPolicy === 'original' || inst.eirFloatingPolicy === 'revise')
+                          ? inst.eirFloatingPolicy : null;
   // OID
   if(inst.oidTreatment)                    o.oidTreatment = inst.oidTreatment;
   if(inst.oidMethod)                       o.oidMethod    = inst.oidMethod;
@@ -20148,7 +20284,8 @@ function syncBuilderFromInstrument(inst){
 function _treatmentStateHash(){
   const parts = [];
   const ids = [
-    'opt-framework','opt-eir-method','opt-eir-override','opt-oid-treatment','opt-oid-method',
+    'opt-framework','opt-eir-method','opt-eir-override','opt-eir-floating-policy',
+    'opt-oid-treatment','opt-oid-method',
     'opt-ifrs9-class','opt-business-model','opt-sppi','opt-fv-level',
     'opt-ecl-stage','opt-pd','opt-lgd','opt-compute-ecl',
     'opt-poci','opt-stage3-int','opt-suspended','opt-ccf',
@@ -20665,6 +20802,74 @@ function runAccountingImpl(){
   }
   // Refresh capability cards now that the deal has been processed
   renderCapabilityCards(inst);
+  /* States whether the rate above was CALCULATED, is merely the contractual
+     coupon, or was deliberately refused — and shows the build-up that produced
+     it. Same principle as the RFR conventions banner on the Cashflow tab: a
+     figure that looks derived and isn't is worse than no figure, because
+     nobody asks a confident number where it came from. */
+  function renderEirBasis(){
+    const host = $('ifrs-eir-note') && $('ifrs-eir-note').parentElement;
+    if(!host) return;
+    let el = document.getElementById('ifrs-eir-basis');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'ifrs-eir-basis';
+      el.style.cssText = 'margin-top:8px;';
+      host.appendChild(el);
+    }
+    const v = (typeof M !== 'undefined' && M.schedule && M.schedule.eirBasis) || null;
+    if(!v){ el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = '';
+
+    const skin = v.status === 'calculated'
+      ? { bg:'#F0FDF4', bd:'#BBF7D0', fg:'#166534', icon:'ti-circle-check',   lead:'EIR calculated' }
+      : v.status === 'refused'
+      ? { bg:'#FEF2F2', bd:'#FECACA', fg:'#991B1B', icon:'ti-alert-circle',   lead:'EIR not applied' }
+      : { bg:'#FFFBEB', bd:'#FDE68A', fg:'#92400E', icon:'ti-alert-triangle', lead:'Coupon, not a calculated EIR' };
+
+    const b = v.build || {};
+    /* Local helpers rather than reaching for the file's globals. This file has
+       both escapeHtml and escapeHTML, and fmtCcy and fmtMoney, in different
+       scopes — picking the wrong spelling threw inside a try/catch and left a
+       silently blank panel, which is the failure mode this panel exists to
+       prevent. */
+    const money = n => (n == null ? '—' : (typeof fmtMoney === 'function' ? fmtMoney(n) : String(Math.round(n))));
+    const esc = s => String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    // The build-up is the point: an EIR nobody can decompose is an EIR nobody
+    // will defend when an auditor asks how it was arrived at.
+    const rows = [
+      ['Face value',            money(b.faceValue)],
+      ['Consideration paid',    b.considerationPaid == null
+                                  ? '<span style="opacity:.7">not stated — par assumed</span>'
+                                  : money(b.considerationPaid)],
+      ['Yield-integral fees',   b.yieldIntegralFees ? '(' + money(b.yieldIntegralFees) + ')' : '—'],
+      ['Transaction costs',     b.transactionCosts ? money(b.transactionCosts) : '—'],
+      ['<b>Opening carrying amount</b>', '<b>' + money(b.openingCarrying) + '</b>'],
+      ['Contractual coupon',    b.contractualCoupon != null ? fmtPct(b.contractualCoupon, 4) : '—'],
+      ['Spread over',           b.horizonUsed + (b.expectedRedemption ? ' · ' + b.expectedRedemption : '')],
+      ['Floating-rate policy',  esc(b.floatingPolicy || '—') +
+                                (b.revisions ? ' · ' + b.revisions + ' revision' + (b.revisions === 1 ? '' : 's') : '')]
+    ].map(([k, val]) =>
+      '<tr><td style="padding:2px 10px 2px 0; color:' + skin.fg + '; opacity:.85; white-space:nowrap;">' + k + '</td>' +
+      '<td style="padding:2px 0; text-align:right; font-variant-numeric:tabular-nums; color:' + skin.fg + ';">' + val + '</td></tr>'
+    ).join('');
+
+    el.innerHTML =
+      '<div style="padding:9px 12px; background:' + skin.bg + '; border:0.5px solid ' + skin.bd + '; border-radius:8px;">' +
+        '<div style="display:flex; gap:8px; align-items:flex-start;">' +
+          '<i class="ti ' + skin.icon + '" style="font-size:14px; color:' + skin.fg + '; margin-top:1px;"></i>' +
+          '<div style="font-size:11px; line-height:1.45; color:' + skin.fg + ';">' +
+            '<b>' + skin.lead + '</b>' +
+            (v.effectiveYield != null ? ' · ' + fmtPct(v.effectiveYield, 4) : '') +
+            '<div style="margin-top:2px; opacity:.85;">' + esc(v.reason || '') + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<table style="margin:8px 0 0 22px; font-size:10.5px; border-collapse:collapse;">' + rows + '</table>' +
+      '</div>';
+  }
+  window.__renderEirBasis = renderEirBasis;
+
   renderChangeHandlingPanel(inst);
   // Render IFRS classification + EIR + fair value
   const cls = inst.ifrs?.ifrs9Classification || 'AmortisedCost';
@@ -20683,6 +20888,15 @@ function runAccountingImpl(){
       '· framework=',      inst?.accountingFramework);
     $('ifrs-eir').textContent = '—';
     $('ifrs-eir-note').textContent = 'EIR unavailable — check settlementDate + maturityDate on the instrument';
+  } else if((M.schedule && M.schedule.eirBasis && M.schedule.eirBasis.calculated)){
+    /* One number on the screen. computeEIR() is a display helper that projects
+       an annual-coupon approximation; the schedule's own solve is the rate the
+       accounting actually uses — it is solved so carrying value rolls forward
+       to the balance outstanding, and it includes fees and transaction costs.
+       Showing computeEIR's figure beside the schedule's put 5.0016% and
+       5.3560% on the same panel for the same loan. The authoritative one wins. */
+    $('ifrs-eir').textContent = fmtPct(M.schedule.eirBasis.effectiveYield, 4);
+    $('ifrs-eir-note').textContent = 'Effective interest method · solved on the amortised-cost roll-forward';
   } else if(eir.effectiveYield != null){
     $('ifrs-eir').textContent = fmtPct(eir.effectiveYield, 4);
     $('ifrs-eir-note').textContent = `${eir.method} method · ${eir.note || ''}`;
@@ -20690,6 +20904,8 @@ function runAccountingImpl(){
     $('ifrs-eir').textContent = fmtPct(eir.couponRate, 4) + ' (coupon, no amort)';
     $('ifrs-eir-note').textContent = eir.note || 'Drawn at par — EIR = coupon';
   }
+  // Provenance + build-up, from the schedule's own verdict.
+  try { renderEirBasis(); } catch(e){ console.error('[EIR] basis render failed:', e); }
   // ─── Dual-book side-by-side summary card ─────────────────────────
   // Injected under #ifrs-eir-note when secondaryFramework is set. Shows
   // primary vs secondary EIR + total interest + total fees so the user
@@ -22644,7 +22860,15 @@ window.externalSnapshotToBuilder = function(snap){
     const interestComponents = mine.filter(c => c.postingType === 'interest').map(c => ({
       id: c.externalComponentId,
       name: c.name,
-      baseIndex: c.index || (c.rateStructure === 'fixed' ? 'FIXED' : 'SOFR'),
+      /* The v0.4 reader emits the benchmark as `interestType`; `index` and
+         `rateStructure` are v0.3 field names that no longer exist on the
+         parsed component. Reading the old names meant EVERY v0.4 floating
+         component fell through to the 'SOFR' default — a SONIA tranche was
+         imported as SOFR, and would then be priced off the wrong published
+         curve entirely. Same defect class as the lookback fields: the value
+         was read, discarded, and silently replaced by a plausible default. */
+      baseIndex: c.interestType || c.index
+                 || (c.rateStructure === 'fixed' ? 'FIXED' : 'SOFR'),
       baseValue: c.rate == null ? 0 : +c.rate,
       // A convention PortF did not state stays null. Defaulting it to 0 would
       // silently assert "no lookback, no lockout, no observation shift" — a
@@ -22688,6 +22912,17 @@ window.externalSnapshotToBuilder = function(snap){
       name: t.name,
       currency: t.currency || deal.currency,
       face: +t.commitment || 0,
+      /* ─── v0.5 effective-interest inputs ───────────────────────────────
+         All five stay null when PortF did not state them. A null
+         consideration is NOT "acquired at par" — par is a claim, and the
+         engine must be able to tell a stated par from an unstated price,
+         because only the first can be reconciled or defended. */
+      considerationPaid:       t.considerationPaid       != null ? +t.considerationPaid : null,
+      considerationDate:       t.considerationDate       || null,
+      transactionCosts:        t.transactionCosts        != null ? +t.transactionCosts  : null,
+      expectedRedemptionDate:  t.expectedRedemptionDate  || null,
+      creditImpairedAtAcquisition: t.creditImpairedAtAcquisition != null
+                                     ? !!t.creditImpairedAtAcquisition : null,
       drawnInitially: initEv ? (+initEv.amount || 0) : (+t.initialDrawdown || 0),
       drawnInitiallyDate: (initEv && initEv.eventDate) || t.startDate || '',
       drawdowns:  ev.filter(e => e.eventType === 'drawdown')
@@ -22707,24 +22942,54 @@ window.externalSnapshotToBuilder = function(snap){
 
   // Fees — facility-level and tranche-level both land in B.fees, which is how
   // the Builder models them; the tranche link is carried on trancheId.
-  const fees = comps.filter(c => c.postingType === 'fee').map(c => ({
-    id: c.externalComponentId,
-    label: c.name,
-    kind: c.feeType || 'other',
-    mode: 'fixPct',
-    pct: c.rate == null ? 0 : +c.rate,
-    bps: 0,
-    flatAmount: 0,
-    base: _extPick(_EXT_FEEBASE, c.calculationBasis, 'commitment'),
-    linkedComponentId: '',
-    frequency: _extPick(_EXT_FEEFREQ, c.settlementFrequency, 'oneOff'),
-    paymentDate: c.firstSettlementDate || '',
-    accrueFrom: '', accrueTo: '',
-    ifrs: /IFRS 9/i.test(c.revenueTreatment || '') ? 'IFRS9-EIR'
-        : /over time/i.test(c.revenueTreatment || '') ? 'IFRS15-overTime'
-        : 'IFRS15-pointInTime',
-    trancheId: c.externalTrancheId || ''
-  }));
+  /* Under v0.4/v0.5 a fee's AMOUNT lives on the Cashflows sheet, not on the
+     Components sheet — Components carries a rate at most, and for a flat fee
+     carries nothing. So the amount is summed from the component's own cashflow
+     rows. This is not recomputing PortF's schedule; it is reading the figure
+     they already sent and attributing it to the fee it belongs to. Without it
+     the engine's deferred-income pool sees a fee of zero and no arrangement
+     fee ever reaches the effective interest rate. */
+  const _feeCashByComponent = {};
+  (snap.cashflows || []).forEach(cf => {
+    if(cf.postingType !== 'fee') return;
+    const k = cf.externalComponentId;
+    if(!k) return;
+    _feeCashByComponent[k] = (_feeCashByComponent[k] || 0) + (+cf.amount || 0);
+  });
+
+  const fees = comps.filter(c => c.postingType === 'fee').map(c => {
+    const flat = _feeCashByComponent[c.externalComponentId];
+    const haveFlat = flat != null && isFinite(flat) && flat !== 0;
+    /* v0.5 states this explicitly. Where it does not, the fee is recorded but
+       kept OUT of the yield — the conservative side of the choice, and the one
+       that does not silently move a reported EIR on an assumption. The parser
+       has already warned that it was unstated. */
+    const integral = c.yieldIntegral === true;
+    return {
+      id: c.externalComponentId,
+      label: c.name,
+      kind: c.feeType || 'other',
+      // A flat amount is carried as a flat amount. Forcing every fee to
+      // 'fixPct' meant a v0.4 flat fee arrived as 0% of commitment — the
+      // engine's deferred pool only ever admits fixAmount/oneOff fees, so the
+      // two shapes could never meet and fee income never entered the EIR.
+      mode: haveFlat ? 'fixAmount' : 'fixPct',
+      pct: haveFlat ? 0 : (c.rate == null ? 0 : +c.rate),
+      bps: 0,
+      flatAmount: haveFlat ? flat : 0,
+      base: _extPick(_EXT_FEEBASE, c.calculationBasis, 'commitment'),
+      linkedComponentId: '',
+      frequency: _extPick(_EXT_FEEFREQ, c.settlementFrequency, 'oneOff'),
+      paymentDate: c.firstSettlementDate || '',
+      accrueFrom: '', accrueTo: '',
+      ifrs: integral ? 'IFRS9-EIR'
+          : /IFRS 9/i.test(c.revenueTreatment || '') ? 'IFRS9-EIR'
+          : /over time/i.test(c.revenueTreatment || '') ? 'IFRS15-overTime'
+          : 'IFRS15-pointInTime',
+      yieldIntegralStated: c.yieldIntegral != null,
+      trancheId: c.externalTrancheId || ''
+    };
+  });
 
   return { deal, facility, tranches, fees };
 };
@@ -22737,7 +23002,7 @@ window.loadExternalDeal = async function(dealId){
   const _P = window.PCSLoad || { step(){}, note(){} };
   _P.note('Reading the latest snapshot…');
   const { data: snapRow, error } = await sb.from('external_snapshots')
-    .select('id, snapshot_id, external_deal_id, facility_jsonb, components_jsonb, tranches_jsonb, events_jsonb, received_at')
+    .select('id, snapshot_id, external_deal_id, facility_jsonb, components_jsonb, tranches_jsonb, events_jsonb, checkpoints_jsonb, received_at')
     .eq('deal_id', dealId).eq('is_current', true).maybeSingle();
   if(error) throw error;
   if(!snapRow) throw new Error('No current snapshot for this deal — re-import the workbook.');
@@ -22813,7 +23078,10 @@ window.loadExternalDeal = async function(dealId){
     // Component and tranche names, so the table can show "Monthly SONIA"
     // rather than an opaque id.
     componentNames: (snap.components || []).reduce((m, c) => { m[c.externalComponentId] = c.name; return m; }, {}),
-    trancheNames:   (snap.tranches   || []).reduce((m, t) => { m[t.externalTrancheId]   = t.name; return m; }, {})
+    trancheNames:   (snap.tranches   || []).reduce((m, t) => { m[t.externalTrancheId]   = t.name; return m; }, {}),
+    /* Kept as-is, including the null: a snapshot imported before checkpoints
+       were captured must not be presented as one whose workbook stated none. */
+    checkpoints: snapRow.checkpoints_jsonb
   };
 
   _P.step('Building the deal…');
@@ -22842,9 +23110,212 @@ window.loadExternalDeal = async function(dealId){
    ═══════════════════════════════════════════════════════════════════════════ */
 window.__extCfFilter = 'all';
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Balance checkpoints
+   ───────────────────────────────────────────────────────────────────────────
+   Every balance on the cashflow screen is DERIVED: PCS starts at zero and
+   walks the movements forward. That makes the whole schedule hostage to the
+   movements being complete — one drawdown that never arrives corrupts the
+   balance from its date onward, and each later period is then measured
+   against a wrong number without anything on screen looking wrong.
+
+   The Balance checkpoints sheet is the only independent statement of what the
+   balance should be on a given date, which is why PCS asks PortF for it
+   quarterly. This view shows those figures verbatim, and — where it can be
+   done honestly — against what PCS derived for the same date.
+
+   The comparison is withheld rather than guessed in two cases. Checkpoints are
+   stated per tranche while the engine's schedule is deal-level, so a date is
+   only compared when checkpoints are present for EVERY tranche in the
+   snapshot; a partial date is shown and labelled, not differenced. And a date
+   outside the schedule gets a dash, not a zero.
+   ═══════════════════════════════════════════════════════════════════════════ */
+window.__openCheckpointsModal = function(){
+  const ctx  = window._externalDealCtx || {};
+  const cps  = ctx.checkpoints;                 // null = not captured, [] = none stated
+  const ccy  = (window.B && B.deal && B.deal.currency) || '';
+  const sym  = (typeof ccySymbol === 'function') ? ccySymbol(ccy) : '';
+  const esc  = t => String(t == null ? '' : t).replace(/[&<>"]/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const money = v => (v == null || v === '') ? '<span style="color:var(--n-400)">—</span>'
+    : sym + Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  /* Deal-level derived balance by date, from the engine's daily schedule —
+     the same source the carrying-value column reads, so the two agree. */
+  const balByDate = (function(){
+    let sched = (typeof M !== 'undefined' && Array.isArray(M.schedule)) ? M.schedule : null;
+    if(!sched || !sched.length){
+      try {
+        const inst = (typeof window.builderToInstrument === 'function') ? window.builderToInstrument() : null;
+        if(inst && typeof window.buildSchedule === 'function') sched = window.buildSchedule(inst);
+      } catch(e){ console.warn('[CP] schedule build failed:', e); }
+    }
+    if(!sched || !sched.length) return null;
+    const m = new Map();
+    for(const s of sched) if(s && s.date) m.set(s.date, +s.balance || 0);
+    return m;
+  })();
+  const derivedAt = iso => {
+    if(!iso || !balByDate) return null;
+    if(balByDate.has(iso)) return balByDate.get(iso);
+    // A checkpoint can land on a non-schedule day (weekend, holiday roll).
+    // Walk back up to a week for the most recent day we hold.
+    const d = new Date(iso + 'T00:00:00Z');
+    for(let k = 0; k < 7; k++){
+      d.setUTCDate(d.getUTCDate() - 1);
+      const key = d.toISOString().slice(0, 10);
+      if(balByDate.has(key)) return balByDate.get(key);
+    }
+    return null;
+  };
+
+  let body;
+  if(cps == null){
+    body = '<div style="padding:22px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; ' +
+           'color:#92400E; font-size:12px; line-height:1.6;">' +
+           '<b>Not captured for this snapshot.</b><br>' +
+           'The workbook’s Balance checkpoints sheet was read at import but there was nowhere to ' +
+           'store it, so it was discarded. Re-import the file to capture it. This says nothing about ' +
+           'whether the sheet was present — only that PCS did not keep it.</div>';
+  } else if(!cps.length){
+    body = '<div style="padding:22px; background:#FEF2F2; border:1px solid #FECACA; border-radius:8px; ' +
+           'color:#991B1B; font-size:12px; line-height:1.6;">' +
+           '<b>No checkpoints supplied.</b><br>' +
+           'The sheet was read and stated none. Every balance on the cashflow screen is therefore ' +
+           'derived from the movements with nothing to confirm it: a movement that never arrived would ' +
+           'corrupt the balance from its date forward and nothing here would show it. Quarterly ' +
+           'checkpoints are requested from ' + esc((B.deal && B.deal.externalSystem) || 'PortF') + '.</div>';
+  } else {
+    // Which tranches does the snapshot know about, and which does each date cover?
+    const allTr = Object.keys(ctx.trancheNames || {});
+    const byDate = new Map();
+    cps.forEach(c => {
+      if(!byDate.has(c.date)) byDate.set(c.date, []);
+      byDate.get(c.date).push(c);
+    });
+    const dates = [...byDate.keys()].sort();
+
+    let breaks = 0, compared = 0, partial = 0;
+    const TOL = 0.01;     // a penny; anything larger is a real disagreement
+    const sections = dates.map(d => {
+      const rowsFor = byDate.get(d);
+      const covered = new Set(rowsFor.map(r => r.externalTrancheId).filter(Boolean));
+      const full = allTr.length > 0 && allTr.every(t => covered.has(t));
+      const statedTotal = rowsFor.reduce((s, r) => s + (+r.principalBalance || 0), 0);
+      const derived = derivedAt(d);
+
+      let verdict, comparable = false;
+      if(!full){
+        partial++;
+        verdict = '<span style="color:#92400E; background:#FFFBEB; border:1px solid #FDE68A; ' +
+          'padding:1px 7px; border-radius:99px; font-size:10.5px;">Not compared — ' +
+          covered.size + ' of ' + allTr.length + ' tranches stated on this date</span>';
+      } else if(derived == null){
+        verdict = '<span style="color:var(--n-500); font-size:10.5px;">Not compared — outside the derived schedule</span>';
+      } else {
+        compared++; comparable = true;
+        const diff = derived - statedTotal;
+        const ok = Math.abs(diff) <= TOL;
+        if(!ok) breaks++;
+        verdict = '<span style="color:' + (ok ? '#065F46' : '#991B1B') + '; background:' +
+          (ok ? '#ECFDF5' : '#FEF2F2') + '; border:1px solid ' + (ok ? '#A7F3D0' : '#FECACA') +
+          '; padding:1px 7px; border-radius:99px; font-size:10.5px;">' +
+          (ok ? 'Agrees' : 'Differs by ' + sym +
+            Math.abs(diff).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+            (diff > 0 ? ' — PCS higher' : ' — PCS lower')) + '</span>';
+      }
+
+      const trRows = rowsFor.map(r =>
+        '<tr>' +
+        '<td style="padding:5px 8px;">' + esc((ctx.trancheNames || {})[r.externalTrancheId] ||
+              r.externalTrancheId || '(not stated)') + '</td>' +
+        '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + money(r.principalBalance) + '</td>' +
+        '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + money(r.unfundedBalance) + '</td>' +
+        '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + money(r.principalPlusCapitalised) + '</td>' +
+        '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + money(r.unfundedNetOfCapitalisations) + '</td>' +
+        '</tr>').join('');
+
+      return '<div style="margin-bottom:14px; border:0.5px solid var(--n-300); border-radius:9px; overflow:hidden;">' +
+        '<div style="display:flex; align-items:center; justify-content:space-between; gap:10px; ' +
+          'padding:8px 11px; background:var(--n-50); border-bottom:0.5px solid var(--n-200);">' +
+          '<b style="font-size:12px;">' + esc(d) + '</b>' + verdict +
+        '</div>' +
+        '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+          '<thead><tr style="color:var(--n-500); text-align:left;">' +
+            '<th style="padding:5px 8px; font-weight:600;">Tranche</th>' +
+            '<th style="padding:5px 8px; font-weight:600; text-align:right;">Principal balance</th>' +
+            '<th style="padding:5px 8px; font-weight:600; text-align:right;">Unfunded</th>' +
+            '<th style="padding:5px 8px; font-weight:600; text-align:right;">Principal + capitalised</th>' +
+            '<th style="padding:5px 8px; font-weight:600; text-align:right;">Unfunded (net of cap.)</th>' +
+          '</tr></thead><tbody>' + trRows +
+          (rowsFor.length > 1 ? '<tr style="border-top:0.5px solid var(--n-200); font-weight:600;">' +
+            '<td style="padding:5px 8px;">Stated total</td>' +
+            '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + money(statedTotal) + '</td>' +
+            '<td colspan="3"></td></tr>' : '') +
+          /* Only on a date we actually compared. Printing the deal-level
+             derived balance under a subset of tranches invites exactly the
+             subtraction the "not compared" verdict exists to refuse — on a
+             two-tranche deal with one stated it reads as a £2m break when
+             nothing is wrong. */
+          (comparable ? '<tr style="background:var(--n-50);">' +
+            '<td style="padding:5px 8px; color:var(--n-600);">PCS derived from movements</td>' +
+            '<td style="padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;">' + money(derived) + '</td>' +
+            '<td colspan="3"></td></tr>' : '') +
+        '</tbody></table></div>';
+    }).join('');
+
+    const summary =
+      '<div style="margin-bottom:13px; padding:10px 13px; border-radius:8px; font-size:11.5px; line-height:1.6; ' +
+        'background:' + (breaks ? '#FEF2F2' : '#EEF2FF') + '; border:1px solid ' + (breaks ? '#FECACA' : '#C7D2FE') +
+        '; color:' + (breaks ? '#991B1B' : '#3730A3') + ';">' +
+      '<b>' + cps.length + ' checkpoint' + (cps.length === 1 ? '' : 's') + ' across ' + dates.length +
+      ' date' + (dates.length === 1 ? '' : 's') + '.</b> ' +
+      (compared
+        ? (breaks
+            ? breaks + ' of ' + compared + ' compared dates disagree with the balance PCS derived. A ' +
+              'disagreement means the movements and the checkpoints cannot both be right — the usual ' +
+              'cause is a movement missing from the feed.'
+            : 'All ' + compared + ' compared dates agree with the balance PCS derived, to the penny.')
+        : 'No date could be compared.') +
+      (partial ? ' ' + partial + ' date' + (partial === 1 ? ' was' : 's were') + ' left uncompared because ' +
+        'not every tranche was stated on it — summing a subset against a deal-level balance would ' +
+        'manufacture a difference that is not there.' : '') +
+      '</div>';
+
+    body = summary + sections;
+  }
+
+  let ov = document.getElementById('cp-modal-overlay');
+  if(ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'cp-modal-overlay';
+  ov.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:120; ' +
+    'display:flex; align-items:center; justify-content:center; padding:28px;';
+  ov.onclick = e => { if(e.target === ov) ov.remove(); };
+  ov.innerHTML =
+    '<div style="background:var(--n-0); border-radius:13px; width:min(920px,100%); max-height:86vh; ' +
+      'display:flex; flex-direction:column; box-shadow:0 22px 60px rgba(0,0,0,.28);">' +
+      '<div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; ' +
+        'padding:15px 18px; border-bottom:0.5px solid var(--n-200);">' +
+        '<div><div style="font-weight:650; font-size:14px;">Balance checkpoints</div>' +
+        '<div style="font-size:11px; color:var(--n-500); margin-top:2px;">As supplied by ' +
+          esc((window.B && B.deal && B.deal.externalSystem) || 'the external system') +
+          ' · snapshot ' + esc(ctx.snapshotId || '—') + '</div></div>' +
+        '<button onclick="document.getElementById(\'cp-modal-overlay\').remove()" ' +
+          'class="mat-btn outline !py-1 !px-2" style="font-size:11px;">Close</button>' +
+      '</div>' +
+      '<div style="padding:16px 18px; overflow-y:auto;">' + body + '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+};
+
 window.__renderExternalCashflows = function(host, chip, kpis, status){
   const ctx = window._externalDealCtx || {};
   const all = ctx.cashflows || [];
+  /* Offer the checkpoints whatever their state — including "not captured".
+     Hiding the button when there is nothing to show would make a snapshot with
+     no independent balance check look the same as one that reconciles. */
+  window.__syncCheckpointsBtn();
   const ccy = (window.B && B.deal && B.deal.currency) || '';
   const sym = (typeof ccySymbol === 'function') ? ccySymbol(ccy) : '';
   const esc = t => String(t == null ? '' : t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -22874,6 +23345,29 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
   });
   const f = window.__extCfFilter;
   const rows = (f === 'all') ? all : all.filter(r => (r.external_tranche_id || '(facility)') === f);
+
+  /* Publish what this view is showing, so Export XLSX has something truthful to
+     write. The exporter reads __cfLastEnrichedRows, which only the ENGINE path
+     populates — and this function returns before that, so on an external deal
+     the export silently emitted whichever internal deal was rendered last,
+     under the external deal's name and filename. Tranche identity is carried
+     here too: the received rows know their tranche, the engine's period rows do
+     not, which is why tranches looked collapsed in the download. */
+  window.__extCfLastRows = rows.map(r => ({
+    trancheId:   r.external_tranche_id || '(facility)',
+    trancheName: r.external_tranche_id ? (ctx.trancheNames[r.external_tranche_id] || r.external_tranche_id) : 'Facility',
+    componentId: r.external_component_id || '',
+    periodStart: r.period_start || '',
+    periodEnd:   r.period_end || r.flow_date || '',
+    flowDate:    r.flow_date || '',
+    postingType: r.posting_type || '',
+    settlementType: r.settlement_type || '',
+    amount:      +r.amount || 0,
+    cashSettled: +r.cash_settled || 0,
+    daysCovered: r.days_covered != null ? +r.days_covered : null,
+    verification: r.verification_status || ''
+  }));
+  window.__extCfLastFilter = f;
 
   /* Totals split the way the ledger needs them: interest and fees separately,
      and within each, paid versus capitalised. A single "interest" total would
@@ -23181,6 +23675,67 @@ window.applyExternalScheduleToAccounting = function(schedule, ctx){
     if('cumPikEarned' in row)  row.cumPikEarned  = cumP;
   });
 
+  /* ─── Re-derive the EIR accretion from the cash actually reported ────────
+     Interest income under IFRS 9 is carrying amount × EIR. It is PRESENTED as
+     cash coupon + accretion, so those two must be computed from the same
+     number. The loop above replaced the cash with PortF's figure; the
+     accretion still reflected PCS's own projected coupon, so the two halves no
+     longer summed to CV × EIR.
+
+     Measured before this fix, on a £10m two-year bought at 97 (EIR 9.6454%)
+     with PortF's interest 40% above our projection: reported income was
+     £3,499.30 a day against a correct £2,580.07 — overstated by £919.23 a day,
+     about £335k a year.
+
+     The re-roll below keeps every other movement of carrying value exactly as
+     the engine computed it (draws, repayments, PIK capitalisation, ECL,
+     modifications, FX) by taking the original day-to-day change and removing
+     only the original accretion from it. Just the accretion is recomputed, and
+     carrying value is rolled forward on the corrected figure so the correction
+     compounds properly rather than being applied as a flat adjustment. */
+  (function reDeriveAccretion(){
+    if(!schedule.length) return;
+    // Nothing to re-derive if no effective yield was ever in force.
+    if(!schedule.some(r => r.eirYieldUsed != null)) return;
+
+    let prevCvOld = null;      // carrying value the engine produced, previous row
+    let cv        = null;      // corrected carrying value, running
+    let cumAmort  = 0;
+
+    schedule.forEach((row, i) => {
+      const cvOld = +row.carryingValue || 0;
+      const amortOld = +row.amortDaily || 0;
+
+      if(i === 0){
+        cv = cvOld;                         // day one is the opening position
+        prevCvOld = cvOld;
+        cumAmort = amortOld;
+        row.cumAmort = cumAmort;
+        return;
+      }
+
+      // Everything that moved carrying value on this row EXCEPT the accretion.
+      const otherDelta = cvOld - prevCvOld - amortOld;
+
+      const y   = row.eirYieldUsed;
+      const dcf = +row.eirDcf || 0;
+      let amortNew = amortOld;
+      if(y != null){
+        // The sign may legitimately go negative — a premium unwinding, when the
+        // cash received exceeds the yield on the carrying amount. Not clamped.
+        amortNew = (cv * y * dcf) - (+row.dailyCash || 0);
+      }
+
+      cv = cv + otherDelta + amortNew;
+      cumAmort += amortNew;
+
+      row.amortDaily    = amortNew;
+      row.cumAmort      = cumAmort;
+      row.carryingValue = cv;
+      prevCvOld = cvOld;
+    });
+  })();
+
   return {
     applied: true,
     from: minD, to: maxD,
@@ -23196,31 +23751,154 @@ window.applyExternalScheduleToAccounting = function(schedule, ctx){
    here would leave PCS and PortF disagreeing, with PCS's version being the one
    that reaches Investran. Inputs are disabled rather than hidden so the values
    stay readable, and a banner says where they came from. */
+/* The Balance checkpoints button lives on the Cashflow toolbar, outside the
+   builder. Tying its visibility to the cashflow painters was not enough: that
+   tab is not repainted on every visit, so switching from an imported deal to
+   an internally built one left the button showing — and offering the previous
+   deal's checkpoints. Source only changes at deal load, which is exactly when
+   this function runs, so sync it here and let the painters merely refresh the
+   count. */
+window.__syncCheckpointsBtn = function(){
+  const btn = document.getElementById('btn-cf-checkpoints');
+  if(!btn) return;
+  const isExternal = !!(window.B && B.deal && B.deal.source === 'external');
+  if(!isExternal){ btn.style.display = 'none'; return; }
+  const ctx = window._externalDealCtx || {};
+  const n = Array.isArray(ctx.checkpoints) ? ctx.checkpoints.length : null;
+  btn.style.display = '';
+  btn.innerHTML = '<i class="ti ti-checkup-list" style="font-size:12px;"></i>Balance checkpoints' +
+    (n ? ' (' + n + ')' : n === 0 ? ' (none)' : '');
+};
+
 window.__applyExternalReadOnly = function(){
   const isExternal = !!(window.B && B.deal && B.deal.source === 'external');
   const builder = document.getElementById('builder');
+  window.__syncCheckpointsBtn();
   if(!builder) return;
 
-  // Deal Setup, Facility Setup, Tranches and Fees. The Accounting and
-  // Dashboard tabs are untouched — those are ours to compute.
-  builder.querySelectorAll('input, select, textarea').forEach(el => {
-    if(el.dataset.extAlwaysEditable === '1') return;
+  /* Lifecycle Events is a SEPARATE page, outside #builder, so it was never
+     gated: a drawdown, repayment or capitalisation could be added to a deal
+     whose movements came from PortF. That does not just disagree with the
+     feed — it changes the balance the engine derives, so the accounting and
+     the received schedule stop reconciling and PCS posts the divergent
+     version to Investran.
+
+     Search and filter stay live; they read, they do not mutate. */
+  const gated = [builder, document.getElementById('lifecycle')].filter(Boolean);
+  const READ_ONLY_OK = new Set(['le-search', 'le-filter']);
+
+  gated.forEach(root => {
+    root.querySelectorAll('input, select, textarea').forEach(el => {
+      if(el.dataset.extAlwaysEditable === '1') return;
+      if(READ_ONLY_OK.has(el.id)) return;
+      if(isExternal){
+        if(!el.dataset.extPrevDisabled) el.dataset.extPrevDisabled = el.disabled ? '1' : '0';
+        el.disabled = true;
+        el.style.cursor = 'not-allowed';
+      } else if(el.dataset.extPrevDisabled !== undefined){
+        el.disabled = el.dataset.extPrevDisabled === '1';
+        el.style.cursor = '';
+        delete el.dataset.extPrevDisabled;
+      }
+    });
+  });
+
+  /* Buttons and action links inside the builder.
+
+     This used to name the three controls that were known to mutate the deal
+     (add tranche, add fee, data-t-action). An audit found 24 others still
+     live on an external deal — including "Save to DB", which writes PCS's
+     version of the deal over the one PortF sent, and "Reset", which discards
+     it. A blacklist cannot hold: every button added later is enabled by
+     default, and nothing tells its author that it needed listing here.
+
+     So: deny by default. Everything is disabled unless it is explicitly
+     marked safe. A control is safe if it does not change the loan the feed
+     supplied — navigation, modal dismissal, workspace-level reference data,
+     and PCS's own posting configuration. New buttons opt in with
+     data-ext-safe="1" rather than silently escaping the gate. */
+  const SAFE_IDS = new Set([
+    'btn-builder-toS2',      // navigation only — sends the deal to the cashflow page
+    'btn-isin-close',        // dismisses a modal
+    'btn-add-allocation',    // legal-entity split: PCS posting config, not PortF data.
+                             // External journals are already blocked by a null
+                             // legal entity; disabling this would make that
+                             // unfixable from the UI.
+    'btn-md-sample', 'btn-md-paste-static', 'btn-md-paste-pricing' // workspace market data
+  ]);
+  /* Whole sections that are PCS-side and carry nothing the feed supplied:
+     who may see the deal, what notices PCS raises, and how the position maps
+     into Investran. */
+  const SAFE_SECTIONS = ['#b-access-section', '#b-reporting-section', '#b-position-section'];
+
+  builder.querySelectorAll('button, a[onclick], a[href^="javascript"]').forEach(el => {
+    const safe = el.dataset.extSafe === '1' ||
+                 el.dataset.extAlwaysEditable === '1' ||
+                 (el.id && SAFE_IDS.has(el.id)) ||
+                 SAFE_SECTIONS.some(sel => el.closest(sel));
+    if(safe){
+      if(el.dataset.extPrevDisabledBtn !== undefined){
+        el.disabled = el.dataset.extPrevDisabledBtn === '1';
+        el.style.opacity = ''; el.style.cursor = ''; el.style.pointerEvents = '';
+        el.removeAttribute('title');
+        delete el.dataset.extPrevDisabledBtn;
+      }
+      return;
+    }
     if(isExternal){
-      if(!el.dataset.extPrevDisabled) el.dataset.extPrevDisabled = el.disabled ? '1' : '0';
+      if(el.dataset.extPrevDisabledBtn === undefined)
+        el.dataset.extPrevDisabledBtn = el.disabled ? '1' : '0';
       el.disabled = true;
+      el.style.opacity = '0.45';
       el.style.cursor = 'not-allowed';
-    } else if(el.dataset.extPrevDisabled !== undefined){
-      el.disabled = el.dataset.extPrevDisabled === '1';
-      el.style.cursor = '';
-      delete el.dataset.extPrevDisabled;
+      // Anchors ignore .disabled, so their click has to be stopped in CSS.
+      if(el.tagName === 'A') el.style.pointerEvents = 'none';
+      el.setAttribute('title', 'Read-only — this deal was supplied by ' +
+        ((window.B && B.deal && B.deal.externalSystem) || 'an external system') + '.');
+    } else if(el.dataset.extPrevDisabledBtn !== undefined){
+      el.disabled = el.dataset.extPrevDisabledBtn === '1';
+      el.style.opacity = ''; el.style.cursor = ''; el.style.pointerEvents = '';
+      el.removeAttribute('title');
+      delete el.dataset.extPrevDisabledBtn;
     }
   });
-  // Buttons that would mutate the deal — add tranche, add fee, remove, etc.
-  builder.querySelectorAll('button[data-t-action], #btn-add-tranche, #btn-add-fee').forEach(b => {
-    b.disabled = isExternal;
-    b.style.opacity = isExternal ? '0.45' : '';
-    b.style.cursor = isExternal ? 'not-allowed' : '';
-  });
+
+  /* Lifecycle's mutating controls. The add-event picker and the save button
+     are the two that write, and the row-level edit/delete buttons carry
+     data-le-action. Disabled rather than hidden, so the page still reads as a
+     complete record of what PortF sent. */
+  const lc = document.getElementById('lifecycle');
+  if(lc){
+    lc.querySelectorAll('#le-add-picker, #le-form-save, [data-le-action], [data-le-add], [data-le-edit], [data-le-delete]')
+      .forEach(el => {
+        el.disabled = isExternal;
+        el.style.opacity = isExternal ? '0.45' : '';
+        el.style.cursor = isExternal ? 'not-allowed' : '';
+        if(isExternal) el.setAttribute('title', 'Read-only — this deal\'s events come from the external feed.');
+        else el.removeAttribute('title');
+      });
+    // The inline add-event form itself: collapse it on an external deal so a
+    // half-filled form cannot be left open inviting a save that will not work.
+    const panel = document.getElementById('le-form-panel');
+    if(panel && isExternal) panel.style.display = 'none';
+
+    let lcBanner = document.getElementById('le-readonly-banner');
+    if(isExternal){
+      if(!lcBanner){
+        lcBanner = document.createElement('div');
+        lcBanner.id = 'le-readonly-banner';
+        lcBanner.style.cssText = 'margin:0 0 12px; padding:9px 13px; border-radius:8px; ' +
+          'background:#EEF2FF; border:1px solid #C7D2FE; color:#3730A3; font-size:11.5px; line-height:1.5;';
+        lcBanner.innerHTML = '<b>Read-only —</b> every drawdown, repayment and capitalisation on this deal ' +
+          'came from the external feed. Adding one here would change the balance PCS derives, so the ' +
+          'accounting would stop reconciling to the schedule that was sent. Re-import a corrected file instead.';
+        lc.insertBefore(lcBanner, lc.firstChild);
+      }
+      lcBanner.style.display = '';
+    } else if(lcBanner){
+      lcBanner.style.display = 'none';
+    }
+  }
 
   let banner = document.getElementById('ext-readonly-banner');
   if(isExternal){
@@ -23382,6 +24060,13 @@ async function _importExternalSnapshotInner(snap, opts){
     components_jsonb: snap.components,
     tranches_jsonb: snap.tranches,
     events_jsonb: snap.events,
+    /* The parser has always read the Balance checkpoints sheet; until now
+       nothing stored it, so the one independent check on the balances PCS
+       derives from the movements was discarded at every import.
+       `|| []` is deliberate and distinguishable from NULL: [] means the
+       workbook was read and stated none, NULL means the snapshot predates
+       capture. The viewer says which. */
+    checkpoints_jsonb: snap.balanceCheckpoints || [],
     cashflow_rows: snap.cashflows.length,
     validation_jsonb: { warnings: opts.warnings || null, ingestMethod: snap.ingestMethod || null,
                         sourceFilename: snap.sourceFilename || null, parseMeta: snap.parseMeta || null }
@@ -32862,7 +33547,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   const TREATMENT_IDS = [
     // Classification
     'opt-framework',
-    'opt-eir-method','opt-eir-override',
+    'opt-eir-method','opt-eir-override','opt-eir-floating-policy',
     'opt-oid-treatment','opt-oid-method',
     'opt-ifrs9-class','opt-business-model','opt-sppi','opt-fv-level',
     // ECL primary
@@ -35568,6 +36253,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     host.innerHTML = B.tranches.map((t, i) => trancheCardHTML(t, i)).join('');
     // Wire all the dynamic inputs
     B.tranches.forEach((t, i) => wireTrancheInputs(t, i));
+    /* Re-apply the external read-only gate. The gate disables live DOM nodes,
+       and this function has just replaced every one of them — so on an external
+       deal the interest components came back fully editable after any
+       re-render. Cheap, and idempotent for internal deals. */
+    try { if(typeof window.__applyExternalReadOnly === 'function') window.__applyExternalReadOnly(); }
+    catch(e){ console.error('[ext] read-only re-apply failed after renderTranches:', e); }
   }
 
   // Flag over-draw at tranche level (drawn_initially + Σdrawdowns > face) and
@@ -35679,16 +36370,75 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             <span class="text-[11px] py-1 text-gray-600">${(t.repayments || []).length} scheduled · <a href="javascript:void(0)" onclick="document.querySelector('.v4-sb-item[data-v4-tab=\'lifecycle\']')?.click(); setTimeout(()=>window.__leOpenEventForm&&window.__leOpenEventForm('paydown'),120);" class="text-emerald-700 underline">+ add</a></span></div>
         </div>
 
+        <!-- ─── Acquisition · what the effective interest rate needs ────────
+             Mirrors the v0.5 PortF sheet field for field, so a deal built here
+             and one imported carry identical inputs and hit the same solver.
+             Left BLANK is a real answer everywhere in this block: blank
+             consideration is not "bought at par", blank costs are not a stated
+             zero, and blank credit-impaired is not "No". Open automatically
+             once anything is filled in. -->
+        <details class="mb-2" ${(t.considerationPaid != null || t.transactionCosts != null ||
+                                 t.expectedRedemptionDate || t.creditImpairedAtAcquisition != null) ? 'open' : ''}>
+          <summary style="font-size:10.5px; color:#4B5563; cursor:pointer; font-weight:600; padding:2px 0;">
+            <i class="ti ti-receipt-2" style="font-size:12px; vertical-align:-1px;"></i>
+            Acquisition &amp; effective interest rate
+            <span style="font-weight:400; color:#9CA3AF;">— price paid, costs, expected life</span>
+          </summary>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mt-1">
+            <div><label class="text-[10px] uppercase text-gray-600 block"
+                        title="What actually left the lender to acquire this tranche. Face 60,000,000 bought for 59,100,000 means 900,000 of extra yield across the life — not a gain on day one. Leave blank if the tranche was not purchased at a price; blank is recorded as 'not stated', NOT as par.">Consideration Paid</label>
+              <input data-t-field="considerationPaid" data-fmt-num="1" data-tidx="${idx}" type="text" inputmode="numeric"
+                     value="${t.considerationPaid != null ? Number(t.considerationPaid).toLocaleString('en-US') : ''}"
+                     placeholder="blank = not stated"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"
+                     style="font-variant-numeric:tabular-nums;"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block" title="When that consideration was paid. Anchors day one of the discount or premium accretion.">Consideration Date</label>
+              <input data-t-field="considerationDate" data-tidx="${idx}" type="date"
+                     value="${t.considerationDate || ''}"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block"
+                        title="Directly attributable costs of doing the deal — external legal, due diligence, arranger. IFRS 9 adds these to the initial carrying amount, so they RAISE the effective yield. A stated 0 is a complete answer; blank is not.">Transaction Costs</label>
+              <input data-t-field="transactionCosts" data-fmt-num="1" data-tidx="${idx}" type="text" inputmode="numeric"
+                     value="${t.transactionCosts != null ? Number(t.transactionCosts).toLocaleString('en-US') : ''}"
+                     placeholder="0 is a valid answer"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"
+                     style="font-variant-numeric:tabular-nums;"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block"
+                        title="When repayment is expected, if that differs from contractual maturity. The EIR is spread over the EXPECTED life. Blank means use contractual maturity.">Expected Redemption</label>
+              <input data-t-field="expectedRedemptionDate" data-tidx="${idx}" type="date"
+                     value="${t.expectedRedemptionDate || ''}"
+                     class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]"/></div>
+            <div><label class="text-[10px] uppercase text-gray-600 block"
+                        title="Was this tranche already credit-impaired when acquired — a distressed purchase? Such an asset needs a credit-adjusted EIR with lifetime losses built into the yield. PCS refuses the ordinary method rather than overstating income for the life of the asset. Blank is NOT 'No'.">Credit-impaired at acq.</label>
+              <select data-t-field="creditImpairedAtAcquisition" data-tidx="${idx}"
+                      class="w-full border border-gray-300 rounded px-2 py-1 bg-white text-[11px]">
+                <option value=""    ${t.creditImpairedAtAcquisition == null  ? 'selected' : ''}>— not stated —</option>
+                <option value="no"  ${t.creditImpairedAtAcquisition === false ? 'selected' : ''}>No</option>
+                <option value="yes" ${t.creditImpairedAtAcquisition === true  ? 'selected' : ''}>Yes</option>
+              </select></div>
+          </div>
+        </details>
+
         <!-- ─── Mezz support: investor attribution + PIK cadence + coupon
              servicing split. Auto-shown when isPikToggle is true or when
              investor_name is populated. For plain term loans without PIK
              this row still renders (so users can add investor metadata
              at will) but the coupon-servicing fields are visually muted
              unless isPikToggle is on — since they only matter for PIK. -->
-        <details class="mb-2" ${(t.isPikToggle || t.investorName || t.couponServicingPct) ? 'open' : ''}>
+        <!-- Everything here is genuinely TRANCHE-level and has no equivalent on
+             a component: who holds the tranche, how often capitalised interest
+             rolls up, and the mezz cash-servicing carve-out ("6% in cash from
+             year 2, remainder capitalised") which is time-varying and so cannot
+             be expressed as a per-component settlement type.
+
+             Whether a component capitalises AT ALL is decided on the component,
+             not here. -->
+        <details class="mb-2" ${((t.interestComponents||[]).some(ic => ['pik','capitalised'].includes(ic.settlementType||'')) ||
+                                 t.isPikToggle || t.investorName || t.couponServicingPct) ? 'open' : ''}>
           <summary style="font-size:10.5px; color:#4B5563; cursor:pointer; font-weight:600; padding:2px 0;">
             <i class="ti ti-user-dollar" style="font-size:12px; vertical-align:-1px;"></i>
-            Investor &amp; PIK — capitalisation cadence + optional cash-serviced coupon
+            Investor &amp; capitalisation
+            <span style="font-weight:400; color:#9CA3AF;">— cadence and cash-serviced split. Set PIK on/off per component.</span>
           </summary>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2" style="background:white; padding:8px; border-radius:6px; border:0.5px solid #E5E7EB;">
             <div><label class="text-[10px] uppercase text-gray-600 block">Investor name</label>
@@ -35708,11 +36458,40 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
                 <option value="semi"      ${t.pikCapitalisationFreq==='semi'?'selected':''}>Semi-annual</option>
                 <option value="annual"    ${t.pikCapitalisationFreq==='annual'?'selected':''}>Annual</option>
               </select></div>
-            <div style="display:flex; align-items:end; gap:4px;">
-              <label class="text-[10px] uppercase text-gray-600 flex items-center gap-1" style="cursor:pointer;">
-                <input data-t-field="isPikToggle" data-tidx="${idx}" type="checkbox" ${t.isPikToggle?'checked':''} style="width:14px; height:14px;"/>
-                PIK / capitalise coupon
-              </label>
+            <!-- Was an editable "PIK / capitalise coupon" checkbox. Removed:
+                 whether a component settles in kind is decided on the component
+                 itself, and having the same decision in two controls meant they
+                 could contradict each other with nothing to resolve it.
+
+                 This is now a read-only statement of what the components add up
+                 to. Deals saved before the change, whose components say nothing
+                 and relied on the tranche flag, still work — _resolveSettlement
+                 falls back to it — and are told where to set it properly. -->
+            <div style="display:flex; align-items:end;">
+              ${(() => {
+                const comps = t.interestComponents || [];
+                const pikComps = comps.filter(ic => ['pik','capitalised'].includes(ic.settlementType || ''));
+                const anyStated = comps.some(ic => ['pik','capitalised','cash'].includes(ic.settlementType || ''));
+                let bg, fg, txt, tip;
+                if(pikComps.length){
+                  bg = '#F5F3FF'; fg = '#6D28D9';
+                  txt = 'PIK · ' + pikComps.length + ' component' + (pikComps.length === 1 ? '' : 's');
+                  tip = pikComps.map(c => c.name).join(', ') + ' settle in kind. Change this on the component\'s Settles field.';
+                } else if(t.isPikToggle && !anyStated){
+                  bg = '#FFFBEB'; fg = '#92400E';
+                  txt = 'PIK · legacy flag';
+                  tip = 'This tranche carries the old tranche-level PIK flag and no component states how it settles, so every component is treated as PIK. Set Settles on each component to make it explicit — the flag is no longer editable here.';
+                } else {
+                  bg = '#F8FAFC'; fg = '#64748B';
+                  txt = 'No PIK — settles cash';
+                  tip = 'No interest component settles in kind. Set Settles = PIK or Capitalised on a component to change that.';
+                }
+                return '<div style="width:100%;">' +
+                  '<label class="text-[10px] uppercase text-gray-600 block">Capitalises?</label>' +
+                  '<span title="' + tip.replace(/"/g,'&quot;') + '" style="display:inline-block; margin-top:3px; padding:3px 8px; background:' + bg +
+                  '; color:' + fg + '; border-radius:6px; font-size:10px; font-weight:700; white-space:nowrap;">' + txt + '</span>' +
+                '</div>';
+              })()}
             </div>
             <div style="grid-column: span 2;"><label class="text-[10px] uppercase text-gray-600 block">Cash-serviced coupon (% p.a.) — optional</label>
               <input data-t-field="couponServicingPct" data-tidx="${idx}" type="number" min="0" step="0.1" value="${t.couponServicingPct != null ? t.couponServicingPct : ''}" placeholder="e.g. 6.0 = 6% cash-served, remainder capitalised"
@@ -35835,8 +36614,19 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
                deals are unaffected. -->
           <label class="text-[10px] text-gray-600" title="How this component settles. Cash is paid away; Capitalised is added to principal; PIK is paid in kind. Inherits the tranche default when left blank.">Settles</label>
           <select data-ic-field="settlementType" data-tidx="${tidx}" data-icidx="${ici}" class="border border-gray-300 rounded px-2 py-0.5 text-[11px] bg-white">
-            ${[['','Tranche default'],['cash','Cash'],['capitalised','Capitalised'],['pik','PIK']]
-              .map(([v,l]) => `<option ${ (ic.settlementType || '') === v ? 'selected' : '' } value="${v}">${l}</option>`).join('')}
+            ${(() => {
+              /* The blank option used to read "Tranche default", which promised
+                 inheritance from a setting that does not exist — the tranche
+                 has a PIK CHECKBOX, not a settlement type. It now names what it
+                 actually falls back to, so the two controls stop competing. */
+              // icCardHTML receives (ic, tidx, ici) — the tranche itself is not
+              // in scope, so read it from B rather than assuming a closure.
+              const _tr = (B.tranches || [])[tidx] || {};
+              const inherits = _tr.isPikToggle ? 'PIK (legacy tranche flag)' : 'Cash';
+              return [['', '— not set: ' + inherits + ' —'],
+                      ['cash','Cash'],['capitalised','Capitalised'],['pik','PIK']]
+                .map(([v,l]) => `<option ${ (ic.settlementType || '') === v ? 'selected' : '' } value="${v}">${l}</option>`).join('');
+            })()}
           </select>
           <label class="text-[10px] text-gray-600" title="First date this component settles. Leave blank to derive it from the facility schedule.">First settlement</label>
           <input data-ic-field="firstSettlementDate" data-tidx="${tidx}" data-icidx="${ici}" type="date"
@@ -36037,6 +36827,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         }
         else if(el.type === 'number')       val = (el.value === '') ? null : (parseFloat(el.value) || 0);
         else                                val = el.value || null;
+        /* Tri-state, not a boolean. '' means nobody answered, which is NOT
+           "No" — the whole reason the question is asked per tranche is that a
+           loan bought at 65 might be distressed or might simply be long-dated
+           and out of the money, and the file cannot tell them apart. */
+        if(f === 'creditImpairedAtAcquisition'){
+          val = el.value === 'yes' ? true : el.value === 'no' ? false : null;
+        }
         t[f] = val;
         if(f === 'currency') B.deal.currency = val;   // tranche currency drives deal display
         recompute();
@@ -36331,6 +37128,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     host.innerHTML = B.fees.map((f, i) => feeCardHTML(f, i)).join('');
     B.fees.forEach((f, i) => wireFeeInputs(f, i));
+    // Same reason as renderTranches — the gate has just lost its DOM nodes.
+    try { if(typeof window.__applyExternalReadOnly === 'function') window.__applyExternalReadOnly(); }
+    catch(e){ console.error('[ext] read-only re-apply failed after renderFees:', e); }
   }
 
   function feeCardHTML(f, idx){
@@ -38359,11 +39159,84 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }, 100);
   }
 
+  /* ─── v0.5 effective-interest inputs, rolled up to the facility ───────────
+     The instrument the engine consumes is the facility; the inputs arrive per
+     tranche. Each helper returns null when NOTHING was stated, so "we were not
+     told" survives all the way to the engine and can be reported as such.
+
+     Deliberately conservative on partial data: if some tranches state a
+     consideration and others do not, no facility-level price is produced. The
+     alternative — filling the silent tranches in at face — would invent a
+     price for part of the book and bury it inside a single blended figure.  */
+  function _v5Sum(field){
+    const vals = (B.tranches || []).map(t => t[field]).filter(v => v != null && isFinite(v));
+    return vals.length ? vals.reduce((a, b) => a + (+b), 0) : null;
+  }
+  function _v5Consideration(){
+    const tr = B.tranches || [];
+    const stated = tr.filter(t => t.considerationPaid != null && isFinite(t.considerationPaid));
+    if(!stated.length) return undefined;                 // nothing stated — engine infers from draws
+    if(stated.length !== tr.length) return undefined;    // partial — see note above
+    const px = stated.reduce((s, t) => s + (+t.considerationPaid), 0);
+    return px > 0 ? px : undefined;
+  }
+  function _v5EarliestRedemption(){
+    const ds = (B.tranches || []).map(t => t.expectedRedemptionDate).filter(Boolean).sort();
+    return ds.length ? ds[0] : null;
+  }
+  function _v5Poci(){
+    const flags = (B.tranches || []).map(t => t.creditImpairedAtAcquisition).filter(v => v != null);
+    if(!flags.length) return null;                       // unstated is not "No"
+    return flags.some(Boolean);
+  }
+
+  /* ─── How a component settles: cash, capitalised, or PIK ─────────────────
+     PIK is specified in two places and they were never reconciled:
+
+       · the Tranche card's "PIK / capitalise coupon" checkbox, which came from
+         the mezz work, where the whole tranche capitalises and the interesting
+         detail is the cadence and the cash-serviced carve-out;
+       · the interest component's "Settles" dropdown, which came from the PortF
+         feed, where one tranche can carry a 6% cash margin AND a 10.5% PIK
+         margin and only the component can say which is which.
+
+     Neither is wrong — they are different granularities — but nothing decided
+     which won, and the dropdown's first option reads "Tranche default" while
+     the tranche has no settlement type to inherit, only a boolean.
+
+     This resolves it in one place: the COMPONENT is the source of truth, and
+     the tranche checkbox is shorthand for "components that do not say default
+     to PIK". A component that states cash beats a ticked tranche box, because
+     the specific statement should beat the blanket one. */
+  function _resolveSettlement(ic, tranche){
+    const s = (ic && ic.settlementType) || '';
+    if(s === 'cash' || s === 'capitalised' || s === 'pik') return s;
+    return (tranche && tranche.isPikToggle) ? 'pik' : 'cash';
+  }
+  window.__resolveSettlement = _resolveSettlement;
+
+  /* Split the deal's interest rate into the part settled in cash and the part
+     settled in kind, so the engine can accrue each correctly. Rates are summed
+     across every tranche's components — the instrument is the facility. */
+  function _splitCashPikRates(){
+    let cash = 0, pik = 0, anyPik = false, freq = null;
+    (B.tranches || []).forEach(t => {
+      (t.interestComponents || []).forEach(ic => {
+        const rate = +ic.baseValue || 0;
+        const how  = _resolveSettlement(ic, t);
+        if(how === 'cash') cash += rate;
+        else { pik += rate; anyPik = true; if(!freq) freq = t.pikCapitalisationFreq || null; }
+      });
+    });
+    return { cash, pik, anyPik, freq };
+  }
+
   function builderToInstrument(){
     if(!B.deal.settle || !B.deal.maturity || !B.tranches.length) return null;
     const firstTranche = B.tranches[0];
     const firstIC = firstTranche.interestComponents[0];
     const totalFace = B.tranches.reduce((s, t) => s + (t.face || 0), 0);
+    const _pikSplit = _splitCashPikRates();
     if(totalFace <= 0) return null;
     const id = B.deal.dealId || ('builder_' + Date.now().toString(36));
     const inst = {
@@ -38384,22 +39257,66 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       currency: B.deal.currency,
       accountingFramework: B.deal.framework,
       faceValue: totalFace,
-      // Don't set purchasePrice — the engine now initializes carryingValue off
-      // the actual initial draw (see loan-module-engine.js "Carrying value start").
-      // Setting purchasePrice to totalFace made carrying value start at face
-      // even when drawn_initially < face, then get post-close drawdowns added
-      // on top → peak = face + Σdrawdowns instead of tracking balance.
-      // Set purchasePrice only when the deal has a genuine premium/discount at
-      // origination — otherwise the engine correctly infers it from the draws.
-      purchasePrice: undefined,
+      // purchasePrice is set ONLY when a genuine premium or discount was
+      // stated. Setting it to totalFace made carrying value start at face even
+      // when drawn_initially < face, then added post-close drawdowns on top →
+      // peak = face + Σdrawdowns instead of tracking the balance. Left unset,
+      // the engine initialises carrying value off the actual initial draw (see
+      // loan-module-engine.js "Carrying value start"), which is right at par.
+      //
+      // v0.5 — where PortF states the consideration actually paid, that IS the
+      // premium/discount case and the figure must reach the engine, or the
+      // discount never accretes and the reported yield is the coupon.
+      // Summed across tranches because the instrument is the facility.
+      purchasePrice: _v5Consideration(),
+      // Deducted from the initial carrying amount, so they raise the effective
+      // yield. null (not 0) when unstated — a stated zero and an unstated cost
+      // are different answers and only one of them is reconcilable.
+      transactionCosts: _v5Sum('transactionCosts'),
+      // EIR is spread over the EXPECTED life where early repayment is
+      // expected, not the contractual life. Earliest across tranches.
+      expectedRedemptionDate: _v5EarliestRedemption(),
+      // Credit-impaired on acquisition takes a credit-adjusted EIR, which is a
+      // different calculation rather than a variation of this one. Carried so
+      // the engine can refuse to apply the ordinary method rather than apply it
+      // silently and overstate interest income for the life of the asset.
+      creditImpairedAtAcquisition: _v5Poci(),
+      /* Accounting policy for floating-rate tranches: hold the rate set at
+         initial recognition, or re-estimate at each reset (IFRS 9 B5.4.5).
+         Read from the treatment overrides — it is a treatment, not a term of
+         the loan, and it persists on treatment_overrides alongside eir_method.
+         Absent means no per-deal override, so the workspace default applies;
+         that default is 'original', the treatment the engine has always used,
+         so no existing deal moves until someone chooses otherwise. */
+      eirFloatingPolicy: (function(){
+        const ov = (window.B && B.treatmentOverrides) || {};
+        return (ov.eirFloatingPolicy === 'revise' || ov.eirFloatingPolicy === 'original')
+          ? ov.eirFloatingPolicy
+          : (window.__WORKSPACE_EIR_FLOATING_POLICY === 'revise' ? 'revise' : 'original');
+      })(),
+      // Whether that came from the house policy or a deliberate deal-level
+      // deviation. Reported on screen so a deal following the house rule says
+      // so, rather than looking like nobody considered it.
+      eirFloatingPolicySource: (function(){
+        const ov = (window.B && B.treatmentOverrides) || {};
+        return (ov.eirFloatingPolicy === 'revise' || ov.eirFloatingPolicy === 'original')
+          ? 'deal override' : 'workspace policy';
+      })(),
       commitment: B.facility.commitment || totalFace,
       settlementDate: B.deal.settle, maturityDate: B.deal.maturity,
       availabilityEnd: B.facility.availEnd || B.deal.maturity,
       dayBasis: B.facility.dayBasis, holidayCalendar: B.facility.holiday,
       coupon: firstIC ? {
         type: firstIC.baseIndex === 'FIXED' ? 'Fixed' : (firstIC.baseIndex === 'SONIA' ? 'SONIA' : 'Floating'),
-        fixedRate: firstIC.baseIndex === 'FIXED' ? firstIC.baseValue : 0,
-        floatingRate: firstIC.baseIndex !== 'FIXED' ? firstIC.baseValue : 0,
+        /* When any component settles in kind, the CASH coupon is only the
+           cash-settled part — otherwise the PIK rate would accrue twice: once
+           here as the cash coupon and again as instr.pik.rate. With no PIK
+           anywhere this is byte-for-byte the previous behaviour, so no existing
+           deal moves. */
+        fixedRate: firstIC.baseIndex === 'FIXED'
+                     ? (_pikSplit.anyPik ? _pikSplit.cash : firstIC.baseValue) : 0,
+        floatingRate: firstIC.baseIndex !== 'FIXED'
+                     ? (_pikSplit.anyPik ? _pikSplit.cash : firstIC.baseValue) : 0,
         spread: (firstIC.spreads?.[0]?.bps || 0) / 10000,
         // Floor / Cap on the all-in rate. Engine reads coupon.floor and
         // coupon.cap and clamps `raw` between them. Both stored as decimals
@@ -38430,9 +39347,50 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         // [{ date:'2026-01-15', rate: 0.0425 }, ...]
         fixings:          firstIC.fixings || []
       } : undefined,
-      pik: { enabled:false, rate:0 },
+      /* Derived, not hardcoded. This was `{ enabled:false, rate:0 }` as a
+         literal, and the engine gates its entire PIK accrual on that flag — so
+         a tranche with the PIK box ticked showed the mezz fields, produced a
+         figure in the waterfall estimator, and accrued no PIK whatsoever.
+
+         Frequency: the engine's isCapitalizationDay understands Monthly /
+         Quarterly / Yearly, so 'semi' has no representation and would silently
+         never capitalise. It is mapped to Quarterly and flagged rather than
+         passed through to be ignored — see pikFrequencyUnsupported below. */
+      pik: (function(){
+        if(!_pikSplit.anyPik || _pikSplit.pik <= 0) return { enabled:false, rate:0 };
+        const MAP = { monthly:'Monthly', quarterly:'Quarterly', annual:'Yearly' };
+        return {
+          enabled: true,
+          rate: _pikSplit.pik,
+          capitalizationFrequency: MAP[_pikSplit.freq] || 'Quarterly'
+        };
+      })(),
+      // Set when the stated cadence could not be honoured exactly, so the UI
+      // can say so instead of the deal quietly capitalising on the wrong day.
+      pikFrequencyUnsupported: (_pikSplit.anyPik && _pikSplit.freq &&
+                                !['monthly','quarterly','annual'].includes(_pikSplit.freq))
+                                 ? _pikSplit.freq : null,
       nonUseFee: { enabled:false, rate:0 },
-      amortization: { method:'none' },
+      /* 'none' means "purchased at par, nothing to amortise" and leaves the
+         effective yield null — the engine then reports the coupon. That is the
+         right answer at par and the wrong one the moment a price or a
+         yield-integral fee exists, because neither of those ever reaches a
+         solver that is never asked to run.
+
+         So the method is chosen from what was actually stated rather than
+         hardcoded. effectiveInterestPrice solves the yield from the
+         consideration against the projected cashflows, which is the IFRS 9
+         method for both a discount/premium and fees taken into the yield. */
+      amortization: (function(){
+        const px      = _v5Consideration();
+        const priced  = px != null && totalFace > 0 && Math.abs(px - totalFace) > 0.005;
+        const eirFees = (B.fees || []).some(f => /EIR$/.test(f.ifrs || '') &&
+                                                 ((+f.flatAmount || 0) !== 0 || (+f.pct || 0) !== 0));
+        const costs   = (_v5Sum('transactionCosts') || 0) !== 0;
+        return (priced || eirFees || costs)
+          ? { method:'effectiveInterestPrice' }
+          : { method:'none' };
+      })(),
       type: 'simpleDaily',
       principalRepayment: B.facility.repayment,
       principalSchedule: (function(){
@@ -38513,6 +39471,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             events.push({
               date: B.deal.maturity, type:'paydown', amount: Math.round(outstandingAtMaturity*100)/100,
               drawdownId: id+'_MAT', status:'actual',
+              /* Settle whatever is actually outstanding, not face less
+                 scheduled paydowns. On a PIK loan the balance compounds well
+                 above face, and a payoff fixed at face would leave the
+                 capitalised interest owing after maturity. The amount above
+                 stays as a floor for the non-PIK case. */
+              repayOutstanding: true,
               kind: 'maturity', reason: 'Bullet maturity payoff (auto)'
             });
           }
@@ -41015,6 +41979,16 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // is exactly as live, because the conventions decide whether PortF's
     // floating figures could ever be checked.
     renderRfrConventionNote();
+    /* Drop the previous deal's rows before rendering this one. They are read
+       by Export XLSX, and a path that returns early (the external branch
+       below) used to leave them in place — so the export handed over whichever
+       deal was rendered last. Stale beats missing only when the staleness is
+       visible, and here it was not. */
+    window.__cfLastEnrichedRows = null;
+    /* Checkpoints exist only on imported deals. The authoritative sync runs at
+       deal load (__applyExternalReadOnly); this keeps the count fresh when the
+       tab repaints. */
+    window.__syncCheckpointsBtn && window.__syncCheckpointsBtn();
     /* External deals show the schedule they SENT us, not one we computed.
        Running the engine here and presenting the result would put our
        arithmetic on screen under a heading that says it came from PortF. */
@@ -41170,6 +42144,37 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const capCostEvents = (inst2 && Array.isArray(inst2.principalSchedule))
       ? inst2.principalSchedule.filter(e => e.type === 'capitalisedCost')
       : [];
+    /* Date → carrying amount, from the engine's daily schedule. Built once
+       rather than per row. For an external deal M.schedule already carries the
+       overlay, so this is the corrected figure, not PCS's own projection. */
+    const _cvByDate = (function(){
+      let sched = (typeof M !== 'undefined' && Array.isArray(M.schedule)) ? M.schedule : null;
+      /* Stage 1 can render BEFORE the accounting run has rebuilt M.schedule —
+         on first load the column came back empty and only filled on a second
+         render, which reads as "this deal has no carrying value" rather than
+         "ask again in a moment". Build it here when it is missing. Only ever
+         hit on that first paint, since the run populates M.schedule after. */
+      if(!sched || !sched.length){
+        try {
+          const inst = (typeof window.builderToInstrument === 'function') ? window.builderToInstrument() : null;
+          if(inst && typeof window.buildSchedule === 'function') sched = window.buildSchedule(inst);
+        } catch(e){ console.warn('[CF] carrying-value fallback build failed:', e); }
+      }
+      if(!sched || !sched.length) return null;
+      const m = new Map();
+      /* BOTH figures are taken from the same schedule row. The period row's own
+         `balance` follows a different convention — it is the balance during the
+         period — so differencing it against an end-of-period carrying amount
+         produced nonsense at the edges: the first period showed a £4.95m gap
+         because the money had not gone out yet, and the last showed −£5.0m
+         because the loan had already been repaid. Carrying value and the
+         balance it is compared against must be observed at the same instant. */
+      for(const s of sched){
+        if(s && s.date) m.set(s.date, { cv: +s.carryingValue || 0, bal: +s.balance || 0 });
+      }
+      return m;
+    })();
+
     // Enrich each row in place with the new derived fields
     rows = rows.map(r => {
       cumDraw += (+r.drawdowns || 0);
@@ -41187,11 +42192,37 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         .filter(e => e.date && e.date >= r.start && e.date < r.end)
         .reduce((s, e) => s + (+e.amount || 0), 0);
       cumCapCost += capThisPeriod;
+      /* Carrying amount at the period end, lifted from the engine's daily
+         schedule. This is NOT the outstanding balance: once a deal has a
+         discount, a premium or a deferred fee the two diverge, and it is the
+         carrying amount that goes on the balance sheet. On Harbour Point they
+         differ by £1.3m on day one. Null when the day is outside the schedule
+         (a forecast period beyond maturity), so the cell shows a dash rather
+         than a misleading zero. */
+      const cvAt = (function(iso){
+        if(!iso || !_cvByDate) return null;
+        if(_cvByDate.has(iso)) return _cvByDate.get(iso);
+        // Periods can end on a non-schedule day (weekend roll, stub). Walk back
+        // up to a week for the most recent day we do have.
+        const d = new Date(iso + 'T00:00:00Z');
+        for(let k = 0; k < 7; k++){
+          d.setUTCDate(d.getUTCDate() - 1);
+          const key = d.toISOString().slice(0, 10);
+          if(_cvByDate.has(key)) return _cvByDate.get(key);
+        }
+        return null;      // period lies outside the schedule — show a dash
+      })(r.end);
+
       return Object.assign({}, r, {
         commitmentToDate: facilityCommitment,
         drawdownToDate:   cumDraw,
         undrawnBalance:   Math.max(0, facilityCommitment - cumDraw),
         outstandingBalance: r.balance,
+        carryingValue:      cvAt ? cvAt.cv : null,
+        // The gap is the part of the balance sheet the coupon alone does not
+        // explain — unaccreted discount, premium or deferred fee. Compared
+        // against the balance observed on the SAME day, not the period row's.
+        carryingVsBalance:  cvAt ? (cvAt.cv - cvAt.bal) : null,
         interestAccruedToDate: cumIntAcc,
         interestPaidThisPeriod: paidThisPeriod,
         interestPaidToDate:    cumIntPaid,
@@ -41246,8 +42277,22 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         render:r => `<td style="padding:6px 10px; text-align:right; color:var(--n-800); font-weight:500;">${fmtCcy(r.drawdownToDate)}</td>` },
       { key:'undrawn_balance', label:'Balance (undrawn)', align:'right', title:'Commitment to date − Drawdown to date',
         render:r => `<td style="padding:6px 10px; text-align:right; color:${r.undrawnBalance>0?'var(--fis-green-700,#15803D)':'var(--n-400)'}; font-weight:600;">${fmtCcy(r.undrawnBalance)}</td>` },
-      { key:'outstanding', label:'Outstanding', align:'right', title:'Currently drawn (outstanding) balance',
+      { key:'outstanding', label:'Outstanding', align:'right', title:'Currently drawn (outstanding) principal balance. This is what the borrower owes — NOT the balance-sheet carrying amount, which differs whenever there is a discount, premium or deferred fee. See the Carrying value column.',
         render:r => `<td style="padding:6px 10px; text-align:right; color:var(--n-900); font-weight:500;">${fmtCcy(r.outstandingBalance)}</td>` },
+      { key:'carrying_value', label:'Carrying value', align:'right',
+        title:'Amortised cost at the period end — the balance-sheet figure. Equals the outstanding balance only when the loan was taken on at par with no fees. Otherwise it opens at consideration paid less yield-integral fees plus transaction costs, and accretes to par over the expected life at the effective interest rate.',
+        render:r => r.carryingValue == null
+          ? `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`
+          : `<td style="padding:6px 10px; text-align:right; color:#0F766E; font-weight:600;">${fmtCcy(r.carryingValue)}</td>` },
+      { key:'carrying_vs_balance', label:'Unaccreted', align:'right',
+        title:'Carrying value minus outstanding balance — the part of the balance sheet the coupon alone does not explain. Negative while a discount or deferred fee is still unwinding, positive for a premium. Runs to zero at maturity.',
+        render:r => {
+          if(r.carryingVsBalance == null) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          const v = r.carryingVsBalance;
+          // Under a tenth of a currency unit is rounding, not a balance.
+          if(Math.abs(v) < 0.1) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          return `<td style="padding:6px 10px; text-align:right; color:${v < 0 ? '#B45309' : '#6D28D9'}; font-weight:500;">${v < 0 ? '(' + fmtCcy(Math.abs(v)) + ')' : fmtCcy(v)}</td>`;
+        } },
       { key:'drawdowns', label:'Drawdowns', align:'right', title:'Cash disbursed to borrower this period',
         render:r => `<td style="padding:6px 10px; text-align:right; color:${r.drawdowns>0?'#B91C1C':'var(--n-400)'}; font-weight:${r.drawdowns>0?'600':'400'};">${r.drawdowns>0 ? '−'+fmtCcy(r.drawdowns) : '—'}</td>` },
       { key:'interest_accrued', label:'Interest accrued', align:'right',
@@ -41606,7 +42651,91 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // ─── Cashflow → Excel exporter ───────────────────────────────────────
   // Uses SheetJS (XLSX global — loaded via CDN in the page head, verified
   // present at line ~182). Falls back to CSV if SheetJS is missing.
+  /* Export for an externally-loaded deal: one row per received cashflow,
+     keeping the tranche and component it belongs to. A "Tranches" sheet gives
+     the per-tranche totals split cash vs capitalised, because a single
+     interest total hides the fact that PIK never touches cash. */
+  function __cfExportExternalXlsx(){
+    const rows = window.__extCfLastRows;
+    if(!rows || !rows.length){
+      if(typeof toast === 'function'){
+        toast('No received cashflows to export. Open the Cashflow tab for this deal first.', 4000, { kind:'info' });
+      }
+      return;
+    }
+    const d = (window.B || {}).deal || {};
+    const dealName = d.name || 'deal';
+    const safeName = String(dealName).replace(/[^A-Za-z0-9 _.-]/g, '_').replace(/\s+/g, '_');
+    const filename = 'cashflows_' + safeName + '_' + new Date().toISOString().slice(0,10) + '.xlsx';
+
+    const header = ['Tranche','Tranche ID','Component ID','Period start','Period end',
+                    'Posting type','Settlement','Amount','Cash settled','Days covered','Verification'];
+    const body = rows.map(r => [r.trancheName, r.trancheId, r.componentId, r.periodStart, r.periodEnd,
+                                r.postingType, r.settlementType, r.amount, r.cashSettled,
+                                r.daysCovered, r.verification]);
+
+    if(typeof XLSX === 'undefined' || !XLSX.utils){
+      const csv = [header].concat(body).map(a => a.map(v =>
+        (v == null ? '' : /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g,'""') + '"' : v)).join(',')).join('\n');
+      downloadFile(filename.replace(/\.xlsx$/, '.csv'), csv, 'text/csv');
+      return;
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet([header].concat(body));
+    ws['!cols'] = [{wch:24},{wch:18},{wch:18},{wch:12},{wch:12},{wch:12},{wch:12},{wch:18},{wch:18},{wch:12},{wch:14}];
+    ws['!freeze'] = { xSplit: 1, ySplit: 1 };
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Cashflows');
+
+    // Per-tranche summary — the thing that looked "collapsed" before.
+    const byTranche = {};
+    rows.forEach(r => {
+      const k = r.trancheName || r.trancheId;
+      const t = byTranche[k] || (byTranche[k] = { intCash:0, intPik:0, feeCash:0, fePik:0, n:0 });
+      const pik = (r.settlementType === 'pik' || r.settlementType === 'capitalised');
+      if(r.postingType === 'interest') t[pik ? 'intPik' : 'intCash'] += r.amount;
+      else if(r.postingType === 'fee') t[pik ? 'fePik' : 'feeCash'] += r.amount;
+      t.n++;
+    });
+    const tAoA = [['Tranche','Rows','Interest — cash','Interest — capitalised','Fees — cash','Fees — capitalised']]
+      .concat(Object.entries(byTranche).map(([k,v]) => [k, v.n, v.intCash, v.intPik, v.feeCash, v.fePik]));
+    const wsT = XLSX.utils.aoa_to_sheet(tAoA);
+    wsT['!cols'] = [{wch:28},{wch:8},{wch:20},{wch:22},{wch:18},{wch:20}];
+    XLSX.utils.book_append_sheet(wb, wsT, 'Tranches');
+
+    const wsMeta = XLSX.utils.aoa_to_sheet([
+      ['Deal name', dealName],
+      ['Deal ID', d.dealId || ''],
+      ['Currency', d.currency || ''],
+      ['Source', 'EXTERNAL — received from ' + ((d.externalSystem === 'portf' ? 'PortF' : d.externalSystem) || 'external feed')],
+      ['Note', 'These are the amounts as received. PCS did not recalculate them.'],
+      ['Tranche filter', window.__extCfLastFilter || 'all'],
+      ['Rows exported', rows.length],
+      ['Generated', new Date().toISOString()],
+      ['Build', window.PCS_BUILD_LABEL || 'V4']
+    ]);
+    wsMeta['!cols'] = [{wch:18},{wch:60}];
+    XLSX.utils.book_append_sheet(wb, wsMeta, 'Meta');
+    XLSX.writeFile(wb, filename);
+    if(typeof toast === 'function'){
+      toast('Exported ' + rows.length + ' received cashflows across ' +
+            Object.keys(byTranche).length + ' tranche(s)', 3500, { kind:'success' });
+    }
+  }
+
   window.__cfExportXlsx = function(){
+    /* An external deal's Cashflow tab shows the RECEIVED rows, not the engine's
+       period schedule, so it has to export those — with their tranche and
+       component, which the engine's aggregated periods do not carry. That is
+       why tranches looked collapsed in the download.
+
+       It also has to export them because __cfLastEnrichedRows is only ever
+       written by the engine path: on an external deal it still held whichever
+       internal deal was rendered last, so Export XLSX produced ANOTHER DEAL'S
+       cashflows under this deal's name and filename. */
+    if(window.B && B.deal && B.deal.source === 'external'){
+      return __cfExportExternalXlsx();
+    }
     const rows = window.__cfLastEnrichedRows;
     if(!rows || !rows.length){
       if(typeof toast === 'function') toast('No cashflows to export — build a deal first', 3000, { kind:'info' });
@@ -46686,6 +47815,25 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   function _leCurrentFormKey(){ return window.__leCurrentFormKey || null; }
 
   window.__leOpenEventForm = function(key, ref){
+    /* Functional guard, not just a disabled button. Lifecycle rows call this
+       from inline onclick handlers and from the add-event picker, so greying
+       the controls alone still leaves a reachable path to writing an event.
+
+       Why it matters: this deal's movements came from the external feed, and
+       balances are DERIVED from movements. An event added here changes the
+       balance PCS computes, so the accounting stops reconciling to the
+       schedule the counterparty sent — and PCS's divergent version is the one
+       that reaches Investran. A corrected file is the fix, not a manual edit. */
+    if(window.B && B.deal && B.deal.source === 'external'){
+      if(typeof toast === 'function'){
+        toast('Read-only — this deal\'s events come from ' +
+              ((B.deal.externalSystem === 'portf' ? 'PortF' : B.deal.externalSystem) || 'the external feed') +
+              '. Re-import a corrected file to change them.', 5000, { kind:'warning' });
+      }
+      const p = document.getElementById('le-add-picker');
+      if(p) p.style.display = 'none';
+      return;
+    }
     const form = EVENT_FORMS[key];
     const panel = document.getElementById('le-form-panel');
     const title = document.getElementById('le-form-title');
@@ -46954,6 +48102,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   };
 
   window.__leRender = function(){
+    /* Re-apply the external gate at the END of this function — see the tail.
+       __leRender rebuilds the table and the tranche tabs, so any disabled
+       state applied earlier is thrown away with the nodes that carried it. */
     const tbody = document.getElementById('le-tbody');
     const tabl  = document.getElementById('le-table');
     const empt  = document.getElementById('le-empty');
@@ -46998,6 +48149,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!filtered.length){
       tabl.style.display = 'none';
       empt.style.display = 'block';
+      _leApplyReadOnly();
       return;
     }
     tabl.style.display = 'table';
@@ -47032,7 +48184,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         '</td>' +
       '</tr>'
     )).join('');
+    _leApplyReadOnly();
   };
+
+  /* The table and its per-row Edit buttons are rebuilt on every render, so the
+     external gate has to run again afterwards or the freshly-created nodes come
+     back enabled. The write path itself is guarded inside __leOpenEventForm —
+     this is the visible half, so a read-only deal also LOOKS read-only. */
+  function _leApplyReadOnly(){
+    try { if(typeof window.__applyExternalReadOnly === 'function') window.__applyExternalReadOnly(); }
+    catch(e){ console.error('[ext] read-only re-apply failed after __leRender:', e); }
+    if(!(window.B && B.deal && B.deal.source === 'external')) return;
+    document.querySelectorAll('#le-tbody button').forEach(btn => {
+      btn.disabled = true;
+      btn.style.opacity = '0.4';
+      btn.style.cursor = 'not-allowed';
+      btn.title = 'Read-only — events on this deal come from the external feed.';
+    });
+  }
 
   // Resolve a row `ref` back to the record it came from, plus a values object
   // the form can prefill from. Returns null when the ref is stale (deal

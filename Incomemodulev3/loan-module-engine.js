@@ -153,6 +153,16 @@ if(typeof window !== 'undefined'){
 }
 
 /* ---------- Capitalization gate ---------- */
+/* A floating-rate reset date: the anchor's day-of-month, every N months after
+   settlement. Shares the day-of-month convention with isCapitalizationDay so a
+   loan that settles on the 15th resets on the 15th, not on month-ends. */
+function isResetDay(date, anchor, months){
+  if(!anchor || !(months > 0)) return false;
+  if(date.getDate() !== anchor.getDate()) return false;
+  const elapsed = (date.getFullYear()-anchor.getFullYear())*12 + (date.getMonth()-anchor.getMonth());
+  return elapsed > 0 && elapsed % months === 0;
+}
+
 function isCapitalizationDay(date, anchor, freq){
   // Capitalization happens on the day-of-month of the anchor at the given frequency.
   if(!anchor) return false;
@@ -973,6 +983,64 @@ function buildSchedule(instr){
   else if(hasFutureDraws)          carryingValue = 0;
   else                             carryingValue = instr.faceValue || 0;
 
+  /* ─── Fees, costs and the opening carrying amount ────────────────────────
+     Hoisted ABOVE the effective-yield solve on purpose. The rate has to be
+     solved against the amount actually invested — consideration net of
+     yield-integral fees received and gross of transaction costs — so that
+     figure must exist before the solver runs. Computing it afterwards (as this
+     did originally) leaves the solve anchored to the headline price while the
+     daily roll-forward starts somewhere else, and the two never reconcile.
+
+     Fee shapes accepted:
+       mode 'flat'/'fixed' + oneOff  — a stated amount (v0.4/v0.5 flat amounts)
+       mode 'percent'     + oneOff  — a rate applied to a stated base           */
+  const fees = Array.isArray(instr.fees) ? instr.fees : [];
+  const feeAccum = fees.map(f => ({
+    id: f.id, kind: f.kind, label: f.label || f.kind, ifrs: f.ifrs || 'IFRS15-overTime',
+    cumAccrued: 0, cumRecognised: 0, cumPaid: 0
+  }));
+  const totalLifeDays = Math.max(1, Math.round((maturity - settle)/ONE_DAY));
+  // For IFRS9-EIR fees: deferred income at t0 = sum(flat one-off) + 0 (% accrue daily over life)
+  let deferredEIRPool = 0;
+  for(const f of fees){
+    // Accept both 'flat' (engine-native) and 'fixed' (v3 builder mapping of 'fixAmount').
+    if(/EIR$/.test(f.ifrs || '') && (f.mode === 'flat' || f.mode === 'fixed') && f.frequency === 'oneOff'){
+      deferredEIRPool += (f.amount || 0);
+      // Reduce initial carrying value by the deferred fee (cash received at signing
+      // is offset against carrying amount; it accretes back into interest income).
+      carryingValue -= (f.amount || 0);
+    } else if(/EIR$/.test(f.ifrs || '') && f.mode === 'percent' && f.frequency === 'oneOff'){
+      const baseAmt = ((b)=>{
+        if(b==='commitment') return commitment;
+        if(b==='face')       return instr.faceValue || 0;
+        if(b==='drawn')      return drawnBalance;
+        if(b==='covered')    return instr.coveredAmount || 0;
+        return commitment;
+      })(f.base);
+      const oneOff = baseAmt * (f.rate || 0);
+      deferredEIRPool += oneOff;
+      carryingValue -= oneOff;
+    }
+  }
+  /* IFRS 9 measures a financial asset initially at fair value PLUS directly
+     attributable transaction costs, so costs raise the opening carrying amount
+     and therefore the effective yield — the mirror image of a fee received,
+     which lowers it. Both belong in the same number. */
+  const txnCosts = +instr.transactionCosts || 0;
+  if(txnCosts) carryingValue += txnCosts;
+
+  /* The amount actually invested. On the Harbour Point example:
+        59,100,000 paid  −  600,000 arrangement fee  +  185,000 costs
+      = 58,685,000
+     Captured once, so the solver and the daily roll-forward can never be
+     anchored to two different opening balances. */
+  const eirOpeningCarrying = carryingValue;
+  /* The balance that opening carrying amount corresponds to. Both already
+     reflect the day-zero funding, so the yield walk must start from this pair
+     and apply only the movements that come AFTER settlement — re-applying the
+     initial draw would count it twice and send the solve to a negative rate. */
+  const eirOpeningBalance = balance;
+
   // Precompute total life (years) and a rough cashflow set for IRR methods.
   // For SONIA / CompoundedRFR coupons the fixedRate is 0 — derive an
   // indicative coupon from the rfr base + first margin step + ESG adj so the
@@ -993,34 +1061,122 @@ function buildSchedule(instr){
   //   method effectiveInterestIRR    -> explicit yield input
   //   method straightLine            -> no y — amortize linearly
   let effectiveYield = null;
+  // Set when a yield COULD have been solved but deliberately was not. Carried
+  // on the schedule so the UI can say why rather than showing a blank.
+  let eirRefusal = null;
   const amort = instr.amortization || { method:'none' };
   // Days-per-year aligned with the day-count basis (keeps IRR-solve consistent with daily accrual).
   const daysPerYear = (basis==='ACT/365' || basis==='ACT/ACT') ? 365 : 360;
-  if(amort.method === 'effectiveInterestPrice' && instr.purchasePrice && instr.faceValue && couponRateNominal){
+  /* ─── Purchased or originated credit-impaired ────────────────────────────
+     A loan already credit-impaired when acquired takes a CREDIT-ADJUSTED
+     effective rate: lifetime expected credit losses are built into the yield
+     from initial recognition, and no separate day-one allowance is raised.
+     That is a different calculation, not a parameter of this one.
+
+     Running the ordinary method on such an asset overstates interest income
+     for the whole of its life — the discount that compensates for expected
+     losses gets accreted into income as though it were pure yield — and the
+     error never self-corrects. So the solve is refused rather than performed,
+     and the reason is carried out to the caller. Deliberately loud: silence
+     here produces a plausible number that is wrong by design. */
+  const pociFlag = instr.creditImpairedAtAcquisition === true;
+  if(pociFlag && amort.method === 'effectiveInterestPrice'){
+    eirRefusal = 'Credit-impaired at acquisition. This asset requires a '
+               + 'credit-adjusted effective interest rate, which embeds lifetime '
+               + 'expected credit losses in the yield. PCS does not yet compute '
+               + 'one, and the ordinary method would overstate interest income '
+               + 'for the life of the asset, so no rate has been applied.';
+  }
+
+  if(!pociFlag && amort.method === 'effectiveInterestPrice' && instr.faceValue && couponRateNominal){
+    /* The rate is solved against the OPENING CARRYING AMOUNT — consideration
+       net of yield-integral fees received and gross of transaction costs — not
+       against the headline price. Solving on the price alone and then releasing
+       the fee separately produces two half-answers: a yield that ignores the
+       fee, and a fee release that ignores the yield. */
+    const eirT0 = eirOpeningCarrying > 0
+      ? eirOpeningCarrying
+      : (instr.purchasePrice || instr.faceValue || 0);
+
+    /* Horizon: the EXPECTED life, not the contractual one. IFRS 9 spreads the
+       yield over the period the instrument is expected to be held, and on a
+       long-dated loan the two are not close — Suffolk runs to 2063 on paper.
+       Falls back to contractual maturity when nothing was stated. */
+    const expISO = instr.expectedRedemptionDate || null;
+    const expDate = expISO ? parseISO(expISO) : null;
+    const horizonDays = (expDate && expDate > settle && expDate <= maturity)
+      ? Math.round((expDate - settle)/ONE_DAY)
+      : totalDays;
+
     // Build cashflows aligned to the scheduler's day-count: coupon annually + face at maturity.
-    const yearsToMat = totalDays / daysPerYear;
+    const yearsToMat = horizonDays / daysPerYear;
     const cfs = [];
     const coupon = instr.faceValue * couponRateNominal;
     const fullYears = Math.floor(yearsToMat);
     for(let y=1; y<=fullYears; y++) cfs.push({t:y, amount: coupon});
     const stub = yearsToMat - fullYears;
     cfs.push({t: yearsToMat, amount: instr.faceValue + (stub>0 ? coupon*stub : 0)});
-    const seed = solveYield(instr.purchasePrice, cfs) ?? couponRateNominal;
-    // Refinement pass: pick the yield that makes the daily-simple-interest schedule
-    // close to face at maturity. Two-point secant is plenty.
+    const seed = solveYield(eirT0, cfs) ?? couponRateNominal;
+
+    /* Refinement pass: find the yield that makes the daily roll-forward land on
+       the closing balance.
+
+       This used to hold the balance at faceValue for the whole life and accrue
+       a constant coupon on it. That is only true of a bullet. On an amortising
+       loan the balance falls as principal is repaid, so both the coupon and the
+       yield accrue on less and less — and the discount and fee are earned over
+       a smaller average balance, which RAISES the effective rate. Holding face
+       constant produced the same EIR for a bullet and for a loan repaying 20% a
+       year, and left carrying value £716,697 short of the balance at maturity
+       on a £60m five-year facility.
+
+       So the walk now follows the actual principal schedule. Each day:
+         balance += draws − repayments
+         carrying += carrying×y×dcf − balance×coupon×dcf + draws − repayments
+       and the target is carrying == balance at the horizon, not carrying ==
+       face. A repayment reduces the carrying amount by the cash received. */
+    const _settleISO = toISO(settle);
+    const _pSched = Array.isArray(instr.principalSchedule) ? instr.principalSchedule : [];
+    const _deltaByDay = {};                       // ISO date → net principal movement
+    for(const e of _pSched){
+      if(!e || !e.date) continue;
+      // Day-zero funding is already inside eirOpeningCarrying / eirOpeningBalance.
+      if(e.date <= _settleISO) continue;
+      const amt = +e.amount || 0;
+      if(!amt) continue;
+      const isDraw = (e.type === 'draw' || e.type === 'initialPurchase');
+      const isDown = (e.type === 'paydown' || e.type === 'repayment' ||
+                      e.type === 'prepayment' || e.type === 'mandatoryPrepayment');
+      if(!isDraw && !isDown) continue;
+      _deltaByDay[e.date] = (_deltaByDay[e.date] || 0) + (isDraw ? amt : -amt);
+    }
+
     const runCarrying = (y) => {
-      let cv = instr.purchasePrice || 0;
-      for(let k=0; k<totalDays+1; k++){
-        cv += cv * y * (1/daysPerYear) - instr.faceValue * couponRateNominal * (1/daysPerYear);
+      let cv  = eirT0;
+      let bal = eirOpeningBalance || instr.faceValue || 0;
+      const d = new Date(settle);
+      for(let k = 0; k <= horizonDays; k++){
+        const iso = toISO(d);
+        const delta = _deltaByDay[iso] || 0;
+        if(delta){ bal += delta; cv += delta; }
+        cv += (cv * y - bal * couponRateNominal) * (1/daysPerYear);
+        d.setDate(d.getDate() + 1);
       }
-      return cv;
+      // Solve for carrying == balance, so the asset is carried at exactly what
+      // is still owed on the day the horizon is reached.
+      return cv - bal;
     };
+    // runCarrying now returns the GAP (carrying − balance), so the root is 0.
+    // It previously returned the carrying amount and was compared against face;
+    // leaving that comparison in place would have solved for carrying == 2×face.
     let y0 = seed, y1 = seed * 1.001;
-    let f0 = runCarrying(y0) - instr.faceValue;
-    let f1 = runCarrying(y1) - instr.faceValue;
-    for(let i=0; i<6 && Math.abs(f1) > 1e-3; i++){
+    let f0 = runCarrying(y0);
+    let f1 = runCarrying(y1);
+    for(let i=0; i<12 && Math.abs(f1) > 1e-3; i++){
+      if(f1 === f0) break;                       // flat secant — no further progress
       const y2 = y1 - f1 * (y1-y0) / (f1-f0);
-      y0 = y1; f0 = f1; y1 = y2; f1 = runCarrying(y1) - instr.faceValue;
+      if(!isFinite(y2)) break;
+      y0 = y1; f0 = f1; y1 = y2; f1 = runCarrying(y1);
     }
     effectiveYield = y1;
   } else if(amort.method === 'effectiveInterestFormula'){
@@ -1101,35 +1257,93 @@ function buildSchedule(instr){
   // EIR-classified fees (IFRS 9) accrete into carrying value as deferred
   // income; recognised pro-rata over the life. IFRS 15 fees are recognised
   // over the service period (commitment/guarantee) or at the point-in-time.
-  const fees = Array.isArray(instr.fees) ? instr.fees : [];
-  const feeAccum = fees.map(f => ({
-    id: f.id, kind: f.kind, label: f.label || f.kind, ifrs: f.ifrs || 'IFRS15-overTime',
-    cumAccrued: 0, cumRecognised: 0, cumPaid: 0
-  }));
-  const totalLifeDays = Math.max(1, Math.round((maturity - settle)/ONE_DAY));
-  // For IFRS9-EIR fees: deferred income at t0 = sum(flat one-off) + 0 (% accrue daily over life)
-  let deferredEIRPool = 0;
-  for(const f of fees){
-    // Accept both 'flat' (engine-native) and 'fixed' (v3 builder mapping of 'fixAmount').
-    if(/EIR$/.test(f.ifrs || '') && (f.mode === 'flat' || f.mode === 'fixed') && f.frequency === 'oneOff'){
-      deferredEIRPool += (f.amount || 0);
-      // Reduce initial carrying value by the deferred fee (cash received at signing
-      // is offset against carrying amount; it accretes back into interest income).
-      carryingValue -= (f.amount || 0);
-    } else if(/EIR$/.test(f.ifrs || '') && f.mode === 'percent' && f.frequency === 'oneOff'){
-      const baseAmt = ((b)=>{
-        if(b==='commitment') return commitment;
-        if(b==='face')       return instr.faceValue || 0;
-        if(b==='drawn')      return drawnBalance;
-        if(b==='covered')    return instr.coveredAmount || 0;
-        return commitment;
-      })(f.base);
-      const oneOff = baseAmt * (f.rate || 0);
-      deferredEIRPool += oneOff;
-      carryingValue -= oneOff;
-    }
+  /* ─── Floating-rate EIR policy ───────────────────────────────────────────
+     IFRS 9 permits two treatments for a floating-rate instrument, and both are
+     used in the market:
+
+       'original' — the rate is set at initial recognition and held. Movements
+                    in the benchmark flow through interest income via the
+                    coupon, but the yield used to accrete the carrying amount
+                    does not change.
+       'revise'   — the rate is re-estimated at each reset (B5.4.5), anchored
+                    to the carrying amount at that date over the remaining
+                    expected life.
+
+     This is an accounting policy, not a fact about the loan, so it is a
+     setting rather than something inferred. Default 'original' — the treatment
+     the engine has always applied — so no existing deal changes its numbers
+     until someone deliberately chooses otherwise.
+
+     IFRS 9 expects a policy to be applied consistently to like items, so a
+     per-deal override is recorded and surfaced rather than applied quietly;
+     eirBasis below reports which was used and how many times the rate moved. */
+  const eirFloatingPolicy = (instr.eirFloatingPolicy === 'revise') ? 'revise' : 'original';
+  // Anything that is not a fixed coupon resets against a benchmark.
+  const isFloatingCoupon = !!(instr.coupon && instr.coupon.type && instr.coupon.type !== 'Fixed');
+  let activeYield = effectiveYield;      // the rate actually driving accretion today
+  let eirRevisions = 0;
+
+  /* Re-estimation at a reset. Uses the periodic solve rather than the daily
+     walk: the daily walk is O(days) and a 39-year facility resetting twice a
+     year would run it ~78 times inside a secant loop. Anchoring each estimate
+     to the current carrying amount means any approximation is corrected at the
+     next reset rather than compounding — and the final segment still solves to
+     land on the balance outstanding. */
+  function _reestimateEIR(cv, bal, cpnRate, daysLeft){
+    if(!(cv > 0) || !(bal > 0) || !(daysLeft > 0)) return null;
+    const yrs = daysLeft / daysPerYear;
+    const cpn = bal * (cpnRate || 0);
+    const cfs = [];
+    const full = Math.floor(yrs);
+    for(let y = 1; y <= full; y++) cfs.push({ t: y, amount: cpn });
+    const stub = yrs - full;
+    cfs.push({ t: yrs, amount: bal + (stub > 0 ? cpn * stub : 0) });
+    const y = solveYield(cv, cfs);
+    // Reject nonsense rather than let a failed solve poison the schedule.
+    return (y != null && isFinite(y) && y > -0.5 && y < 2) ? y : null;
   }
-  const eirDailyAccretion = deferredEIRPool > 0 ? (deferredEIRPool / totalLifeDays) : 0;
+
+  /* Reset cadence, in months. Prefer the component's own tenor (a 6M SONIA
+     component resets every six months); fall back to the accrual frequency. */
+  const _resetMonths = (function(){
+    const t = instr.rfr && instr.rfr.tenor;
+    if(t){
+      const m = String(t).trim().toUpperCase().match(/^(\d+)([DWMY])$/);
+      if(m){
+        const n = +m[1];
+        if(m[2] === 'M') return n;
+        if(m[2] === 'Y') return n * 12;
+        if(m[2] === 'W') return Math.max(1, Math.round(n / 4.345));
+        if(m[2] === 'D') return Math.max(1, Math.round(n / 30.44));
+      }
+    }
+    const f = String(instr.interestAccrualFreq || '').toLowerCase();
+    if(/month/.test(f))  return 1;
+    if(/quarter/.test(f)) return 3;
+    if(/semi/.test(f))    return 6;
+    if(/annual|year/.test(f)) return 12;
+    return 3;
+  })();
+
+  /* ─── Why the straight-line pool is gone ─────────────────────────────────
+     Deferred fee income used to accrete as deferredEIRPool / totalLifeDays —
+     an even daily slice. IFRS 9 5.4.1 requires the effective interest method,
+     under which the release is the gap between the yield on the carrying
+     amount and the contractual coupon. That gap grows as the carrying amount
+     grows, so the true profile is never a straight line.
+
+     The engine already computes exactly that, further down, as
+         dailyAmort = carryingValue × effectiveYield × dcf − dailyCash
+     but it only runs when effectiveYield is non-null — which, until the v0.5
+     inputs arrived, it never was. So the flat pool was doing the work instead.
+
+     Now that a yield is actually solved, running BOTH would add the fee to
+     carrying value twice and overshoot par at maturity. The flat accretion is
+     therefore kept only as the legacy fallback for deals with no solved yield,
+     where it remains better than nothing. */
+  const eirFlatFallback = (effectiveYield == null && deferredEIRPool > 0)
+    ? (deferredEIRPool / totalLifeDays)
+    : 0;
   // V3 — Running total so the daily accretion step can cap itself at the pool
   // (prevents float-rounding overshoot) and crystallise the residual when the
   // loan is derecognised (balance → 0 via paydown / sale / write-off).
@@ -1375,8 +1589,28 @@ function lookupMarginBps(dateISO){
       // scheduled paydowns. The loan is extinguished; subsequent scheduled
       // payments are no-ops.
       else if(e.type==='paydown' || e.type==='repayment'){
-        const actual = Math.min(Math.max(0, balance), e.amount);
+        /* `repayOutstanding` means "settle whatever is left", which is what a
+           bullet maturity actually does. The amount cannot be known when the
+           schedule is built: on a PIK loan the balance compounds, so a payoff
+           fixed at face leaves the capitalised interest outstanding forever.
+           Measured on a 6% cash + 10.5% PIK facility, £10m face compounded to
+           £16.37m and the auto payoff repaid only £10m, leaving £6.8m owing
+           after maturity. The stated amount is kept as a floor so a partial
+           schedule is never silently enlarged. */
+        const target = e.repayOutstanding
+          ? Math.max(+e.amount || 0, Math.max(0, balance))
+          : e.amount;
+        const actual = Math.min(Math.max(0, balance), target);
         paydown += actual;
+        /* PIK accrued since the last capitalisation is settled in cash at the
+           payoff, not capitalised onto a loan that is being extinguished. The
+           day loop capitalises AFTER events, so without this the final stub
+           landed on a zero balance and left a phantom £428,570 outstanding on a
+           loan that had just been repaid in full. */
+        if(e.repayOutstanding && cumPikAccrued > 0.005){
+          paydown += cumPikAccrued;
+          cumPikAccrued = 0;
+        }
         balance -= actual;
         drawnBalance = Math.max(0, drawnBalance - actual);
         carryingValue = Math.max(0, carryingValue - actual);
@@ -2004,11 +2238,11 @@ function lookupMarginBps(dateISO){
     //      correct accounting treatment: the loan is derecognised so any
     //      unamortised deferred fee must be recognised at that moment.
     let dailyEIRAccretion = 0;
-    if(eirDailyAccretion > 0){
+    if(eirFlatFallback > 0){
       const remainingPool = Math.max(0, deferredEIRPool - cumulativeEIRAccreted);
       if(balance > 0.005){
         // Standard daily accretion — but never exceed the residual pool
-        dailyEIRAccretion = Math.min(eirDailyAccretion, remainingPool);
+        dailyEIRAccretion = Math.min(eirFlatFallback, remainingPool);
       } else if(remainingPool > 0.005){
         // Balance just hit zero — crystallise the entire residual pool today
         dailyEIRAccretion = remainingPool;
@@ -2028,6 +2262,21 @@ function lookupMarginBps(dateISO){
       cumPikAccrued = 0; // reset accrued pool
     }
 
+    /* ----- Floating-rate reset: re-estimate the yield if policy says so -----
+       Only under 'revise', only for a floating coupon, and only once a yield
+       exists to revise. A fixed-rate loan has nothing to re-estimate: its cash
+       flows do not move, so the rate set at inception remains correct for life
+       and re-solving would only add noise. */
+    if(eirFloatingPolicy === 'revise' && activeYield != null && isFloatingCoupon &&
+       isResetDay(d, settle, _resetMonths)){
+      const daysLeft = Math.round((maturity - d)/ONE_DAY);
+      const y = _reestimateEIR(carryingValue, balance, couponRate, daysLeft);
+      if(y != null){
+        if(Math.abs(y - activeYield) > 1e-9) eirRevisions++;
+        activeYield = y;
+      }
+    }
+
     // ----- Amortization of discount/premium -----
     let dailyAmort = 0;
     if(inAmortWindow){
@@ -2035,9 +2284,9 @@ function lookupMarginBps(dateISO){
         dailyAmort = straightLineDaily;
         carryingValue += dailyAmort;
         cumAmort += dailyAmort;
-      } else if(effectiveYield != null){
+      } else if(activeYield != null){
         // effective interest: daily yield accrual on carrying value
-        const dyield = effectiveYield * dcf;
+        const dyield = activeYield * dcf;
         const effectiveIncome = carryingValue * dyield;
         dailyAmort = effectiveIncome - dailyCash; // portion that amortizes discount/premium
         carryingValue += dailyAmort;
@@ -2094,6 +2343,14 @@ function lookupMarginBps(dateISO){
       pikPaydown: 0,
       amortDaily: dailyAmort,
       cumAmort,
+      /* The two inputs the accretion was derived from, carried on the row so it
+         can be re-derived downstream without re-running the engine. The
+         external overlay replaces dailyCash with the amount the counterparty
+         actually reported; accretion is the gap between the yield on the
+         carrying amount and the cash coupon, so replacing one and not the other
+         breaks the identity. Null when no effective yield is in force. */
+      eirYieldUsed: (inAmortWindow && amort.method !== 'straightLine') ? activeYield : null,
+      eirDcf: dcf,
       nonUseFee: dailyNonUse,
       cumNonUseFee,
       // IFRS-aware fee fields
@@ -2142,6 +2399,56 @@ function lookupMarginBps(dateISO){
   // any future reconciliation all read the same verdict rather than each
   // re-deriving it — or, worse, none of them asking.
   rows.rfrConventions = rfrConventionStatus(instr);
+  /* ─── What the EIR on this schedule actually is ──────────────────────────
+     A yield of "7.25%" that is really the contractual coupon, shown without
+     qualification, is the same failure as a compounded rate built on assumed
+     conventions: a number that looks calculated and is not. This says which,
+     and shows the build-up so the figure can be decomposed rather than taken
+     on trust — an EIR nobody can take apart is one nobody will defend. */
+  rows.eirBasis = (function(){
+    const consideration = instr.purchasePrice != null ? +instr.purchasePrice : null;
+    const build = {
+      faceValue:        instr.faceValue || 0,
+      considerationPaid: consideration,
+      yieldIntegralFees: deferredEIRPool || 0,
+      transactionCosts:  txnCosts || 0,
+      openingCarrying:   eirOpeningCarrying,
+      contractualCoupon: couponRateNominal,
+      expectedRedemption: instr.expectedRedemptionDate || null,
+      horizonUsed: instr.expectedRedemptionDate ? 'expected redemption' : 'contractual maturity',
+      floatingPolicy: isFloatingCoupon
+        ? (eirFloatingPolicy === 'revise' ? 'revised at each reset' : 'held from initial recognition')
+          + ' (' + (instr.eirFloatingPolicySource || 'workspace policy') + ')'
+        : 'n/a (fixed coupon)',
+      resetMonths: isFloatingCoupon ? _resetMonths : null,
+      revisions: eirRevisions,
+      // The rate in force at the end of the schedule. Equals the opening rate
+      // under 'original'; under 'revise' it is wherever the resets took it.
+      closingYield: activeYield
+    };
+    if(eirRefusal){
+      return { status:'refused', calculated:false, effectiveYield:null, build,
+               reason: eirRefusal };
+    }
+    if(effectiveYield == null){
+      const atPar = consideration == null || Math.abs(consideration - (instr.faceValue||0)) < 0.005;
+      return {
+        status:'coupon', calculated:false, effectiveYield:null, build,
+        reason: (atPar && !(deferredEIRPool > 0) && !txnCosts)
+          ? 'No consideration, fee or cost was stated that differs from par, so '
+          + 'there is nothing to amortise and the effective rate equals the '
+          + 'contractual coupon. That is the correct answer here, not a fallback.'
+          : 'No effective yield was solved — the amortisation method is not set. '
+          + 'The figure shown is the contractual coupon and must not be reported '
+          + 'as an effective interest rate.'
+      };
+    }
+    return {
+      status:'calculated', calculated:true, effectiveYield, build,
+      reason: 'Solved so the carrying amount rolls forward to the balance '
+            + 'outstanding at the ' + build.horizonUsed + '.'
+    };
+  })();
   return rows;
 }
 

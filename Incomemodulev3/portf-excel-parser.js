@@ -247,11 +247,30 @@
   function makeValidator(lookups, warn, err) {
     var repairsReported = {};
 
+    /* Some lookup columns exist under more than one spelling across template
+       versions — the original tab said "Day Count Conversion", the corrected
+       one says "Day Count Convention". Try every known spelling before giving
+       up, or a workbook that FIXED the typo is punished for it. */
+    var COLUMN_ALIASES = {
+      'day count conversion': ['day count conversion', 'day count convention'],
+      'day count convention': ['day count convention', 'day count conversion']
+    };
+
     function allowed(key) {
-      var l = lookups[key];
+      var candidates = COLUMN_ALIASES[key] || [key];
+      var l = null;
+      for (var i = 0; i < candidates.length && !l; i++) {
+        if (lookups[candidates[i]] && lookups[candidates[i]].values.length) l = lookups[candidates[i]];
+      }
       var vals = l ? l.values.slice() : [];
       var rep = LOOKUP_REPAIRS[key];
-      if (rep && rep.add) rep.add.forEach(function (v) {
+      /* Only repair a list that EXISTS. Adding to an empty one manufactured a
+         whitelist out of nothing: with no matching column the day-count repair
+         produced the single value ACT/365, so a file correctly stating ACT/360
+         was rejected as invalid — against a list the workbook never contained.
+         A missing column is "cannot validate", which the caller already
+         reports; it is not a one-item vocabulary. */
+      if (rep && rep.add && vals.length) rep.add.forEach(function (v) {
         if (vals.map(norm).indexOf(norm(v)) === -1) vals.push(v);
       });
       return vals;
@@ -373,9 +392,24 @@
            list.filter(function (c) { return strip(c.name) === want; })[0] || null;
   }
 
+  /* Locate a section heading. Scans the WHOLE sheet by default.
+
+     It used to stop after `maxRow || 12` rows and every caller passed 14, which
+     silently broke the moment a block above grew. "Facility Setup" sits at row
+     index 14 in the current template — one row past the window — so the entire
+     block was invisible: facility name blank, Total Commitment 0, Availability
+     End blank, and Day Count / Holiday / Repayment / Facility Type / Accrual
+     all falling through to their DEFAULTS. Day count silently became ACT/365
+     on a template that said ACT/360, which moves every interest figure.
+
+     Nothing was wrong with the file, and nothing reported an error, because a
+     missing optional block looks exactly like a block that is not there. The
+     row cap bought nothing — a heading match is unambiguous — so it is gone.
+     `maxRow` is still honoured when a caller genuinely wants a bounded scan. */
   function findSection(grid, headingText, maxRow) {
     var want = norm(headingText);
-    for (var r = 0; r < Math.min(grid.length, maxRow || 12); r++) {
+    var limit = maxRow ? Math.min(grid.length, maxRow) : grid.length;
+    for (var r = 0; r < limit; r++) {
       for (var c = 0; c < 24; c++) {
         if (norm(cell(grid, r, c)) === want) return { row: r, col: c };
       }
@@ -994,24 +1028,67 @@
   function readTranchesV04(grids, key, externalDealId, warn) {
     var grid = grids[key];
     if (!grid) return [];
-    var t = readTable(grid, ['Tranche ID', 'Tranche GUID', 'Tranche Name', 'Currency', 'Face Value', 'Commitment'], key, warn);
+    var t = readTable(grid, ['Tranche ID', 'Tranche GUID', 'Tranche Name', 'Currency', 'Face Value', 'Commitment',
+                             /* v0.5 — effective-interest inputs. */
+                             'Consideration Paid', 'Consideration Date', 'Transaction Costs',
+                             'Expected Redemption Date', 'Credit Impaired at Acquisition'], key, warn);
     var out = [];
     t.rows.forEach(function (r) {
       var id = txt(gv(grid, r, t.col, 'Tranche ID'));
       var nm = txt(gv(grid, r, t.col, 'Tranche Name'));
       if (!id && !nm) return;
+      var face  = num(gv(grid, r, t.col, 'Face Value'));
+      /* Every v0.5 field stays null when the cell is blank. Defaulting
+         consideration to face would assert "acquired at par" — a specific and
+         consequential claim — on a file that said nothing, and the resulting
+         yield would look as settled as one we were actually told. Same for
+         costs: a stated 0 and an unstated cost are different answers. */
+      var consid = num(gv(grid, r, t.col, 'Consideration Paid'));
+      var costs  = num(gv(grid, r, t.col, 'Transaction Costs'));
+      var poci   = yesNo(gv(grid, r, t.col, 'Credit Impaired at Acquisition'));
+
+      if (consid !== null && face && consid > 0) {
+        /* A price wildly away from face is almost always a units error — a
+           figure entered in thousands against a face in units, say. Worth a
+           word before it becomes a yield nobody can explain. */
+        var pxPct = consid / face * 100;
+        if (pxPct < 20 || pxPct > 180) {
+          warn(key + ': tranche "' + (nm || id) + '" has Consideration Paid at ' +
+               pxPct.toFixed(1) + '% of Face Value. Check the units — this is well ' +
+               'outside the range a price normally takes.');
+        }
+      }
+
       out.push({
         externalTrancheId: externalDealId + '-' + slug(id || nm),
         sourceKey: id || nm,
         externalTrancheGuid: txt(gv(grid, r, t.col, 'Tranche GUID')) || null,
         name: nm || id,
         currency: txt(gv(grid, r, t.col, 'Currency')) || null,
-        face: num(gv(grid, r, t.col, 'Face Value')),
+        face: face,
         commitment: num(gv(grid, r, t.col, 'Commitment')),
+        // ─── v0.5 ───
+        considerationPaid: consid,
+        considerationDate: iso(gv(grid, r, t.col, 'Consideration Date')),
+        transactionCosts: costs,
+        expectedRedemptionDate: iso(gv(grid, r, t.col, 'Expected Redemption Date')),
+        creditImpairedAtAcquisition: poci,
         startDate: null, initialDrawdown: null
       });
     });
     return out;
+  }
+
+  /* Yes / No, kept tri-state. Returns true, false, or null for "not stated" —
+     because on the POCI question in particular, an unanswered cell must not be
+     read as "No". The whole point of asking is that the two are different. */
+  function yesNo(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'boolean') return v;
+    var s = norm(v);
+    if (/^(y|yes|true|1)$/.test(s)) return true;
+    if (/^(n|no|false|0)$/.test(s)) return false;
+    return null;
   }
 
   /* A compounding convention expressed as a number of business days.
@@ -1032,7 +1109,9 @@
     if (!grid) return [];
     var cols = ['Component ID', 'Tranche ID', 'Name', 'Posting Type', 'Settlement Type', 'Interest Type',
                 'Base Value', 'Terms', 'Accrual Frequency', 'Balance Basis', 'Lookback', 'Lockout',
-                'Obs Shift', 'First Settlement Date', 'Fee Types'];
+                'Obs Shift', 'First Settlement Date', 'Fee Types',
+                /* v0.5 — is this fee part of the yield, or payment for a service? */
+                'Yield Integral'];
     var t = readTable(grid, cols, key, warn);
     var out = [];
     t.rows.forEach(function (r) {
@@ -1046,6 +1125,20 @@
             '", which is not on the Tranches sheet.');
       }
       var posting = (norm(gv(grid, r, t.col, 'Posting Type')) || 'interest');
+      var isFee   = /fee/.test(posting);
+      /* Whether this fee forms part of the lender's return (and belongs inside
+         the effective interest rate) or is payment for a service (and is
+         recognised as that service is performed). Tri-state: null means the
+         file did not say, and PCS must not decide it from the fee's name —
+         "arrangement and agency fee" is genuinely ambiguous, and an inference
+         that moves the reported yield should never be silent. */
+      var yieldIntegral = yesNo(gv(grid, r, t.col, 'Yield Integral'));
+      if (isFee && yieldIntegral === null) {
+        warn(key + ': fee "' + (txt(gv(grid, r, t.col, 'Name')) || txt(gv(grid, r, t.col, 'Component ID'))) +
+             '" does not state Yield Integral. PCS cannot tell whether it forms part of the ' +
+             'yield or is payment for a service, so it will be recorded but kept out of the ' +
+             'effective interest rate.');
+      }
       var settleRaw = txt(gv(grid, r, t.col, 'Settlement Type'));
       var base = num(gv(grid, r, t.col, 'Base Value'));
       var itype = txt(gv(grid, r, t.col, 'Interest Type'));
@@ -1071,7 +1164,8 @@
         externalTrancheId: tr ? tr.externalTrancheId : null,
         scope: tr ? 'tranche' : 'facility',
         name: nm || id,
-        postingType: /fee/.test(posting) ? 'fee' : 'interest',
+        postingType: isFee ? 'fee' : 'interest',
+        yieldIntegral: yieldIntegral,
         settlementType: settleRaw ? (SETTLE_MAP[norm(settleRaw)] || norm(settleRaw)) : 'cash',
         interestType: itype || null,
         baseValue: base,
@@ -1277,19 +1371,31 @@
 
     // Old-template detection: fail with a sentence that explains, rather than
     // an avalanche of "label not found".
-    if (!findSection(loan, 'Deal Setup', 14) && !findSection(loan, 'Facility Setup', 14)) {
+    if (!findSection(loan, 'Deal Setup') && !findSection(loan, 'Facility Setup')) {
       err('"Loan info" has no "Deal Setup" or "Facility Setup" heading. This does not look like the ' +
           'current PCS Loan Import template — an earlier layout will not import.');
       return { snapshot: null, warnings: rollUp(warnings), errors: errors };
     }
 
     /* ── deal + facility ── */
-    var dealAt = findSection(loan, 'Deal Setup', 14);
-    var facAt  = findSection(loan, 'Facility Setup', 14);
-    var feeAt  = findSection(loan, 'Facility Fees', 14);
+    var dealAt = findSection(loan, 'Deal Setup');
+    var facAt  = findSection(loan, 'Facility Setup');
+    var feeAt  = findSection(loan, 'Facility Fees');
 
     var deal = readBlock(loan, dealAt, 1) || {};
     var fac  = readBlock(loan, facAt, 1) || {};
+
+    /* Say so rather than defaulting in silence. With no Facility Setup block
+       the commitment is 0, the facility is unnamed, and day count, holiday
+       calendar, repayment type and accrual period all take engine defaults —
+       ACT/365 where the file may well say ACT/360, which moves every interest
+       figure on the deal. That is far too consequential to infer from silence. */
+    if (!facAt) {
+      err('Loan info: no "Facility Setup" heading found. Total Commitment, Day Count ' +
+          'Convention, Holiday Calendar, Repayment Type and Facility Type all live in ' +
+          'that block; without it the import would fall back to defaults and quietly ' +
+          'change how interest is calculated.');
+    }
 
     function fv(fields, names, label) {
       var f = fieldAt(fields, names, 0);
@@ -1486,9 +1592,9 @@
       var sheet = trancheKeys[ti];
       var tg = grids[sheet];
 
-      var tdAt = findSection(tg, 'Tranche Details', 14);
-      var tiAt = findSection(tg, 'Tranche Interest Details', 14);
-      var tfAt = findSection(tg, 'Tranche Fees', 14);
+      var tdAt = findSection(tg, 'Tranche Details');
+      var tiAt = findSection(tg, 'Tranche Interest Details');
+      var tfAt = findSection(tg, 'Tranche Fees');
       if (!tdAt) { err(sheet + ': no "Tranche Details" heading — cannot read this tranche.'); continue; }
 
       var td = readBlock(tg, tdAt, 1) || {};
