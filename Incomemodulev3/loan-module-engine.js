@@ -3745,6 +3745,172 @@ function generateDIUFromReference(instr, referenceData){
   return applyInvestranGLMapping(entries);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   generateDIUFromExternalFeed — journals for an imported deal
+   ───────────────────────────────────────────────────────────────────────────
+   For a deal PortF calculates, PCS accounts and does not re-derive. Until now
+   the accounting run called generateDIU() for every deal regardless of source,
+   so an imported deal was journalised from the ENGINE'S PROJECTION rather than
+   from the schedule that was sent. On Marija Example 2 that produced 901 JEs
+   running to the facility's 2063 end date from a feed of 27 rows covering
+   November 2025 — and, because the projection's first monthly period ended
+   after the feed stopped, not one interest journal fell inside the window
+   PortF had actually reported.
+
+   This generator posts the received rows and nothing else. There is no
+   horizon, no period grid and no forecast: one row in, one JE pair out. The
+   ledger therefore ends where the feed ends, which is the honest position —
+   a period PortF has not reported is a period PCS has nothing to say about.
+
+   Three rules worth stating, because each was a way of quietly inventing a
+   number:
+
+   1. Cash is posted from `cash_settled`, never from the accrual. An accrued
+      amount is not evidence that it was paid; a row that accrues 2,500 and
+      settles nothing gets an accrual pair and no cash pair.
+   2. A posting type we do not map is REPORTED, not skipped. Silently dropping
+      a row type would understate income while the run still reported success.
+   3. Transaction-type labels are reused verbatim from the existing generators
+      because applyInvestranGLMapping routes on that text. Inventing a clearer
+      label here would silently change the GL account it lands in.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function generateDIUFromExternalFeed(instr, rows, opts){
+  opts = opts || {};
+  const out = { entries: [], unmapped: [], rowsPosted: 0, rowsSkipped: 0,
+                minDate: null, maxDate: null };
+  if(!instr || !Array.isArray(rows) || !rows.length) return out;
+
+  const system   = opts.system || 'PortF';
+  const snapshot = opts.snapshotId || null;
+  const glDateOverride = opts.glDate || null;
+  const trNames  = opts.trancheNames   || {};
+  const cpNames  = opts.componentNames || {};
+  const ctx = { legal: instr.legalEntity, leid: instr.leid, deal: instr.deal,
+                position: instr.position, sec: instr.incomeSecurity };
+  const entries = [];
+  let jeIndex = 1;
+
+  const add = (transType, amount, isDebit, account, effDate, comments) => {
+    entries.push({
+      legalEntity: ctx.legal, leid: ctx.leid, batchId: 1, jeIndex: jeIndex,
+      txIndex: isDebit ? 2 : 1,
+      glDate: glDateOverride || effDate, effectiveDate: effDate,
+      deal: ctx.deal, position: ctx.position, incomeSecurity: ctx.sec,
+      transactionType: transType, account: account,
+      allocationRule: 'No Allocation',
+      batchType: 'Loan Calculator (external feed)',
+      batchComments: 'Posted from the ' + system + ' schedule as received' +
+                     (snapshot ? ' · snapshot ' + snapshot : '') +
+                     ' · no PCS projection',
+      transactionComments: comments,
+      originalAmount: amount,
+      amountLE: Math.abs(amount), fx: 1, amountLocal: Math.abs(amount),
+      isDebit, leDomain: 'NWF'
+    });
+  };
+
+  // "Tranche A · Monthly SONIA · 2025-11-04" — enough for a workpaper to find
+  // the source row without opening the workbook.
+  const label = r => {
+    const bits = [];
+    if(r.external_tranche_id   && trNames[r.external_tranche_id])   bits.push(trNames[r.external_tranche_id]);
+    else if(r.external_tranche_id)   bits.push(r.external_tranche_id);
+    if(r.external_component_id && cpNames[r.external_component_id]) bits.push(cpNames[r.external_component_id]);
+    const period = (r.period_start && r.period_end)
+      ? r.period_start + '→' + r.period_end
+      : (r.flow_date || '');
+    bits.push(period);
+    return bits.join(' · ');
+  };
+
+  const sorted = rows.slice().sort((a, b) =>
+    String(a.flow_date || '').localeCompare(String(b.flow_date || '')));
+
+  for(const r of sorted){
+    const eff = r.flow_date;
+    if(!eff){ out.rowsSkipped++; continue; }
+    const amt  = +r.amount || 0;
+    /* cash_settled arrives as numeric, not boolean — a column that looks like a
+       flag and is not. Treating it as truthy would have posted the full accrual
+       as cash on every row that settled a penny. */
+    const cash = +r.cash_settled || 0;
+    const type = String(r.posting_type || '').toLowerCase();
+    const memo = ' · ' + system + ' ' + label(r);
+    let handled = false;
+
+    if(type === 'interest'){
+      if(Math.abs(amt) > 0.005){
+        add('Interest Receivable',            amt, true,  '40100', eff, 'Interest accrual' + memo);
+        add('Income - Daily Accrued Interest', amt, false, '23000', eff, 'Interest accrual' + memo);
+        jeIndex++;
+      }
+      if(Math.abs(cash) > 0.005){
+        add('Interest Cash Receipt',     cash, true,  '10000', eff, 'Interest cash settlement' + memo);
+        add('Interest Receivable Clear', cash, false, '23000', eff, 'Interest cash settlement' + memo);
+        jeIndex++;
+      }
+      handled = true;
+    } else if(type === 'fee'){
+      if(Math.abs(amt) > 0.005){
+        add('Fee Income (PortF)', amt, false, '40250', eff, 'Fee accrual' + memo);
+        add('Fee Receivable',     amt, true,  '23150', eff, 'Fee accrual' + memo);
+        jeIndex++;
+      }
+      if(Math.abs(cash) > 0.005){
+        add('Fee Cash Receipt',       cash, true,  '10000', eff, 'Fee cash settlement' + memo);
+        add('Fee Receivable Clear',   cash, false, '23150', eff, 'Fee cash settlement' + memo);
+        jeIndex++;
+      }
+      handled = true;
+    } else if(type === 'drawdown' || type === 'principaldrawdown'){
+      if(Math.abs(amt) > 0.005){
+        add('Loan Drawdown',        Math.abs(amt), true,  '15000', eff, 'Drawdown' + memo);
+        add('Loan Drawdown — Cash', Math.abs(amt), false, '10000', eff, 'Drawdown' + memo);
+        jeIndex++;
+      }
+      handled = true;
+    } else if(type === 'repayment' || type === 'principal' || type === 'principalrepayment'){
+      if(Math.abs(amt) > 0.005){
+        add('Loan Repayment — Cash', Math.abs(amt), true,  '10000', eff, 'Repayment' + memo);
+        add('Loan Repayment',        Math.abs(amt), false, '15000', eff, 'Repayment' + memo);
+        jeIndex++;
+      }
+      handled = true;
+    } else if(type === 'capitalisation' || type === 'capitalization' || type === 'pik'){
+      /* NOT the engine's reclass. The engine books PIK by moving interest its
+         own daily accrual already parked in Interest Receivable across into the
+         loan asset. Under a feed no such receivable was ever raised — the
+         capitalised amount arrives as a fact — so reversing it leaves a lone
+         debit and a batch that does not balance (Ardersier was out by exactly
+         its PIK total). What is true is simpler: the borrower owes more and we
+         earned income. */
+      if(Math.abs(amt) > 0.005){
+        add('PIK Interest Capitalised', Math.abs(amt), true,  '15000', eff, 'PIK capitalisation' + memo);
+        add('PIK Interest Income',      Math.abs(amt), false, '23000', eff, 'PIK capitalisation' + memo);
+        jeIndex++;
+      }
+      handled = true;
+    }
+
+    if(handled){
+      out.rowsPosted++;
+      if(!out.minDate || eff < out.minDate) out.minDate = eff;
+      if(!out.maxDate || eff > out.maxDate) out.maxDate = eff;
+    } else {
+      out.rowsSkipped++;
+      // Carried out so the caller can say which types went unposted, with a
+      // count and an example date, rather than reporting a clean run.
+      let u = out.unmapped.find(x => x.postingType === (r.posting_type || '(blank)'));
+      if(!u){ u = { postingType: r.posting_type || '(blank)', count: 0,
+                    firstDate: eff, total: 0 }; out.unmapped.push(u); }
+      u.count++; u.total += amt;
+    }
+  }
+
+  out.entries = applyInvestranGLMapping(entries);
+  return out;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // splitInterestJEsByCouponPeriod — post-processor for generateDIU output
 // ═══════════════════════════════════════════════════════════════════════════

@@ -9386,6 +9386,39 @@ window.SB = (function(){
       _stats.runsSaved++;
       updateStatusChip();
       console.log('[SB] saved accounting run', runId, '·', rows.length, 'JE rows');
+
+      /* Mark older Draft/Calculated runs Cancelled as soon as a newer one
+         lands. The purge below already deletes stale runs, but only those
+         older than a five-minute grace window — and that window exists for a
+         real reason (a run saved seconds ago may still be writing its cashflow
+         schedule, which references run_id). Two runs in quick succession is the
+         normal case, so the previous run routinely fell inside the window and
+         survived: Marija Example 2 held two complete 1,802-line runs written 40
+         seconds apart.
+
+         Marking is safe where deleting is not — no foreign key is touched, so
+         an in-flight schedule insert still succeeds, and the purge removes the
+         row later. Approved and Posted runs are never touched: superseding a
+         run someone signed off is rewriting the audit trail, not tidying it.
+         Done after the JE rows land, so a failed insert cannot cancel the only
+         good run. */
+      try {
+        const { data: superseded, error: supErr } = await _client
+          .from('accounting_runs')
+          .update({ status: 'Cancelled' })
+          .eq('deal_id', dealId)
+          .in('status', ['Draft','Calculated'])
+          .neq('id', runRow.id)
+          .select('id, run_id');
+        if(supErr){
+          console.warn('[SB] superseding prior runs failed (non-fatal):', supErr.message);
+        } else if(superseded && superseded.length){
+          console.log('[SB] superseded ' + superseded.length + ' prior run(s): ' +
+                      superseded.map(r => r.run_id).join(', '));
+        }
+      } catch(supThrew){
+        console.warn('[SB] superseding prior runs threw (non-fatal):', supThrew);
+      }
       // Auto-purge prior stale runs for the same deal so a re-run doesn't
       // leave orphaned Draft/Calculated JEs behind (they'd contaminate
       // reconciliation, Evidence Pack, dashboards). Preserves Approved and
@@ -10461,6 +10494,9 @@ window.SB = (function(){
         .from('accounting_runs')
         .select('id, run_at, status')
         .eq('deal_id', dealId)
+        // A superseded run is not the book of record. Latest-wins would
+        // otherwise pick one up if the run that replaced it were removed.
+        .neq('status', 'Cancelled')
         .order('run_at', { ascending: false })
         .limit(1);
       if(runErr){ console.error('[SB] fetchJournalEntriesForDeal (runs):', runErr); return []; }
@@ -21003,7 +21039,92 @@ function runAccountingImpl(){
   // GL Posting Date — empty input means AUTO mode (engine matches each row's
   // effectiveDate). Filled value applies the same close date to every row.
   const glPostDate = $('opt-gl-date')?.value || null;
-  M.acctJournals = generateDIU(inst, M.summary, { glDate: glPostDate });
+
+  /* An imported deal is journalised from the schedule that was SENT, never
+     from a schedule PCS projects. The run used to call generateDIU() for every
+     deal regardless of source, so Marija Example 2 — a feed of 27 rows covering
+     November 2025 — produced 901 JEs running to the facility's 2063 end date,
+     with no interest journal at all inside the month PortF had reported.
+
+     PortF calculates; PCS accounts. A period they have not sent is a period we
+     have nothing to post for, and the ledger stopping where the feed stops is
+     the truthful shape, not a gap to be filled. */
+  const _extCtx = (window.B && B.deal && B.deal.source === 'external')
+    ? (window._externalDealCtx || null) : null;
+  window.__acctExternalPosting = null;
+
+  if(_extCtx){
+    const fed = generateDIUFromExternalFeed(inst, _extCtx.cashflows || [], {
+      glDate: glPostDate,
+      system: (B.deal.externalSystem || 'PortF'),
+      snapshotId: _extCtx.snapshotId,
+      trancheNames: _extCtx.trancheNames,
+      componentNames: _extCtx.componentNames
+    });
+    M.acctJournals = fed.entries;
+    window.__acctExternalPosting = fed;
+
+    /* The received schedule is capped at 20,000 rows for the Cashflow tab's
+       benefit. Posting a capped set would silently under-report income, so the
+       run refuses rather than producing a plausible short answer. */
+    if(_extCtx.cashflowsTruncated){
+      M.acctJournals = [];
+      window.__acctExternalPosting = Object.assign({}, fed, {
+        refused: 'The received schedule was truncated at ' +
+          (_extCtx.cashflowCap || 20000).toLocaleString() + ' rows for display. ' +
+          'Journals are not generated from a partial schedule.' });
+    } else if(_extCtx.cashflowLoadError){
+      M.acctJournals = [];
+      window.__acctExternalPosting = Object.assign({}, fed, {
+        refused: 'The received schedule failed to load in full (' +
+          _extCtx.cashflowLoadError + '). Journals are not generated from a ' +
+          'partial schedule.' });
+    }
+
+    /* Say what happened. A refusal that only logs to the console reads on
+       screen as "no journals", and rows dropped for an unrecognised posting
+       type would understate income while the run still reported success. */
+    const _p = window.__acctExternalPosting;
+    if(_p.refused){
+      console.error('[ext-acct] REFUSED: ' + _p.refused);
+      if(typeof toast === 'function') toast('Journals not generated — ' + _p.refused, 12000);
+    } else {
+      console.log('[ext-acct] posted ' + _p.rowsPosted + ' received row(s) → ' +
+        _p.entries.length + ' JE lines · ' + _p.minDate + ' → ' + _p.maxDate +
+        ' · no projection beyond the feed');
+
+      /* The schedule was cut at the feed's last date. Say so — a schedule that
+         simply ends reads as a short deal rather than a short feed, and the
+         KPI strip, carrying value and EIR are all now measured over this
+         shorter window. */
+      const _su = M.externalScheduleUse;
+      if(_su && _su.applied && _su.truncatedRows){
+        console.log('[ext-acct] schedule truncated at ' + _su.to + ' — dropped ' +
+          _su.truncatedRows.toLocaleString() + ' projected day(s) (' +
+          _su.truncatedFrom + ' → ' + _su.truncatedTo + ')');
+        if(typeof toast === 'function')
+          toast('Accounting stops at ' + _su.to + ', the last date ' +
+                ((B.deal && B.deal.externalSystem) || 'PortF') + ' sent. ' +
+                _su.truncatedRows.toLocaleString() + ' projected day(s) dropped.', 9000);
+      }
+      if(_su && _su.applied && _su.daysBeforeFeed){
+        console.warn('[ext-acct] ' + _su.daysBeforeFeed + ' day(s) BEFORE the feed\'s first ' +
+          'date (' + _su.from + ') still carry PCS-computed interest of ' +
+          (_su.engineInterestBeforeFeed || 0).toLocaleString() +
+          ' — the sender did not report that period.');
+      }
+      if(_p.unmapped.length){
+        const detail = _p.unmapped.map(u => '"' + u.postingType + '" ×' + u.count +
+          ' (' + u.total.toLocaleString() + ', from ' + u.firstDate + ')').join('; ');
+        console.warn('[ext-acct] UNPOSTED posting types: ' + detail);
+        if(typeof toast === 'function')
+          toast('⚠ ' + _p.rowsSkipped + ' received row(s) were not posted — ' +
+                'unrecognised posting type: ' + detail, 14000);
+      }
+    }
+  } else {
+    M.acctJournals = generateDIU(inst, M.summary, { glDate: glPostDate });
+  }
 
   /* External PIK — replace the engine's reclass with a real income entry.
 
@@ -21020,8 +21141,13 @@ function runAccountingImpl(){
 
      What is economically true is simpler: the borrower owes more, and we earned
      income. DR the loan asset, CR PIK interest income. Accounts are lifted from
-     the engine's own rows so any GL mapping already applied is preserved. */
-  if(_isExt && M.externalScheduleUse && M.externalScheduleUse.applied
+     the engine's own rows so any GL mapping already applied is preserved.
+
+     Not needed on the feed path: generateDIUFromExternalFeed already emits the
+     DR asset / CR income pair directly from the capitalisation rows, so there
+     is no reclass to undo. Running this as well would look for 'PIK Investment'
+     rows that are not there. */
+  if(!_extCtx && _isExt && M.externalScheduleUse && M.externalScheduleUse.applied
      && M.externalScheduleUse.capitalisedIntoBalance > 0.005){
     try {
       const cap = +M.externalScheduleUse.capitalisedIntoBalance.toFixed(2);
@@ -21066,7 +21192,14 @@ function runAccountingImpl(){
   // Notices Rec column something to match against, and matches real-world
   // agent-bank behavior where interest posts every quarter (or per the deal's
   // coupon frequency). Non-interest JEs pass through untouched.
-  if(typeof splitInterestJEsByCouponPeriod === 'function' && Array.isArray(M.schedule)){
+  /* Skipped entirely on the feed path. This splitter exists because the base
+     engine emits ONE aggregated interest pair at maturity and real coupons pay
+     periodically — it redistributes that aggregate across M.schedule's coupon
+     dates. Feed journals are already one pair per received row, dated by the
+     feed. Re-splitting them would redistribute PortF's amounts across PCS's
+     PROJECTED coupon grid, which is the projection we just removed, arriving
+     by a side door. */
+  if(!_extCtx && typeof splitInterestJEsByCouponPeriod === 'function' && Array.isArray(M.schedule)){
     try {
       const before = M.acctJournals.length;
       const beforeInterest = M.acctJournals.filter(j => /Interest Receivable|Interest Cash Receipt|Income - Daily Accrued Interest|Interest Receivable Clear/.test(j.transactionType || '')).length;
@@ -23600,6 +23733,51 @@ window.applyExternalScheduleToAccounting = function(schedule, ctx){
 
   if(!byDate.size) return { applied: false, reason: 'received rows carry no dates' };
 
+  /* Stop the schedule where the feed stops.
+
+     The overlay below replaces engine figures only INSIDE the received span.
+     Everything after it kept PCS's own projection, so an imported deal carried
+     a schedule running to contractual maturity: Marija Example 2 held 27 days
+     of PortF data and roughly 37 years of ours, out to 2063. The journals no
+     longer post that projection, but the schedule still fed it to the KPI
+     strip, the carrying value column and the EIR solve — so the interest in
+     the ledger and the interest on screen were computed from different things
+     and could disagree.
+
+     A period the sender has not reported is a period PCS has nothing to say
+     about. Cutting here rather than after the loops below matters: the
+     capitalisation, cumulative-total and EIR re-derivation passes all run over
+     this array, and totalling days we are about to drop would put the
+     projection back into the very figures we are removing it from.
+
+     The maturity repayment row goes with it. That is the point — it has not
+     happened, and asserting it is the same error in a different column.
+
+     Truncation is reported, never silent: a schedule that simply ends could be
+     read as a short deal rather than a short feed. */
+  let truncatedRows = 0, truncatedFrom = null, truncatedTo = null;
+  if(maxD){
+    let keep = schedule.length;
+    for(let i = 0; i < schedule.length; i++){
+      if(schedule[i].date > maxD){ keep = i; break; }
+    }
+    /* Decide BEFORE cutting. Returning applied:false after having already
+       emptied the array would be the worst of both: the caller is told the
+       overlay did nothing while the schedule it owns has been destroyed, so
+       every KPI reads blank with no explanation attached to it. */
+    if(keep === 0){
+      return { applied: false,
+               reason: 'every schedule row falls after the last received date (' + maxD +
+                       ') — the schedule is left untouched rather than emptied' };
+    }
+    if(keep < schedule.length){
+      truncatedFrom = schedule[keep].date;
+      truncatedTo   = schedule[schedule.length - 1].date;
+      truncatedRows = schedule.length - keep;
+      schedule.length = keep;               // same array M.schedule points at
+    }
+  }
+
   let replacedDays = 0, engineDays = 0;
   let recvCash = 0, recvPik = 0, recvFees = 0, engCash = 0, engFees = 0;
 
@@ -23743,7 +23921,14 @@ window.applyExternalScheduleToAccounting = function(schedule, ctx){
     daysFromPortF: replacedDays, daysFromPCS: engineDays,
     receivedInterestCash: recvCash, receivedInterestPik: recvPik, receivedFees: recvFees,
     capitalisedIntoBalance: capitalisedTotal,
-    engineInterestOutsideSpan: engCash, engineFeesOutsideSpan: engFees
+    engineInterestOutsideSpan: engCash, engineFeesOutsideSpan: engFees,
+    /* Dropped because they fall after the last received date. */
+    truncatedRows: truncatedRows, truncatedFrom: truncatedFrom, truncatedTo: truncatedTo,
+    /* Days BEFORE the feed's first date. These are not projection — they are
+       history for a period the sender did not report — so they are left alone
+       and counted here rather than changed. A non-zero figure means PCS
+       interest is still in the numbers, at the front instead of the back. */
+    daysBeforeFeed: engineDays, engineInterestBeforeFeed: engCash
   };
 };
 
