@@ -10502,14 +10502,27 @@ window.SB = (function(){
       if(runErr){ console.error('[SB] fetchJournalEntriesForDeal (runs):', runErr); return []; }
       if(!runs || !runs.length) return [];
       const chosen = runs[0];
-      let jeQ = _client.from('journal_entries')
-        .select('id, run_id, effective_date, gl_date, transaction_type, account_code, is_debit, amount_le, amount_original, transaction_comments')
-        .eq('run_id', chosen.id);
-      if(startDate) jeQ = jeQ.gte('effective_date', startDate);
-      if(endDate)   jeQ = jeQ.lte('effective_date', endDate);
-      const { data: jes, error: jeErr } = await jeQ;
-      if(jeErr){ console.error('[SB] fetchJournalEntriesForDeal (jes):', jeErr); return []; }
-      return jes || [];
+      /* Paged for the same reason as fetchLatestRunForDeal: PostgREST's
+         1,000-row ceiling is silent. Unpaged, reconciliation compared notices
+         against the first 1,000 JE rows and reported every notice beyond them
+         as unmatched — a reconciliation failure invented by the fetch. */
+      const JE_PAGE = 1000;
+      const jes = [];
+      for(let from = 0; ; from += JE_PAGE){
+        let jeQ = _client.from('journal_entries')
+          .select('id, run_id, effective_date, gl_date, transaction_type, account_code, is_debit, amount_le, amount_original, transaction_comments')
+          .eq('run_id', chosen.id);
+        if(startDate) jeQ = jeQ.gte('effective_date', startDate);
+        if(endDate)   jeQ = jeQ.lte('effective_date', endDate);
+        const { data: page, error: jeErr } = await jeQ
+          .order('id', { ascending: true })
+          .range(from, from + JE_PAGE - 1);
+        if(jeErr){ console.error('[SB] fetchJournalEntriesForDeal (jes):', jeErr); return []; }
+        const got = page || [];
+        jes.push(...got);
+        if(got.length < JE_PAGE) break;
+      }
+      return jes;
     } catch(err){ console.error('[SB] fetchJournalEntriesForDeal threw:', err); return []; }
   }
 
@@ -10565,17 +10578,54 @@ window.SB = (function(){
       if(runErr){ console.error('[SB] fetchLatestRunForDeal (run):', runErr); return null; }
       if(!runs || !runs.length) return null;
       const run = runs[0];
-      const { data: jes, error: jeErr } = await _client
-        .from('journal_entries')
-        .select('je_index, tx_index, effective_date, gl_date, legal_entity, leid, batch_id, ' +
-                'deal_label, position_label, income_security, transaction_type, account_code, ' +
-                'gl_account_name, gl_trans_type, is_debit, amount_original, amount_le, ' +
-                'amount_local, fx_rate, allocation_rule, batch_type, batch_comments, ' +
-                'transaction_comments, le_domain, is_gl_gap, gl_gap_note')
-        .eq('run_id', run.id)
-        .order('je_index', { ascending: true })
-        .order('tx_index', { ascending: true });
+      /* Page explicitly. PostgREST enforces its own max-rows ceiling (1,000 on
+         this project) and silently returns a short page — no error, no flag.
+         This call had no .range() at all, so a 3,864-row run restored as its
+         first 1,000 rows and the tab reported "1,000 of 1,000": a quarter of
+         the run, presented as the whole of it.
+
+         Worse than a wrong count: the partial set still balances, because
+         truncation cuts whole DR/CR pairs. External Deal III restored as
+         "balanced · £750,000" against an actual £2,724,000 — a fragment that
+         reconciles, which is exactly the kind of wrong number nobody catches.
+
+         Let the row count, not the limit, say when we are done. */
+      const JE_PAGE = 1000;
+      const jes = [];
+      let jeErr = null;
+      for(let from = 0; ; from += JE_PAGE){
+        const { data: page, error } = await _client
+          .from('journal_entries')
+          .select('je_index, tx_index, effective_date, gl_date, legal_entity, leid, batch_id, ' +
+                  'deal_label, position_label, income_security, transaction_type, account_code, ' +
+                  'gl_account_name, gl_trans_type, is_debit, amount_original, amount_le, ' +
+                  'amount_local, fx_rate, allocation_rule, batch_type, batch_comments, ' +
+                  'transaction_comments, le_domain, is_gl_gap, gl_gap_note')
+          .eq('run_id', run.id)
+          .order('je_index', { ascending: true })
+          .order('tx_index', { ascending: true })
+          .order('id',       { ascending: true })   // stable tie-break across pages
+          .range(from, from + JE_PAGE - 1);
+        if(error){ jeErr = error; break; }
+        const got = page || [];
+        jes.push(...got);
+        if(got.length < JE_PAGE) break;             // short page = end of data
+      }
       if(jeErr){ console.error('[SB] fetchLatestRunForDeal (jes):', jeErr); return null; }
+
+      /* The run row states how many rows it wrote. If what came back differs,
+         say so rather than rendering a set whose totals cannot be right.
+         Silence here is what let a 28%-complete run look finished. */
+      const claimed = +run.je_rows_count || 0;
+      if(claimed && jes.length !== claimed){
+        console.error('[SB] restored JE count mismatch — run ' + run.run_id + ' claims ' +
+          claimed.toLocaleString() + ' row(s), fetched ' + jes.length.toLocaleString() +
+          '. Totals on screen will not match the run.');
+        if(typeof toast === 'function')
+          toast('Restored run is incomplete: ' + jes.length.toLocaleString() + ' of ' +
+                claimed.toLocaleString() + ' rows loaded. Re-run accounting before relying ' +
+                'on these figures.', 12000, { kind:'warning', id:'sb:je-partial' });
+      }
       // Map snake_case columns back onto the camelCase shape the renderers,
       // the DIU builder and the reconciler all expect.
       const journals = (jes || []).map(r => ({
@@ -10609,7 +10659,9 @@ window.SB = (function(){
         glGapNote:           r.gl_gap_note,
         _restored:           true    // provenance: read back, not just computed
       }));
-      return { run, journals };
+      return { run, journals,
+               claimedRows: +run.je_rows_count || 0,
+               complete: !(+run.je_rows_count) || journals.length === (+run.je_rows_count) };
     } catch(err){
       console.error('[SB] fetchLatestRunForDeal threw:', err);
       return null;
@@ -21596,6 +21648,21 @@ window.__renderInlineJETable = function(){
   const chipBal = document.getElementById('inline-je-balance-chip');
   if(!section || !host) return;
   const rowsAll = (typeof M !== 'undefined' && Array.isArray(M.acctJournals)) ? M.acctJournals : [];
+
+  /* Keep the sub-tab badge honest on every render, not just after a run.
+     refreshS2RunBadge was called from exactly two places: the end of a
+     successful run, and once 400ms after boot. The RESTORE path — which
+     replaces M.acctJournals when you open a deal — called neither, so the
+     badge kept whatever the boot refresh had stamped on it from the persisted
+     session: a previous deal's journals. That is how a deal showing
+     "3,864 of 3,864 rows" in the table simultaneously showed "128 JE · 256
+     rows" on the tab above it.
+
+     Refreshing here covers every path that repaints the table, present and
+     future, instead of relying on each caller to remember. */
+  try { if(typeof window.refreshS2RunBadge === 'function') window.refreshS2RunBadge(); }
+  catch(e){ console.warn('[acct] badge refresh failed:', e); }
+
   if(!rowsAll.length){
     section.classList.add('hidden');
     return;
@@ -32922,7 +32989,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }
     const run = res.run;
     strip.style.display = '';
-    document.getElementById('approval-run-id').textContent = run.run_id + ' · ' + (run.je_rows_count || 0) + ' JEs · ' + (run.framework_used || 'IFRS');
+    /* je_rows_count is journals.length at save time — DR/CR LINES, not entries.
+       Labelling it "JEs" here while the JE table counts entries is how one run
+       showed three different totals on one screen. */
+    document.getElementById('approval-run-id').textContent = run.run_id + ' · ' +
+      (run.je_rows_count || 0).toLocaleString() + ' rows · ' + (run.framework_used || 'IFRS');
     // Paint the three pills based on status
     const draft = document.getElementById('approval-pill-draft');
     const appr  = document.getElementById('approval-pill-approved');
@@ -33568,7 +33639,14 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(!chip) return;
     const n = (typeof M !== 'undefined' && Array.isArray(M.acctJournals)) ? M.acctJournals.length : 0;
     if(n > 0){
-      chip.textContent = n + ' JE';
+      /* These are LINES, not journal entries. Each JE is at least a DR/CR pair,
+         so calling 3,864 rows "3864 JE" doubles the apparent entry count — on
+         External Deal III there are 1,932 entries behind those rows. Show both,
+         labelled, rather than one number under the wrong name. */
+      const jeCount = new Set(M.acctJournals.map(j => j.jeIndex)).size;
+      chip.textContent = jeCount.toLocaleString() + ' JE · ' + n.toLocaleString() + ' rows';
+      chip.title = jeCount.toLocaleString() + ' journal entries, ' + n.toLocaleString() +
+                   ' debit/credit lines';
       chip.style.display = '';
     } else {
       chip.style.display = 'none';
