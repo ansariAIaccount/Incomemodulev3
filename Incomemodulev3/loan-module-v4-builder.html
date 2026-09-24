@@ -107,7 +107,24 @@
 })();
 </script>
 <script>
-  window.PCS_VERSION = 'V4';
+  /* ─── Version ────────────────────────────────────────────────────────────
+     MAJOR is a deliberate decision — bump it by hand when the module changes
+     shape. MINOR increments on every commit, so V4.1 → V4.2 → V4.3 tracks
+     what actually shipped.
+
+     The MINOR line below is rewritten by .githooks/pre-commit. It carries the
+     PCS_AUTO_MINOR marker because the hook edits it with a line-targeted
+     substitution: a loose match on "PCS_VERSION_MINOR" would also hit this
+     comment and corrupt the file on commit. Do not reword the marker.
+
+     Install once per clone (hooks are not cloned with the repo):
+         git config core.hooksPath .githooks
+     Without that the hook never runs and the version simply stops moving —
+     which is why the login card shows the file's modified time beside it, so
+     a stalled version number is visible rather than quietly misleading. */
+  window.PCS_VERSION_MAJOR = 4;
+  window.PCS_VERSION_MINOR = 1; // PCS_AUTO_MINOR
+  window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
   //   e.g.  V4 · 2026.08.19       (first build of the day)

@@ -1,0 +1,62 @@
+#!/bin/sh
+#
+# Bump PCS_VERSION_MINOR on every commit that touches the builder.
+#
+# V4.1 → V4.2 → V4.3 … so the number on the login card says which build is
+# running, and "is my fix deployed?" is answerable by looking rather than by
+# comparing file hashes.
+#
+# Install once per clone — hooks are not cloned with a repo:
+#     git config core.hooksPath .githooks
+#
+# Skip for a single commit with:  git commit --no-verify
+#
+set -e
+
+FILE="Incomemodulev3/loan-module-v4-builder.html"
+MARKER="PCS_AUTO_MINOR"
+
+# Only bump when the builder is actually part of this commit. A commit that
+# touches only docs or the engine should not move the UI's version, or the
+# number stops meaning "this build of the app".
+if ! git diff --cached --name-only | grep -qx "$FILE"; then
+  exit 0
+fi
+
+if [ ! -f "$FILE" ]; then
+  echo "pre-commit: $FILE not found — version not bumped." >&2
+  exit 0
+fi
+
+# The marker line, and only it. A loose match on PCS_VERSION_MINOR would also
+# hit the explanatory comment above the constant and corrupt the file.
+LINE=$(grep -n "$MARKER" "$FILE" | grep "PCS_VERSION_MINOR *=" | head -1 || true)
+if [ -z "$LINE" ]; then
+  echo "pre-commit: $MARKER line not found in $FILE — version NOT bumped." >&2
+  echo "            (Was the constant renamed? See the Version block in the file.)" >&2
+  exit 0          # never block a commit over a version stamp
+fi
+
+NUM=$(printf '%s' "$LINE" | cut -d: -f1)
+CUR=$(printf '%s' "$LINE" | sed -E 's/.*PCS_VERSION_MINOR *= *([0-9]+).*/\1/')
+
+case "$CUR" in
+  ''|*[!0-9]*)
+    echo "pre-commit: could not read current minor from line $NUM — version NOT bumped." >&2
+    exit 0 ;;
+esac
+
+NEXT=$((CUR + 1))
+
+# Edit that one line in place. -i.bak then remove, so it works on both BSD
+# (macOS) and GNU sed without branching on platform.
+sed -i.bak "${NUM}s/PCS_VERSION_MINOR *= *[0-9]*/PCS_VERSION_MINOR = ${NEXT}/" "$FILE"
+rm -f "$FILE.bak"
+
+MAJOR=$(grep -E "PCS_VERSION_MAJOR *= *[0-9]+" "$FILE" | head -1 | sed -E 's/.*= *([0-9]+).*/\1/')
+
+# Re-stage so the bump is part of THIS commit rather than dangling unstaged
+# and landing in the next one — which would make the number lag by a commit.
+git add "$FILE"
+
+echo "pre-commit: version bumped to V${MAJOR}.${NEXT}"
