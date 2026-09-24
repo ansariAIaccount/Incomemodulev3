@@ -356,6 +356,38 @@
                                       commit: manifest.commit },
              features: FEATURES, missing, missingAcct };
   };
+  /* ─── pcsDeployed() — the one-line answer ────────────────────────────────
+     "Is everything deployed?" is a yes/no question and deserves a yes/no
+     answer. pcsVersion() prints two tables and a feature matrix, which is the
+     right tool when something is wrong and too much when you just want to
+     confirm a deploy landed. */
+  window.pcsDeployed = async function(){
+    const stale = await window.__pcsDeployCheck();
+    if(stale === null){
+      console.warn('%c⚠  Cannot tell — build-manifest.json is not on the server.\n' +
+        '   Deploy it alongside the other files (./deploy.sh does this) and run again.',
+        'font-weight:600');
+      return null;
+    }
+    if(!stale.length){
+      console.log('%c✅  All files deployed and current · ' + window.PCS_VERSION +
+        ' · ' + (window.PCS_BUILD_MODIFIED ? window.PCS_BUILD_MODIFIED.full : ''),
+        'color:#065F46; font-weight:600; font-size:13px');
+      return true;
+    }
+    console.error('%c❌  ' + stale.length + ' file(s) NOT deployed:\n   · ' + stale.join('\n   · ') +
+      '\n\n   Copy them to the server, then hard-reload (Cmd/Ctrl+Shift+R).' +
+      '\n   Run  await pcsVersion()  for the full per-file detail.',
+      'font-weight:600; font-size:13px');
+    return false;
+  };
+  /* Casing aliases. The name was mistyped as PCSVersion() and PCS_VERSION()
+     before it was typed correctly, which is a fair sign the exact casing is
+     not worth anyone's memory. PCS_VERSION itself stays a string — it is read
+     as one in a dozen places — so it is deliberately not aliased here. */
+  window.PCSVersion = window.pcsversion = function(){ return window.pcsVersion(); };
+  window.PCSDeployed = window.pcsdeployed = function(){ return window.pcsDeployed(); };
+
   /* ─── Automatic staleness check on load ──────────────────────────────────
      A console command only helps someone who already suspects a problem. The
      partial deploy that cost two accounting fixes looked completely normal:
@@ -366,12 +398,49 @@
      page load to verify itself is a poor trade. Its version is compared
      against the manifest instead, which catches a stale HTML just as well.
      The script files are small and get hashed properly. */
+  function showBanner(kind, headline, detail){
+    const old = document.getElementById('pcs-stale-banner');
+    if(old) old.remove();
+    const bar = document.createElement('div');
+    bar.id = 'pcs-stale-banner';
+    /* Above the login gate, which is z-index 999999. At 99999 the banner
+       existed, reported visible by every computed style, and was painted
+       UNDERNEATH the sign-in overlay — hidden at exactly the moment it most
+       needs to be seen, before anyone signs in and starts trusting numbers. */
+    bar.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:1000001; ' +
+      'background:' + (kind === 'amber' ? '#78350F' : '#7F1D1D') + '; color:#fff; ' +
+      'font:600 12px/1.5 Inter,system-ui,sans-serif; padding:9px 16px; display:flex; ' +
+      'gap:12px; align-items:flex-start; box-shadow:0 2px 10px rgba(0,0,0,.25);';
+    bar.innerHTML =
+      '<span style="font-size:15px; line-height:1;">&#9888;</span>' +
+      '<span style="flex:1;">' + headline +
+      '<br><span style="font-weight:400; opacity:.9;">' + detail + '</span></span>' +
+      '<button onclick="this.parentNode.remove()" style="background:rgba(255,255,255,.15); ' +
+      'color:#fff; border:0; border-radius:5px; padding:3px 9px; font-size:11px; cursor:pointer;">' +
+      'Dismiss</button>';
+    document.body.appendChild(bar);
+    return bar;
+  }
+
   window.__pcsDeployCheck = async function(){
     try {
       const dir = location.pathname.replace(/[^/]*$/, '');
       const man = await fetch(dir + 'build-manifest.json?v=' + Date.now(), { cache:'no-store' })
                         .then(r => r.ok ? r.json() : null).catch(() => null);
-      if(!man || !man.files) return null;          // no manifest deployed — silent
+
+      /* A missing manifest used to return silently. That was backwards: the
+         manifest is a new file with no <script> tag, so it is the likeliest
+         thing to be left out of a deploy — and leaving it out disabled the
+         very check meant to catch an incomplete deploy. Silence then meant
+         "cannot verify", which on screen is indistinguishable from "all
+         good". Say so instead. */
+      if(!man || !man.files){
+        showBanner('amber',
+          'Cannot verify this deployment — <b>build-manifest.json</b> is not on the server.',
+          'Deploy it alongside the other files (./deploy.sh copies it) and reload. ' +
+          'Until then nothing here can tell you whether the files are current.');
+        return null;
+      }
 
       const stale = [];
       if(man.version && window.PCS_VERSION && man.version !== window.PCS_VERSION){
@@ -392,28 +461,11 @@
       if(!stale.length) return [];
 
       console.error('[deploy] STALE FILES: ' + stale.join(', '));
-      const bar = document.createElement('div');
-      bar.id = 'pcs-stale-banner';
-      /* Above the login gate, which is z-index 999999. At 99999 the banner
-         existed, was "visible" by every computed style, and was painted
-         underneath the sign-in overlay — so the one moment it most needs to
-         be seen, before anyone signs in and starts trusting the numbers, was
-         exactly when it was hidden. */
-      bar.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:1000001; ' +
-        'background:#7F1D1D; color:#fff; font:600 12px/1.5 Inter,system-ui,sans-serif; ' +
-        'padding:9px 16px; display:flex; gap:12px; align-items:flex-start; ' +
-        'box-shadow:0 2px 10px rgba(0,0,0,.25);';
-      bar.innerHTML =
-        '<span style="font-size:15px; line-height:1;">&#9888;</span>' +
-        '<span style="flex:1;">Deployment incomplete — ' + stale.length + ' file(s) out of date: <b>' +
-        stale.map(s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;')).join('</b>, <b>') + '</b>' +
-        '<br><span style="font-weight:400; opacity:.9;">This build can produce wrong figures with ' +
-        'nothing on screen to say so. Copy the listed file(s) to the server and hard-reload ' +
-        '(Cmd/Ctrl+Shift+R).</span></span>' +
-        '<button onclick="this.parentNode.remove()" style="background:rgba(255,255,255,.15); ' +
-        'color:#fff; border:0; border-radius:5px; padding:3px 9px; font-size:11px; cursor:pointer;">' +
-        'Dismiss</button>';
-      document.body.appendChild(bar);
+      showBanner('red',
+        'Deployment incomplete — ' + stale.length + ' file(s) out of date: <b>' +
+        stale.map(s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;')).join('</b>, <b>') + '</b>',
+        'This build can produce wrong figures with nothing on screen to say so. Copy the ' +
+        'listed file(s) to the server and hard-reload (Cmd/Ctrl+Shift+R).');
       return stale;
     } catch(_){ return null; }   // never let a version check break the app
   };
