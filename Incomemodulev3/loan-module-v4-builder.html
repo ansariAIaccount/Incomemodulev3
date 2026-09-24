@@ -361,8 +361,63 @@
      answer. pcsVersion() prints two tables and a feature matrix, which is the
      right tool when something is wrong and too much when you just want to
      confirm a deploy landed. */
+  /* Two DIFFERENT questions, and conflating them is what made pcsDeployed()
+     report success on a build that pcsVersion() called stale:
+
+       · the file hashes answer "what does the SERVER hold?"  — they fetch
+         each file with a cache-busting query string
+       · the feature checks answer "what is this PAGE RUNNING?" — they inspect
+         the functions actually in memory
+
+     They disagree when the server is correct but the browser is executing a
+     cached copy: the <script src> tags carry no cache-buster, so Chrome
+     happily reuses an old engine while a no-store fetch of the same filename
+     returns the new one. Hashes current + features missing = a caching
+     problem, not a deployment one, and the fix is a hard reload rather than
+     another copy to the server.
+
+     pcsDeployed() now reports on both, and names which of the two it is. */
+  window.__pcsRunningCodeMissing = function(){
+    const W = window, SBx = W.SB || {};
+    const has = (fn, needle) => { try { return String(fn).includes(needle); } catch(_){ return false; } };
+    const checks = {
+      'heavy-write gate ceiling':      has(SBx.withHeavyWrite, 'HEAVY_WRITE_MAX_MS'),
+      'reconnect unified':             has(SBx.manualReconnect, '_tryReconnect'),
+      'JE batches of 1000':            has(SBx.saveAccountingRun, 'batchSize = 1000'),
+      'one run at a time':             has(W.runAccounting, '__acctRunInFlight'),
+      'run payload snapshotted':       has(W.runAccountingImpl, '_snap'),
+      'restored runs paged':           has(SBx.fetchLatestRunForDeal, 'JE_PAGE'),
+      'external journals from feed':   typeof W.generateDIUFromExternalFeed === 'function',
+      'schedule stops at feed end':    has(W.applyExternalScheduleToAccounting, 'truncatedRows'),
+      'JE badge follows deal':         has(W.__renderInlineJETable, 'refreshS2RunBadge'),
+      'checkpoints captured':          has(W.loadExternalDeal, 'checkpoints_jsonb'),
+      'builder read-only external':    has(W.__applyExternalReadOnly, 'SAFE_SECTIONS'),
+      'ECL per reporting date [engine.js]':        typeof W.splitECLByReportingPeriod === 'function',
+      'principal movements booked [engine.js]':    typeof W.emitPrincipalMovementsFromSchedule === 'function',
+      'deal structure mapped':         has(W.externalSnapshotToBuilder, 'corporate_term'),
+      'cashflow shows every row':      has(W.__renderExternalCashflows, 'CHUNK_ROWS')
+    };
+    return Object.keys(checks).filter(k => !checks[k]);
+  };
+
   window.pcsDeployed = async function(){
     const stale = await window.__pcsDeployCheck();
+    const running = window.__pcsRunningCodeMissing();
+
+    /* Server fine, running code behind → the browser cached it. Say that,
+       because "deploy the file again" is the wrong instruction here and
+       wastes a round of confusion. */
+    if(Array.isArray(stale) && !stale.length && running.length){
+      console.error('%c⚠  Files on the server are current, but THIS PAGE is running older code.\n' +
+        '   ' + running.length + ' fix(es) missing from memory:\n   · ' + running.join('\n   · ') +
+        '\n\n   Your browser cached the old script. HARD-RELOAD: Cmd+Shift+R (Mac) / Ctrl+Shift+R.\n' +
+        '   If that does not clear it: DevTools → Network → tick "Disable cache", then reload.',
+        'font-weight:600; font-size:13px');
+      showBanner('red',
+        'This page is running cached code — ' + running.length + ' fix(es) not active',
+        'The server files are correct. Hard-reload with Cmd/Ctrl+Shift+R to pick them up.');
+      return false;
+    }
     if(stale === null){
       console.warn('%c⚠  Cannot tell — build-manifest.json is not on the server.\n' +
         '   Deploy it alongside the other files (./deploy.sh does this) and run again.',
@@ -370,7 +425,9 @@
       return null;
     }
     if(!stale.length){
-      console.log('%c✅  All files deployed and current · ' + window.PCS_VERSION +
+      // Both questions answered before claiming success: server files match
+      // the manifest AND every tracked fix is present in the running page.
+      console.log('%c✅  All files deployed and running · ' + window.PCS_VERSION +
         ' · ' + (window.PCS_BUILD_MODIFIED ? window.PCS_BUILD_MODIFIED.full : ''),
         'color:#065F46; font-weight:600; font-size:13px');
       return true;
@@ -443,11 +500,14 @@
       }
 
       const stale = [];
-      if(man.version && window.PCS_VERSION && man.version !== window.PCS_VERSION){
-        stale.push('loan-module-v4-builder.html (' + window.PCS_VERSION + ' deployed, ' +
-                   man.version + ' expected)');
-      }
-      const scripts = Object.keys(man.files).filter(f => /\.js$/.test(f));
+      /* Hash the HTML too, don't compare version strings.
+         Version-only comparison passed a file that pcsVersion() reported
+         STALE: both read V4.1, because the version bumps on COMMIT and the
+         file had been edited since. Two builds can share a version and differ
+         in content, which is exactly the case a deployment check exists for.
+         It costs one extra fetch of the page on demand — acceptable for a
+         command you run deliberately. */
+      const scripts = Object.keys(man.files);
       for(const name of scripts){
         try {
           const txt = await fetch(dir + name + '?v=' + Date.now(), { cache:'no-store' })
