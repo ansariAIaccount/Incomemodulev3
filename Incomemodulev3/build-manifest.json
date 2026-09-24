@@ -1,0 +1,14 @@
+{
+  "version": "V4.1",
+  "generatedAt": "2026-09-24T20:45:00Z",
+  "commit": "seed",
+  "files": {
+    "loan-module-v4-builder.html": "63190508d4147501",
+    "portf-excel-parser.js": "b1400402a1dc83ef",
+    "loan-module-engine.js": "f81fa7aa85cb0f32",
+    "loan-module-instruments.js": "cad9aae70f4ac00c",
+    "loan-module-analytics.js": "215a290d2c3a7b19",
+    "demo-assistant-kb.js": "f3ca6794c1628b35",
+    "demo-assistant-system-prompt.js": "fc22e4e72289f409"
+  }
+}

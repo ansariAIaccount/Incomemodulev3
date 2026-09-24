@@ -235,30 +235,114 @@
       'acct · JE badge follows the loaded deal':              has(W.__renderInlineJETable, 'refreshS2RunBadge'),
       'acct · balance checkpoints captured on import':        has(W.loadExternalDeal, 'checkpoints_jsonb'),
       'acct · loan builder read-only on external deals':      has(W.__applyExternalReadOnly, 'SAFE_SECTIONS'),
-      'acct · ECL posted per reporting date':                 typeof W.splitECLByReportingPeriod === 'function',
-      'acct · principal movements booked (drawdowns)':        typeof W.emitPrincipalMovementsFromSchedule === 'function',
+      // ↓ these two live in loan-module-engine.js, not in this file
+      'acct · ECL posted per reporting date [engine.js]':     typeof W.splitECLByReportingPeriod === 'function',
+      'acct · principal movements booked (drawdowns) [engine.js]': typeof W.emitPrincipalMovementsFromSchedule === 'function',
       'acct · deal structure mapped from import label':       has(W.externalSnapshotToBuilder, 'corporate_term'),
       'ui   · cashflow table shows every row':                has(W.__renderExternalCashflows, 'CHUNK_ROWS')
     };
-    let sha = '(unavailable)';
+    /* Hash EVERY file that ships, not just this one.
+
+       The app is two deployables — this HTML and loan-module-engine.js — and
+       they can drift apart. A deploy that copied the HTML but not the engine
+       left two accounting fixes missing while the page looked entirely
+       current, because the version label lives in the HTML and said what you
+       expected. Hashing both is what turns "something is stale" into "this
+       file is stale". */
+    const dir = location.pathname.replace(/[^/]*$/, '');
+    const hashOf = async (name) => {
+      try {
+        const txt = await fetch(dir + name + '?v=' + Date.now(), { cache:'no-store' }).then(r => {
+          if(!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        });
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+        return { sha: Array.from(new Uint8Array(buf))
+                        .map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16),
+                 bytes: txt.length };
+      } catch(e){ return { sha: '(' + (e.message || 'unreachable') + ')', bytes: null }; }
+    };
+
+    /* Every file the browser loads from our own origin — the <script src>
+       tags, not just this page. A deploy that copies some of them leaves the
+       app looking current while behaving like an older build, because the
+       version label lives in the HTML and reads exactly as expected. */
+    const DEPLOYABLES = [
+      'loan-module-v4-builder.html',
+      'portf-excel-parser.js',
+      'loan-module-engine.js',
+      'loan-module-instruments.js',
+      'loan-module-analytics.js',
+      'demo-assistant-kb.js',
+      'demo-assistant-system-prompt.js'
+    ];
+
+    /* build-manifest.json is written at commit time and carries the sha of
+       each file as it was committed. Comparing against it turns "one of these
+       is stale" into "THIS file is stale" without anyone holding a reference
+       copy to diff against. */
+    let manifest = null;
     try {
-      const txt = await fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(r => r.text());
-      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
-      sha = Array.from(new Uint8Array(buf)).slice(0, 8)
-              .map(b => b.toString(16).padStart(2, '0')).join('');
-    } catch(e){ sha = '(' + (e.message || 'hash failed') + ')'; }
+      manifest = await fetch(dir + 'build-manifest.json?v=' + Date.now(), { cache:'no-store' })
+                        .then(r => r.ok ? r.json() : null);
+    } catch(_){ manifest = null; }
+
+    const files = {};
+    for(const name of DEPLOYABLES){
+      const h = await hashOf(name);
+      const expected = manifest && manifest.files && manifest.files[name];
+      files[name] = {
+        sha: h.sha,
+        bytes: h.bytes,
+        expected: expected || '—',
+        status: !expected ? 'no manifest'
+              : (h.sha === expected ? 'current' : 'STALE')
+      };
+    }
+    const sha = files['loan-module-v4-builder.html'].sha;
+    const staleFiles = Object.keys(files).filter(f => files[f].status === 'STALE');
 
     const missing = Object.keys(FEATURES).filter(k => !FEATURES[k]);
     const missingAcct = missing.filter(k => k.startsWith('acct ·'));
     console.log('%cPCS build', 'font-weight:600;font-size:13px');
     console.log('  label        ', window.PCS_BUILD_LABEL);
     console.log('  lastModified ', document.lastModified);
-    console.log('  file sha256  ', sha, '(first 8 bytes)');
     console.log('  url          ', location.origin + location.pathname);
+    if(manifest){
+      console.log('  manifest     ', manifest.version || '?', '· built', manifest.generatedAt || '?',
+                  '· commit', manifest.commit || '?');
+    } else {
+      console.log('  manifest     ', '(build-manifest.json not found — deploy it to get per-file staleness)');
+    }
+    console.table(files);
+    if(staleFiles.length){
+      console.error('%cDEPLOY THESE ' + staleFiles.length + ' FILE(S) — their contents differ from the ' +
+        'committed build:\n  · ' + staleFiles.join('\n  · '),
+        'font-weight:600');
+    } else if(manifest){
+      console.log('%cAll ' + DEPLOYABLES.length + ' deployed files match the manifest.',
+                  'color:#065F46;font-weight:600');
+    }
     console.table(FEATURES);
     if(missing.length){
-      console.warn('STALE BUILD — ' + missing.length + ' known fix(es) NOT in the deployed file:\n  · ' +
-                   missing.join('\n  · ') + '\nRe-deploy, then hard-reload (Cmd/Ctrl+Shift+R).');
+      /* Name the file, not just the fix. Every check tagged [engine.js] tests
+         a function defined in loan-module-engine.js; the rest are in this
+         HTML. If all the failures share one file, that file is the one that
+         did not ship — which is a one-line answer instead of a hunt. */
+      const engineMissing = missing.filter(k => k.indexOf('[engine.js]') !== -1);
+      const htmlMissing   = missing.filter(k => k.indexOf('[engine.js]') === -1);
+      console.warn('STALE BUILD — ' + missing.length + ' known fix(es) NOT in the deployed files:\n  · ' +
+                   missing.join('\n  · '));
+      if(engineMissing.length && !htmlMissing.length){
+        console.warn('%cAll ' + engineMissing.length + ' are in loan-module-engine.js — that file was ' +
+          'NOT deployed alongside the HTML. Copy loan-module-engine.js to the server, then hard-reload.',
+          'font-weight:600');
+      } else if(engineMissing.length && htmlMissing.length){
+        console.warn('Both files are behind: ' + htmlMissing.length + ' in the HTML, ' +
+                     engineMissing.length + ' in loan-module-engine.js. Deploy both.');
+      } else {
+        console.warn('All in loan-module-v4-builder.html. Re-deploy it, then hard-reload (Cmd/Ctrl+Shift+R).');
+      }
       if(missingAcct.length){
         console.error('%c' + missingAcct.length + ' of those are ACCOUNTING fixes — this build can ' +
           'produce wrong figures with nothing on screen to say so. Do not rely on numbers from it.',
@@ -267,8 +351,79 @@
     } else {
       console.log('%cAll tracked fixes present.', 'color:#065F46;font-weight:600');
     }
-    return { label: window.PCS_BUILD_LABEL, sha, features: FEATURES, missing, missingAcct };
+    return { label: window.PCS_BUILD_LABEL, sha, files, staleFiles,
+             manifest: manifest && { version: manifest.version, generatedAt: manifest.generatedAt,
+                                      commit: manifest.commit },
+             features: FEATURES, missing, missingAcct };
   };
+  /* ─── Automatic staleness check on load ──────────────────────────────────
+     A console command only helps someone who already suspects a problem. The
+     partial deploy that cost two accounting fixes looked completely normal:
+     correct version label, no errors, wrong numbers. So check on every load
+     and put it on screen.
+
+     Deliberately does NOT hash the 3 MB HTML — re-downloading it on every
+     page load to verify itself is a poor trade. Its version is compared
+     against the manifest instead, which catches a stale HTML just as well.
+     The script files are small and get hashed properly. */
+  window.__pcsDeployCheck = async function(){
+    try {
+      const dir = location.pathname.replace(/[^/]*$/, '');
+      const man = await fetch(dir + 'build-manifest.json?v=' + Date.now(), { cache:'no-store' })
+                        .then(r => r.ok ? r.json() : null).catch(() => null);
+      if(!man || !man.files) return null;          // no manifest deployed — silent
+
+      const stale = [];
+      if(man.version && window.PCS_VERSION && man.version !== window.PCS_VERSION){
+        stale.push('loan-module-v4-builder.html (' + window.PCS_VERSION + ' deployed, ' +
+                   man.version + ' expected)');
+      }
+      const scripts = Object.keys(man.files).filter(f => /\.js$/.test(f));
+      for(const name of scripts){
+        try {
+          const txt = await fetch(dir + name + '?v=' + Date.now(), { cache:'no-store' })
+                            .then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)));
+          const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+          const sha = Array.from(new Uint8Array(buf))
+                        .map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+          if(sha !== man.files[name]) stale.push(name);
+        } catch(e){ stale.push(name + ' (' + e.message + ')'); }
+      }
+      if(!stale.length) return [];
+
+      console.error('[deploy] STALE FILES: ' + stale.join(', '));
+      const bar = document.createElement('div');
+      bar.id = 'pcs-stale-banner';
+      /* Above the login gate, which is z-index 999999. At 99999 the banner
+         existed, was "visible" by every computed style, and was painted
+         underneath the sign-in overlay — so the one moment it most needs to
+         be seen, before anyone signs in and starts trusting the numbers, was
+         exactly when it was hidden. */
+      bar.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:1000001; ' +
+        'background:#7F1D1D; color:#fff; font:600 12px/1.5 Inter,system-ui,sans-serif; ' +
+        'padding:9px 16px; display:flex; gap:12px; align-items:flex-start; ' +
+        'box-shadow:0 2px 10px rgba(0,0,0,.25);';
+      bar.innerHTML =
+        '<span style="font-size:15px; line-height:1;">&#9888;</span>' +
+        '<span style="flex:1;">Deployment incomplete — ' + stale.length + ' file(s) out of date: <b>' +
+        stale.map(s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;')).join('</b>, <b>') + '</b>' +
+        '<br><span style="font-weight:400; opacity:.9;">This build can produce wrong figures with ' +
+        'nothing on screen to say so. Copy the listed file(s) to the server and hard-reload ' +
+        '(Cmd/Ctrl+Shift+R).</span></span>' +
+        '<button onclick="this.parentNode.remove()" style="background:rgba(255,255,255,.15); ' +
+        'color:#fff; border:0; border-radius:5px; padding:3px 9px; font-size:11px; cursor:pointer;">' +
+        'Dismiss</button>';
+      document.body.appendChild(bar);
+      return stale;
+    } catch(_){ return null; }   // never let a version check break the app
+  };
+  // After load, and off the critical path — this is diagnostics, not startup.
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', () => setTimeout(window.__pcsDeployCheck, 1200));
+  } else {
+    setTimeout(window.__pcsDeployCheck, 1200);
+  }
+
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
   // again after the login gate mounts (in case it swaps its own subtitle).
