@@ -142,6 +142,44 @@
   })();
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
 
+  /* Last-modified with the TIME, not just the date.
+     PCS_BUILD above is date-only, so every build on a given day reads the
+     same — which is exactly what made "is my fix deployed?" unanswerable from
+     the screen. This carries the clock time so two builds an hour apart are
+     visibly different.
+
+     Caveat worth knowing rather than hiding: document.lastModified reflects
+     the server's Last-Modified header. Locally that is the file's real mtime;
+     behind some servers or a CDN it can be the deploy or fetch time instead.
+     It tells you WHEN THE FILE WAS SERVED FROM, which is the useful question
+     most of the time — but when it really matters, the sha from pcsVersion()
+     is the only thing that cannot be misreported. */
+  window.PCS_BUILD_MODIFIED = (function(){
+    try {
+      const d = new Date(document.lastModified);
+      if(isNaN(d.getTime())) return null;
+      const p = n => String(n).padStart(2, '0');
+      const dateStr = d.getFullYear() + '.' + p(d.getMonth() + 1) + '.' + p(d.getDate());
+      const timeStr = p(d.getHours()) + ':' + p(d.getMinutes());
+      return { date: dateStr, time: timeStr, full: dateStr + ' ' + timeStr };
+    } catch(_){ return null; }
+  })();
+
+  /* The stamp the UI shows. Normally the modified date matches PCS_BUILD, so
+     append just the clock time — "V4 · 2026.09.24 13:02" — rather than
+     repeating the date in a second format and wrapping the login card onto
+     three lines.
+
+     When the two DISAGREE, show both. That mismatch means the file being
+     served is not from the day its build label claims, which is precisely the
+     case worth noticing and precisely what a tidy single date would hide. */
+  window.PCS_BUILD_STAMP = (function(){
+    const m = window.PCS_BUILD_MODIFIED;
+    if(!m) return window.PCS_BUILD_LABEL;
+    if(m.date === window.PCS_BUILD) return window.PCS_BUILD_LABEL + ' ' + m.time;
+    return window.PCS_BUILD_LABEL + ' · file ' + m.full;
+  })();
+
   /* ─── pcsVersion() — what is ACTUALLY deployed ───────────────────────────
      Run `await pcsVersion()` in the console on any environment.
 
@@ -223,7 +261,15 @@
         // Sidebar badge stays as short "V4"; the build number lives in the
         // fixed bottom-right stamp so the sidebar rhythm stays clean.
         var sub = document.getElementById('v4-login-brand-sub');
-        if (sub) sub.textContent = 'Private Capital Suite · ' + window.PCS_BUILD_LABEL;
+        if (sub) {
+          // Modified time on the login card, so which build you are on is
+          // answerable before signing in — and without opening the console.
+          sub.textContent = 'Private Capital Suite · ' + window.PCS_BUILD_STAMP;
+          sub.title = 'Build ' + window.PCS_BUILD_LABEL +
+            (window.PCS_BUILD_MODIFIED ? '\nCode last modified: ' + window.PCS_BUILD_MODIFIED.full : '') +
+            '\n\nFrom the server\'s Last-Modified header. Run  await pcsVersion()  in the ' +
+            'console for the file hash and which fixes are present.';
+        }
         if (document.title.indexOf(window.PCS_BUILD) === -1) {
           document.title = 'PCS Loan Module · ' + window.PCS_BUILD_LABEL;
         }
