@@ -9377,11 +9377,35 @@ window.SB = (function(){
         // wrote a meaningless domain into the audit trail for every JE row.
         le_domain:            j.leDomain || null
       }));
-      const batchSize = 200;
+      /* 1,000, not 200. At 200 a 3,864-row run was 20 sequential round-trips,
+         and the whole sequence runs inside withHeavyWrite — so for its full
+         duration the health ping is gated off and every other DB call queues
+         behind it. Fewer, larger inserts mean the gate is held for a fraction
+         of the time, which is what actually reduces the chance of a stall.
+
+         The old value was chosen to "keep payloads reasonable", but the
+         cashflow schedule alongside it already inserts 900 rows a chunk
+         without trouble, so 200 was cautious beyond need. 1,000 matches
+         PostgREST's own page ceiling and keeps a JE payload near 1 MB.
+
+         Progress is logged for the large runs: a silent 20-second write is
+         indistinguishable from a hung one, which is the confusion that
+         started this. */
+      const batchSize = 1000;
+      const batches = Math.ceil(rows.length / batchSize);
+      const _t0 = Date.now();
       for(let i = 0; i < rows.length; i += batchSize){
         const slice = rows.slice(i, i + batchSize);
         const { error } = await _client.from('journal_entries').insert(slice);
         if(error){ console.error('[SB] JE batch insert:', error); return { ok:false, reason: error.message, runId: runRow.run_id }; }
+        if(batches > 1){
+          console.log('[SB] JE insert ' + Math.min(i + batchSize, rows.length) + '/' +
+                      rows.length + ' rows (batch ' + (i / batchSize + 1) + '/' + batches + ')');
+        }
+      }
+      if(batches > 1){
+        console.log('[SB] JE insert complete · ' + rows.length + ' rows in ' + batches +
+                    ' batch(es) · ' + (Date.now() - _t0) + 'ms');
       }
       _stats.runsSaved++;
       updateStatusChip();
@@ -9546,6 +9570,24 @@ window.SB = (function(){
     updateStatusChip();
     // Clear any stale dedup entries — they're holding refs to stalled promises.
     if(typeof _inFlight !== 'undefined' && _inFlight && _inFlight.clear) _inFlight.clear();
+
+    /* Release the heavy-write gate before doing anything else.
+
+       A persist that never settles leaves _heavyWriteDepth stuck above zero,
+       and that counter gates the health ping. Reconnect could abort sockets
+       and rebuild the client all it liked — the ping stayed skipped, so the
+       connection could never be declared healthy again and the only way out
+       was a page reload.
+
+       Reconnect is an explicit recovery action: no in-flight write survives
+       the abortAll below anyway, so a counter claiming one is running is by
+       definition stale here. */
+    if(_heavyWriteDepth > 0){
+      console.warn('[SB] reconnect: clearing stuck heavy-write gate (depth was ' +
+                   _heavyWriteDepth + ') — it was blocking every health check');
+      _heavyWriteDepth = 0;
+      _lastHeavyWriteEndedAt = Date.now();
+    }
     try {
       // ─── STEP 1 · Free the connection pool ──────────────────────────
       // Root cause of the "can't reconnect" deadlock: a heavy write (3000+
@@ -9566,7 +9608,19 @@ window.SB = (function(){
       // instances" warning) and makes things worse, so only do it if a
       // plain ping on the existing client still fails.
       if(_client){
-        const aliveNow = await _dbHealthPing();
+        /* Bounded. _dbHealthPing relies on the fetch watchdog to time out, but
+           a request queued behind a stalled auth lock never reaches fetch, so
+           the watchdog never fires and this await hangs. That is why clicking
+           Reconnect produced one "Attempting silent reconnect" line and then
+           nothing at all: the reconnect was stuck on the very condition it
+           exists to clear. A ping that cannot answer in 8s is a failure. */
+        const aliveNow = await Promise.race([
+          _dbHealthPing(),
+          new Promise(res => setTimeout(() => {
+            console.warn('[SB] reconnect: health ping did not answer within 8s — treating as down');
+            res(false);
+          }, 8000))
+        ]);
         if(aliveNow){
           console.log('[SB] reconnect resolved by freeing the pool — existing client is healthy (no rebuild)');
           _connected = true;
@@ -13939,7 +13993,32 @@ window.SB = (function(){
       _heavyWriteDepth++;
       console.log('[SB] heavy-write START · ' + label + ' (depth ' + _heavyWriteDepth + ')');
       try {
-        return await fn();
+        /* Bounded. The try/finally below always decrements IF the promise
+           settles — and that was the hole: a persist queued behind a stalled
+           auth-token lock never issues a fetch, so the fetch watchdog never
+           fires, the promise stays pending forever, and `finally` never runs.
+           The depth counter then sits at 1 for the life of the tab.
+
+           Everything downstream reads that counter: the health ping skips
+           while it is above zero, so connection health is never checked again;
+           every DB call waits 12s for a write that already finished; and the
+           reconnect button cannot recover because the state it needs to clear
+           is the stuck counter itself. That is the "constant DB errors,
+           Reconnect does nothing, only a force-refresh works" loop.
+
+           A legitimate 3,000-row schedule insert takes seconds, so this
+           ceiling is generous. It exists to guarantee the counter always
+           returns to zero, not to police write duration. */
+        const HEAVY_WRITE_MAX_MS = 180000;
+        let timer;
+        const bail = new Promise((_, rej) => {
+          timer = setTimeout(() => rej(new Error(
+            'heavy write "' + label + '" did not settle within ' +
+            (HEAVY_WRITE_MAX_MS / 1000) + 's — releasing the health-ping gate so the ' +
+            'connection can recover. The write may still complete.')), HEAVY_WRITE_MAX_MS);
+        });
+        try { return await Promise.race([fn(), bail]); }
+        finally { clearTimeout(timer); }
       } finally {
         _heavyWriteDepth = Math.max(0, _heavyWriteDepth - 1);
         if(_heavyWriteDepth === 0) _lastHeavyWriteEndedAt = Date.now();
@@ -14077,18 +14156,29 @@ window.SB = (function(){
     ensureFreshSession: _ensureFreshSession,
     // Manual reconnect — bound to the v4 topbar chip click. Rebuilds the
     // supabase client, verifies with a health ping. Toasts result.
+    /* The status chip's click handler. This used to be a SECOND, weaker
+       reconnect implementation that shared nothing with _tryReconnect: it
+       called init() and pinged, but never aborted in-flight requests, never
+       freed Chrome's saturated connection pool, and never cleared the stuck
+       heavy-write gate. Every piece of recovery logic added over the months
+       went into _tryReconnect — which this path never called.
+
+       That is why the button "does nothing": it ran a probe through the same
+       blocked pool that caused the problem, got "probe timeout after pool
+       flush", and gave up, leaving a force-refresh as the only way out.
+
+       One recovery path now, not two. */
     manualReconnect: async function(){
       if(typeof toast === 'function') toast('Reconnecting…', 3000, { kind:'info', id:'sb:manual-reconnect' });
       if(typeof _inFlight !== 'undefined' && _inFlight && _inFlight.clear) _inFlight.clear();
+      _reconnectAttempts = 0;
+      _authKicked = false;
       try {
-        const ok = await init();
-        const alive = ok && await _dbHealthPing();
-        if(alive){
-          if(typeof _dbTimeoutState !== 'undefined'){ _dbTimeoutState.count = 0; _dbTimeoutState.firstAt = 0; _dbTimeoutState.tripped = false; }
-          _reconnectAttempts = 0;
-          if(typeof toast === 'function') toast('Reconnected', 3000, { kind:'success', id:'sb:manual-reconnect' });
-        } else {
-          if(typeof toast === 'function') toast('Reconnect failed — check network', 5000, { kind:'error', id:'sb:manual-reconnect' });
+        const ok = await _tryReconnect('manual reconnect from status chip');
+        if(typeof toast === 'function'){
+          toast(ok ? 'Reconnected' : 'Reconnect failed — check network',
+                ok ? 3000 : 5000,
+                { kind: ok ? 'success' : 'error', id:'sb:manual-reconnect' });
         }
       } catch(err){
         if(typeof toast === 'function') toast('Reconnect failed: ' + (err.message || err), 5000, { kind:'error', id:'sb:manual-reconnect' });
