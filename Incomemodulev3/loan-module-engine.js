@@ -4115,4 +4115,216 @@ function splitInterestJEsByCouponPeriod(journals, inst, schedule){
 
 if(typeof window !== 'undefined') window.splitInterestJEsByCouponPeriod = splitInterestJEsByCouponPeriod;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   splitECLByReportingPeriod — one impairment entry per reporting date
+   ───────────────────────────────────────────────────────────────────────────
+   IFRS 9 5.5.1 measures the loss allowance AT EACH REPORTING DATE, and the
+   period's impairment charge is the movement in that allowance. The engine
+   already models this properly: every schedule row carries `eclAllowance`,
+   re-derived daily from stage, exposure and remaining life, with SICR
+   migration and releases on cure, write-off and participation sale.
+
+   generateDIU then threw that away. It collapsed roughly three thousand daily
+   movements into a single `summary.totalECLChange` and posted it at
+   `summary.periodEnd` — the end of the MODELLED HORIZON, which on a full-term
+   run is maturity. So an eight-year loan booked its entire impairment charge
+   in 2034, the balance sheet carried no allowance at any reporting date before
+   then, and a month-end close deleted the entry outright, because the
+   up-until filter drops rows dated after the cut-off.
+
+   `periodEnd` meaning "end of the model" rather than "end of the accounting
+   period" is the whole bug. Interest was already fixed this way — hence 99
+   monthly interest entries beside a single ECL one in the same ledger.
+
+   This takes the allowance at each reporting date, differences consecutive
+   values, and posts the movement on that date. Provisions and releases use
+   the same transaction types and accounts as before, so Investran GL routing
+   is untouched.
+
+   It also GENERATES the entries where none existed: external deals post from
+   the received feed, which carries no ECL because ECL is PCS's own
+   calculation, so the aggregate pair was simply absent. Deriving from the
+   schedule rather than from the rows being replaced fixes both cases in one
+   pass.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function splitECLByReportingPeriod(journals, inst, schedule, opts){
+  opts = opts || {};
+  const rows = Array.isArray(journals) ? journals : [];
+  if(!Array.isArray(schedule) || !schedule.length) return rows;
+
+  const ECL_TYPES = /^(Impairment Expense \(ECL\)|Loan Loss Allowance \(Contra-Asset\)|Impairment Reversal \(ECL\)|Loan Loss Allowance Reversal)$/i;
+  const aggregates = rows.filter(j => ECL_TYPES.test(j.transactionType || ''));
+  const kept       = rows.filter(j => !ECL_TYPES.test(j.transactionType || ''));
+
+  // Nothing to do when the allowance never moves — a Stage 1 bullet with a
+  // flat exposure legitimately has one step and then nothing. Emitting a
+  // string of zero-value entries would be noise dressed as diligence.
+  const hasAllowance = schedule.some(r => Math.abs(+r.eclAllowance || 0) > 0.005);
+  if(!hasAllowance) return kept;
+
+  /* Reporting grid. Monthly by default — it matches the coupon split, and a
+     fund striking quarterly NAVs can set 'quarterly' rather than getting
+     twelve entries where it wants four. Deliberately NOT tied to coupon
+     frequency: when you report is an accounting-policy question, not a
+     property of the loan's payment terms. */
+  const freq = String(opts.frequency || (typeof window !== 'undefined' && window.__ECL_REPORTING_FREQ) || 'monthly').toLowerCase();
+  const stepMonths = freq === 'quarterly' ? 3
+                   : freq === 'semi-annual' || freq === 'semi' ? 6
+                   : freq === 'annual' || freq === 'yearly' ? 12
+                   : 1;
+
+  // Allowance on each date, plus the ordered list of dates we actually hold.
+  const allowanceByDate = new Map();
+  for(const r of schedule){
+    if(r && r.date) allowanceByDate.set(r.date, +r.eclAllowance || 0);
+  }
+  const firstDate = schedule[0].date;
+  const lastDate  = schedule[schedule.length - 1].date;
+
+  /* Period ends: step from the first schedule date, and always include the
+     last one. The final period is usually partial, and dropping it would
+     strand whatever the allowance did in it — most often the release to zero
+     at repayment, which is the entry an auditor looks for first. */
+  const ends = [];
+  const cur = new Date(firstDate + 'T00:00:00Z');
+  const end = new Date(lastDate + 'T00:00:00Z');
+  while(true){
+    cur.setUTCMonth(cur.getUTCMonth() + stepMonths);
+    if(cur > end) break;
+    ends.push(cur.toISOString().slice(0, 10));
+  }
+  if(!ends.length || ends[ends.length - 1] !== lastDate) ends.push(lastDate);
+
+  // The allowance as at a date — walk back up to 7 days for a period end that
+  // falls on a non-schedule day (weekend, holiday roll).
+  const allowanceAt = (iso) => {
+    if(allowanceByDate.has(iso)) return allowanceByDate.get(iso);
+    const d = new Date(iso + 'T00:00:00Z');
+    for(let k = 0; k < 7; k++){
+      d.setUTCDate(d.getUTCDate() - 1);
+      const key = d.toISOString().slice(0, 10);
+      if(allowanceByDate.has(key)) return allowanceByDate.get(key);
+    }
+    return null;
+  };
+
+  const fw = String((inst && inst.accountingFramework) || 'IFRS').toUpperCase();
+  const eclLabel = fw === 'USGAAP' ? 'ASC 326 CECL'
+                 : fw === 'AASB'   ? 'AASB 9 ECL'
+                 : fw === 'ASPE'   ? 'ASPE 3856 incurred-loss'
+                 :                   'IFRS 9 ECL';
+
+  /* Carry the batch/entity context from a row that already exists. Rebuilding
+     it from `inst` would drift from whatever the rest of the run used — and on
+     the external path these rows have to sit in the same batch as the feed
+     journals they accompany. */
+  const tpl = aggregates[0] || kept[0] || null;
+  if(!tpl) return kept;
+  let jeIndex = kept.reduce((m, j) => Math.max(m, +j.jeIndex || 0), 0) + 1;
+  const mk = (transType, amount, isDebit, account, effDate, comments) =>
+    Object.assign({}, tpl, {
+      jeIndex: jeIndex, txIndex: isDebit ? 2 : 1,
+      glDate: (opts.glDate || effDate), effectiveDate: effDate,
+      transactionType: transType, account: account,
+      originalAmount: amount, amountLE: Math.abs(amount), amountLocal: Math.abs(amount),
+      isDebit: isDebit, transactionComments: comments,
+      glAccountName: undefined, glTransType: undefined   // re-mapped by the GL pass
+    });
+
+  const out = [];
+  let prev = allowanceAt(firstDate);
+  if(prev == null) prev = 0;
+  for(const e of ends){
+    const now = allowanceAt(e);
+    if(now == null) continue;
+    const delta = +(now - prev).toFixed(2);
+    prev = now;
+    if(Math.abs(delta) <= 0.005) continue;      // no movement, no entry
+    const memo = eclLabel + (delta > 0 ? ' provision' : ' release') +
+                 ' for period ending ' + e +
+                 ' · allowance ' + now.toFixed(2);
+    if(delta > 0){
+      out.push(mk('Impairment Expense (ECL)',           delta, true,  '70100', e, memo));
+      out.push(mk('Loan Loss Allowance (Contra-Asset)', delta, false, '15500', e, memo));
+    } else {
+      out.push(mk('Impairment Reversal (ECL)',          -delta, false, '70100', e, memo));
+      out.push(mk('Loan Loss Allowance Reversal',       -delta, true,  '15500', e, memo));
+    }
+    jeIndex++;
+  }
+
+  return kept.concat(out);
+}
+if(typeof window !== 'undefined') window.splitECLByReportingPeriod = splitECLByReportingPeriod;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   emitPrincipalMovementsFromSchedule — book the drawdowns and repayments
+   ───────────────────────────────────────────────────────────────────────────
+   Principal does NOT arrive on the cashflow sheet. It arrives on Movements —
+   Initial Purchase, drawdown, repayment, capitalisation — and the engine folds
+   those into the schedule as `draw` and `paydown` per day.
+
+   generateDIU walks the schedule and books them. The external feed generator
+   does not: it emits one JE per RECEIVED CASHFLOW ROW, and principal is not a
+   cashflow row. So an imported deal recognised no loan asset at all. External
+   Deal III carried three Initial Purchases totalling £100,000,000, every one
+   of them present in the schedule, and not a single Loan Drawdown entry in the
+   ledger — while 3,864 interest lines accrued on the asset that was never
+   booked. Interest on nothing, and a balance sheet missing the loan.
+
+   Derived from the schedule rather than from the feed rows on purpose: the
+   schedule is where movements have already been reconciled into a single daily
+   position, so there is one source and nothing to double-count.
+
+   No-ops when principal entries already exist, so the internal path — which
+   books them inside generateDIU — is untouched.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function emitPrincipalMovementsFromSchedule(journals, inst, schedule, opts){
+  opts = opts || {};
+  const rows = Array.isArray(journals) ? journals : [];
+  if(!Array.isArray(schedule) || !schedule.length) return rows;
+
+  // Already booked (internal path) — leave well alone.
+  const PRINCIPAL = /^(Loan Drawdown|Loan Drawdown — Cash|Loan Repayment|Loan Repayment — Cash|Loan Prepayment|Loan Prepayment — Cash)$/i;
+  if(rows.some(j => PRINCIPAL.test(j.transactionType || ''))) return rows;
+
+  const moves = schedule.filter(r => (Math.abs(+r.draw || 0) > 0.005) ||
+                                     (Math.abs(+r.paydown || 0) > 0.005));
+  if(!moves.length) return rows;
+
+  const tpl = rows[0];
+  if(!tpl) return rows;                      // nothing to inherit batch context from
+  let jeIndex = rows.reduce((m, j) => Math.max(m, +j.jeIndex || 0), 0) + 1;
+  const system = opts.system || 'the external feed';
+  const mk = (transType, amount, isDebit, account, effDate, comments) =>
+    Object.assign({}, tpl, {
+      jeIndex: jeIndex, txIndex: isDebit ? 2 : 1,
+      glDate: (opts.glDate || effDate), effectiveDate: effDate,
+      transactionType: transType, account: account,
+      originalAmount: amount, amountLE: Math.abs(amount), amountLocal: Math.abs(amount),
+      isDebit: isDebit, transactionComments: comments,
+      glAccountName: undefined, glTransType: undefined   // re-mapped by the GL pass
+    });
+
+  const out = [];
+  for(const r of moves){
+    const draw = +r.draw || 0;
+    const paid = +r.paydown || 0;
+    if(Math.abs(draw) > 0.005){
+      const memo = 'Drawdown ' + r.date + ' · movement supplied by ' + system;
+      out.push(mk('Loan Drawdown',        draw, true,  '15000', r.date, memo));
+      out.push(mk('Loan Drawdown — Cash', draw, false, '10000', r.date, memo));
+      jeIndex++;
+    }
+    if(Math.abs(paid) > 0.005){
+      const memo = 'Repayment ' + r.date + ' · movement supplied by ' + system;
+      out.push(mk('Loan Repayment — Cash', paid, true,  '10000', r.date, memo));
+      out.push(mk('Loan Repayment',        paid, false, '15000', r.date, memo));
+      jeIndex++;
+    }
+  }
+  return rows.concat(out);
+}
+if(typeof window !== 'undefined') window.emitPrincipalMovementsFromSchedule = emitPrincipalMovementsFromSchedule;
+
 

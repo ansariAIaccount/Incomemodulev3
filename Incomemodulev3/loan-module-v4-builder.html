@@ -179,7 +179,11 @@
       'acct · schedule stops at the feed’s last date':        has(W.applyExternalScheduleToAccounting, 'truncatedRows'),
       'acct · JE badge follows the loaded deal':              has(W.__renderInlineJETable, 'refreshS2RunBadge'),
       'acct · balance checkpoints captured on import':        has(W.loadExternalDeal, 'checkpoints_jsonb'),
-      'acct · loan builder read-only on external deals':      has(W.__applyExternalReadOnly, 'SAFE_SECTIONS')
+      'acct · loan builder read-only on external deals':      has(W.__applyExternalReadOnly, 'SAFE_SECTIONS'),
+      'acct · ECL posted per reporting date':                 typeof W.splitECLByReportingPeriod === 'function',
+      'acct · principal movements booked (drawdowns)':        typeof W.emitPrincipalMovementsFromSchedule === 'function',
+      'acct · deal structure mapped from import label':       has(W.externalSnapshotToBuilder, 'corporate_term'),
+      'ui   · cashflow table shows every row':                has(W.__renderExternalCashflows, 'CHUNK_ROWS')
     };
     let sha = '(unavailable)';
     try {
@@ -21421,6 +21425,51 @@ async function runAccountingImpl(){
       if(typeof toast === 'function') toast('PIK journals could not be rebuilt: ' + e.message, 9000);
     }
   }
+  /* ─── Principal movements ────────────────────────────────────────────────
+     Books drawdowns and repayments from the schedule when nothing else has.
+     No-op on the internal path (generateDIU already emits them); on the feed
+     path it recognises the loan asset, which otherwise never appeared at all. */
+  if(typeof window.emitPrincipalMovementsFromSchedule === 'function' && Array.isArray(M.schedule)){
+    try {
+      const before = M.acctJournals.length;
+      M.acctJournals = window.emitPrincipalMovementsFromSchedule(M.acctJournals, inst, M.schedule, {
+        glDate: glPostDate,
+        system: (window.B && B.deal && B.deal.externalSystem) || 'the external feed'
+      });
+      const added = M.acctJournals.length - before;
+      if(added) console.log('[engine] emitPrincipalMovementsFromSchedule: added ' + added +
+        ' principal line(s) that were missing from the ledger');
+    } catch(err){
+      console.error('[engine] emitPrincipalMovementsFromSchedule failed:', err);
+    }
+  }
+
+  /* ─── ECL: one entry per reporting date, not one at the horizon ──────────
+     Runs for internal AND external deals, and BEFORE the up-until filter
+     below — that ordering is the point. The aggregate pair was dated at
+     summary.periodEnd (maturity on a full-term run), so the close filter
+     deleted it outright and a month-end close produced no impairment entry at
+     all. Re-dating first means the close keeps its allowance instead of
+     losing it.
+
+     On the external path there is no aggregate to replace — the feed carries
+     no ECL, because ECL is ours — so this generates the entries outright and
+     closes the regression that left external deals with an allowance on the
+     KPI card and nothing in the ledger. */
+  if(typeof window.splitECLByReportingPeriod === 'function' && Array.isArray(M.schedule)){
+    try {
+      const beforeECL = M.acctJournals.filter(j => /ECL|Loan Loss|Impairment/i.test(j.transactionType || '')).length;
+      M.acctJournals = window.splitECLByReportingPeriod(M.acctJournals, inst, M.schedule, { glDate: glPostDate });
+      const after = M.acctJournals.filter(j => /ECL|Loan Loss|Impairment/i.test(j.transactionType || ''));
+      const dates = after.map(j => j.effectiveDate).sort();
+      console.log('[engine] splitECLByReportingPeriod: ECL rows ' + beforeECL + '→' + after.length +
+        (after.length ? ' · ' + dates[0] + ' → ' + dates[dates.length - 1] +
+                        ' · freq=' + (window.__ECL_REPORTING_FREQ || 'monthly') : ' (allowance never moves)'));
+    } catch(err){
+      console.error('[engine] splitECLByReportingPeriod failed — ECL left as generated:', err);
+    }
+  }
+
   // ─── "Up until date" filter — drop any JE row with effectiveDate > cutoff.
   //     Applied post-generation so we don't have to refactor the engine.
   //     Cutoff is inclusive: rows with effectiveDate === cutoff are kept.
@@ -23261,7 +23310,27 @@ window.externalSnapshotToBuilder = function(snap){
     maturity:    f.loanEndDate || '',
     signingDate: f.signingDate || '',
     agentName:   f.agentName || '',
-    structure:   f.dealStructure || '',
+    /* The workbook carries the human LABEL ("Corporate term loan"); the
+       #b-deal-structure <select> is keyed on slugs ("corporate_term"). Passing
+       the label straight through matched no option, so the dropdown sat blank
+       on every imported deal and B.deal.structure never drove the
+       structure-specific panels either. Map label → key, and let a value that
+       is already a key pass through unchanged. */
+    structure:   (function(v){
+      const raw = String(v == null ? '' : v).trim();
+      if(!raw) return '';
+      const KEYS = ['corporate_term','construction_mezz','revolving_borrowing_base','bilateral','other'];
+      if(KEYS.includes(raw)) return raw;
+      const n = raw.toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+      if(/corporate|term loan/.test(n))                 return 'corporate_term';
+      if(/construction|mezz/.test(n))                   return 'construction_mezz';
+      if(/revolv|borrowing base/.test(n))               return 'revolving_borrowing_base';
+      if(/bilateral/.test(n))                           return 'bilateral';
+      // Unrecognised: keep 'other' rather than blank, and say so — a silently
+      // empty dropdown reads as "not supplied" when it was supplied and unmatched.
+      console.warn('[ext] deal structure "' + raw + '" not in the picker list — set to Other');
+      return 'other';
+    })(f.dealStructure),
     participationPct: 100,
     // The flag every read-only gate keys off.
     source:      'external',
@@ -23834,8 +23903,17 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
   const td = (t, right) => '<td style="padding:5px 8px; border-bottom:0.5px solid var(--n-100);' +
     (right ? ' text-align:right; font-variant-numeric:tabular-nums;' : '') + '">' + t + '</td>';
 
-  const VIEW_ROWS = 400;
-  const shown = rows.slice(0, VIEW_ROWS);
+  /* Every row is reachable. The table used to stop dead at 400 with a note
+     saying so, which on a 966-row feed hid most of the schedule and on a
+     daily 37-year deal hid nearly all of it — you could not scroll to a date
+     you wanted to check.
+
+     Rendering 20,000 rows in one go locks the tab for seconds, so rows are
+     painted in chunks and the next chunk is appended as you reach the bottom.
+     The scroll bar therefore reflects what is rendered, not the whole set,
+     which is why the footer states the running count. */
+  const CHUNK_ROWS = 500;
+  const shown = rows.slice(0, CHUNK_ROWS);
 
   let html =
     '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">' +
@@ -23886,7 +23964,8 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
       'full — this table is capped for display only.</div>';
   }
 
-  html += '<div style="max-height:56vh; overflow:auto; border:0.5px solid var(--n-200); border-radius:8px;">' +
+  html += '<div id="ext-cf-scroll" style="max-height:68vh; overflow:auto; overscroll-behavior:contain; ' +
+    'border:0.5px solid var(--n-200); border-radius:8px;">' +
     '<table style="width:100%; border-collapse:collapse; font-size:11px;"><thead><tr>' +
       th('Date') + th('Days') + th('Tranche') + th('Component') + th('Posts as') + th('Settles') + th('Basis') +
       th('Basis balance', true) + th('Rate', true) + th('Amount', true) + th('Cash settled', true) +
@@ -23898,7 +23977,9 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
     commitment:'Commitment', faceValue:'Face'
   };
 
-  shown.forEach(r => {
+  // One row's markup, reusable so the scroll-append below renders identically
+  // to the first paint rather than drifting into a second implementation.
+  const rowHTML = (r) => {
     const comp = ctx.componentNames[r.external_component_id] || r.external_component_id || '—';
     // The importer stores the literal '(facility)' for facility-level rows so
     // the column is never null; it is a sentinel, not a name, so it must not
@@ -23918,7 +23999,7 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
       : vs === 'flat'
         ? ' <span class="chip gray" style="font-size:8.5px; padding:1px 5px;" title="Flat amount by design — a fee with no rate.">flat</span>'
         : '';
-    html += '<tr' + (vs === 'unverified' ? ' style="background:#FFFBFB;"' : '') + '>' +
+    return '<tr' + (vs === 'unverified' ? ' style="background:#FFFBFB;"' : '') + '>' +
       td(esc(r.flow_date)) + td(days, true) + td(esc(tr)) + td(esc(comp) + vsMark) +
       td('<span class="chip ' + (r.posting_type === 'fee' ? 'purple' : 'blue') + '" style="font-size:9.5px;">' +
          esc(r.posting_type || '—') + '</span>') +
@@ -23933,16 +24014,52 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
       td(money(r.amount), true) +
       td(+r.cash_settled ? money(r.cash_settled) : '<span style="color:var(--n-400);">—</span>', true) +
     '</tr>';
-  });
+  };
+  shown.forEach(r => { html += rowHTML(r); });
   html += '</tbody></table></div>';
 
-  if(rows.length > VIEW_ROWS){
-    html += '<div style="margin-top:8px; font-size:10.5px; color:var(--n-500);">Showing the first ' +
-      VIEW_ROWS + ' of ' + rows.length.toLocaleString() + ' rows for this selection. ' +
-      'Totals above cover the full selection, not just what is displayed.</div>';
-  }
+  html += '<div id="ext-cf-footer" style="margin-top:8px; font-size:10.5px; color:var(--n-500);">' +
+    (rows.length > CHUNK_ROWS
+      ? 'Showing ' + shown.length.toLocaleString() + ' of ' + rows.length.toLocaleString() +
+        ' rows — scroll the table to load more.'
+      : rows.length.toLocaleString() + ' row' + (rows.length === 1 ? '' : 's') + ' — all shown.') +
+    '</div>';
 
   host.innerHTML = html;
+
+  /* Append the next chunk as the bottom comes into view. Bound to the scroll
+     container, not the window: the table has its own overflow, so a window
+     listener would never fire. */
+  if(rows.length > CHUNK_ROWS){
+    const box = host.querySelector('#ext-cf-scroll');
+    const tbody = box && box.querySelector('tbody');
+    const footer = host.querySelector('#ext-cf-footer');
+    if(box && tbody){
+      let painted = shown.length;
+      let busy = false;
+      const more = () => {
+        if(busy || painted >= rows.length) return;
+        busy = true;
+        const next = rows.slice(painted, painted + CHUNK_ROWS);
+        tbody.insertAdjacentHTML('beforeend', next.map(rowHTML).join(''));
+        painted += next.length;
+        if(footer){
+          footer.textContent = painted >= rows.length
+            ? rows.length.toLocaleString() + ' rows — all shown.'
+            : 'Showing ' + painted.toLocaleString() + ' of ' + rows.length.toLocaleString() +
+              ' rows — scroll the table to load more.';
+        }
+        busy = false;
+      };
+      box.addEventListener('scroll', () => {
+        if(box.scrollTop + box.clientHeight >= box.scrollHeight - 300) more();
+      }, { passive: true });
+      // A short table may not be scrollable at all — top up until it is, or
+      // the user is stuck at 500 rows with no way to ask for the rest.
+      let guard = 0;
+      while(box.scrollHeight <= box.clientHeight && painted < rows.length && guard++ < 20) more();
+    }
+  }
   if(chip) chip.textContent = rows.length.toLocaleString() + ' received rows';
   if(kpis) kpis.innerHTML = '';
   if(status){
@@ -42260,6 +42377,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // Cache in memory keyed by index so switching deals reuses fixings.
   // Fires on deal-code change (same poll pattern used elsewhere).
   const _rfxCache = {};       // { BBSY: [{date, rate}], ... }
+  const _rfxFailed = {};      // { SONIA: 1790000000000 } — last failed fetch, for the cooldown below
   const _rfxSupported = new Set(['BBSY','BBSW','SOFR','TermSOFR','SONIA','ESTR','EURIBOR']);
   let _rfxLastDealKey = '';
   async function _rfxHydrateActiveDeal(){
@@ -42273,16 +42391,50 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       if(ic && ic.baseIndex && _rfxSupported.has(ic.baseIndex)) indices.add(ic.baseIndex);
     }));
     if(!indices.size) return;
-    // Fetch each index we haven't cached
+    /* Fetch each index we haven't cached.
+
+       A FAILED fetch used to leave _rfxCache[idx] unset, so the next deal
+       switch tried again — and each attempt held one of Chrome's six
+       connection slots for the full 15-second watchdog before giving up. That
+       is where a Run Accounting on External Deal III lost most of its wall
+       time: the inserts took 3.6s, and roughly sixteen seconds went on waiting
+       behind a fixings read that was never going to answer.
+
+       Remember the failure for a few minutes instead. Not permanently — a
+       timeout is usually transient and the fixings genuinely matter for
+       compounded-RFR interest, so refusing to ever retry would trade a slow
+       run for a silently wrong rate. The cooldown is long enough to stop the
+       15s tax on every deal switch and short enough to self-heal. */
+    const RFX_FAIL_COOLDOWN_MS = 5 * 60 * 1000;
     for(const idx of indices){
       if(_rfxCache[idx]) continue;
+      const failedAt = _rfxFailed[idx];
+      if(failedAt && (Date.now() - failedAt) < RFX_FAIL_COOLDOWN_MS){
+        console.log('[rfx] skipping ' + idx + ' — last fetch failed ' +
+          Math.round((Date.now() - failedAt) / 1000) + 's ago, retrying after the cooldown. ' +
+          'Compounded-RFR interest for this deal falls back to the snapshot rate.');
+        continue;
+      }
       try {
         if(window.SB && window.SB.listFixings){
           const rows = await window.SB.listFixings(idx);
+          if(!rows.length){
+            /* Zero rows is not the same as a healthy empty table: a timeout
+               returns [] too. Treat it as a failure so it retries later rather
+               than caching "no fixings" and computing on a missing curve. */
+            _rfxFailed[idx] = Date.now();
+            console.warn('[rfx] ' + idx + ' returned no fixings — not caching; ' +
+              'interest will use the snapshot rate until a fetch succeeds.');
+            continue;
+          }
+          delete _rfxFailed[idx];
           _rfxCache[idx] = rows.map(r => ({ date: r.fix_date, rate: +r.rate }));
           console.log('[rfx] cached', rows.length, 'fixings for', idx);
         }
-      } catch(err){ console.warn('[rfx] listFixings failed for', idx, err); }
+      } catch(err){
+        _rfxFailed[idx] = Date.now();
+        console.warn('[rfx] listFixings failed for', idx, err);
+      }
     }
     // Stamp onto B.tranches so the next builderToInstrument picks them up
     B.tranches.forEach(t => (t.interestComponents || []).forEach(ic => {
