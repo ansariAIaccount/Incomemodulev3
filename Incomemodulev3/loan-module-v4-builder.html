@@ -141,6 +141,54 @@
     return dateStr + (window.PCS_BUILD_SUFFIX || '');
   })();
   window.PCS_BUILD_LABEL = window.PCS_VERSION + ' · ' + window.PCS_BUILD;
+
+  /* ─── pcsVersion() — what is ACTUALLY deployed ───────────────────────────
+     Run `await pcsVersion()` in the console on any environment.
+
+     PCS_BUILD above is date-only (document.lastModified), so two builds on the
+     same day are indistinguishable, and a server that stamps Last-Modified at
+     deploy time reports "today" whatever the file contains. That is not enough
+     to answer "did my fix ship?" — which is the only version question anyone
+     actually asks.
+
+     So this reports two things a label cannot fake:
+       · a SHA-256 of the served file, which changes if a single byte does
+       · feature detection — whether specific fixes are present in the running
+         code, read from the live function sources
+
+     Add a line to FEATURES whenever a fix is worth confirming in the field. */
+  window.pcsVersion = async function(){
+    const has = (fn, needle) => { try { return String(fn).includes(needle); } catch(_){ return false; } };
+    const SBx = window.SB || {};
+    const FEATURES = {
+      'heavy-write gate ceiling (no permanent stall)': has(SBx.withHeavyWrite, 'HEAVY_WRITE_MAX_MS'),
+      'reconnect unified (chip runs real recovery)':   has(SBx.manualReconnect, '_tryReconnect'),
+      'JE insert batches of 1000':                     has(SBx.saveAccountingRun, 'batchSize = 1000'),
+      'restored runs paged (no 1000-row truncation)':  has(SBx.fetchLatestRunForDeal, 'JE_PAGE')
+    };
+    let sha = '(unavailable)';
+    try {
+      const txt = await fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(r => r.text());
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+      sha = Array.from(new Uint8Array(buf)).slice(0, 8)
+              .map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch(e){ sha = '(' + (e.message || 'hash failed') + ')'; }
+
+    const missing = Object.keys(FEATURES).filter(k => !FEATURES[k]);
+    console.log('%cPCS build', 'font-weight:600;font-size:13px');
+    console.log('  label        ', window.PCS_BUILD_LABEL);
+    console.log('  lastModified ', document.lastModified);
+    console.log('  file sha256  ', sha, '(first 8 bytes)');
+    console.log('  url          ', location.origin + location.pathname);
+    console.table(FEATURES);
+    if(missing.length){
+      console.warn('STALE BUILD — ' + missing.length + ' known fix(es) NOT in the deployed file:\n  · ' +
+                   missing.join('\n  · ') + '\nRe-deploy, then hard-reload (Cmd/Ctrl+Shift+R).');
+    } else {
+      console.log('%cAll tracked fixes present.', 'color:#065F46;font-weight:600');
+    }
+    return { label: window.PCS_BUILD_LABEL, sha, features: FEATURES, missing };
+  };
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
   // again after the login gate mounts (in case it swaps its own subtitle).
