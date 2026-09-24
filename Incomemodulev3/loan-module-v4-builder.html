@@ -160,11 +160,26 @@
   window.pcsVersion = async function(){
     const has = (fn, needle) => { try { return String(fn).includes(needle); } catch(_){ return false; } };
     const SBx = window.SB || {};
+    const W = window;
+    /* Two groups, because they fail differently. A missing connection fix is
+       visible — the tab stops working and you know. A missing accounting fix
+       is silent: the numbers are simply wrong, and nothing says so. The second
+       group is the one to check before anyone trusts a figure on a deployment. */
     const FEATURES = {
-      'heavy-write gate ceiling (no permanent stall)': has(SBx.withHeavyWrite, 'HEAVY_WRITE_MAX_MS'),
-      'reconnect unified (chip runs real recovery)':   has(SBx.manualReconnect, '_tryReconnect'),
-      'JE insert batches of 1000':                     has(SBx.saveAccountingRun, 'batchSize = 1000'),
-      'restored runs paged (no 1000-row truncation)':  has(SBx.fetchLatestRunForDeal, 'JE_PAGE')
+      // ── connection / session ──────────────────────────────────────────
+      'conn · heavy-write gate ceiling (no permanent stall)': has(SBx.withHeavyWrite, 'HEAVY_WRITE_MAX_MS'),
+      'conn · reconnect unified (chip runs real recovery)':   has(SBx.manualReconnect, '_tryReconnect'),
+      'conn · JE insert batches of 1000':                     has(SBx.saveAccountingRun, 'batchSize = 1000'),
+      'conn · one accounting run at a time':                  has(W.runAccounting, '__acctRunInFlight'),
+
+      // ── accounting correctness (silent when missing) ──────────────────
+      'acct · run payload snapshotted (no cross-deal write)': has(W.runAccountingImpl, '_snap'),
+      'acct · restored runs paged (no 1000-row truncation)':  has(SBx.fetchLatestRunForDeal, 'JE_PAGE'),
+      'acct · external journals from feed, no projection':    typeof W.generateDIUFromExternalFeed === 'function',
+      'acct · schedule stops at the feed’s last date':        has(W.applyExternalScheduleToAccounting, 'truncatedRows'),
+      'acct · JE badge follows the loaded deal':              has(W.__renderInlineJETable, 'refreshS2RunBadge'),
+      'acct · balance checkpoints captured on import':        has(W.loadExternalDeal, 'checkpoints_jsonb'),
+      'acct · loan builder read-only on external deals':      has(W.__applyExternalReadOnly, 'SAFE_SECTIONS')
     };
     let sha = '(unavailable)';
     try {
@@ -175,6 +190,7 @@
     } catch(e){ sha = '(' + (e.message || 'hash failed') + ')'; }
 
     const missing = Object.keys(FEATURES).filter(k => !FEATURES[k]);
+    const missingAcct = missing.filter(k => k.startsWith('acct ·'));
     console.log('%cPCS build', 'font-weight:600;font-size:13px');
     console.log('  label        ', window.PCS_BUILD_LABEL);
     console.log('  lastModified ', document.lastModified);
@@ -184,10 +200,15 @@
     if(missing.length){
       console.warn('STALE BUILD — ' + missing.length + ' known fix(es) NOT in the deployed file:\n  · ' +
                    missing.join('\n  · ') + '\nRe-deploy, then hard-reload (Cmd/Ctrl+Shift+R).');
+      if(missingAcct.length){
+        console.error('%c' + missingAcct.length + ' of those are ACCOUNTING fixes — this build can ' +
+          'produce wrong figures with nothing on screen to say so. Do not rely on numbers from it.',
+          'font-weight:600');
+      }
     } else {
       console.log('%cAll tracked fixes present.', 'color:#065F46;font-weight:600');
     }
-    return { label: window.PCS_BUILD_LABEL, sha, features: FEATURES, missing };
+    return { label: window.PCS_BUILD_LABEL, sha, features: FEATURES, missing, missingAcct };
   };
   // Stamp every visible build indicator from the single constant so future
   // bumps only need to edit the two lines above. Runs on DOM ready and
@@ -20896,18 +20917,51 @@ function applyAASBExtrasToJEs(journals, inst, summary){
   return out;
 }
 
-function runAccounting(){
-  try { return runAccountingImpl(); }
-  catch(err){
+/* One accounting run at a time.
+
+   runAccountingImpl now awaits its own persist, so this returns a promise that
+   settles only once the write is done. The guard below makes that useful: a
+   second click while a run is saving is refused rather than interleaved.
+
+   Two runs overlapping is not a cosmetic problem. They share the global M, and
+   the persist reads from it — which is how one deal's schedule could be filed
+   under another deal's run. The snapshot in runAccountingImpl closes that hole
+   for data already captured; this closes it for the run itself. */
+window.__acctRunInFlight = false;
+
+async function runAccounting(){
+  if(window.__acctRunInFlight){
+    console.warn('[acct] run refused — a run is still saving');
+    if(typeof toast === 'function'){
+      toast('A run is still saving. Wait for it to finish before starting another.',
+            5000, { kind:'warning', id:'acct:in-flight' });
+    }
+    return;
+  }
+  window.__acctRunInFlight = true;
+  // Reflect it on the button so the refusal is predictable rather than a surprise.
+  const btns = Array.from(document.querySelectorAll('[data-acct-run], #btn-run-accounting'))
+    .filter(Boolean);
+  const prior = btns.map(b => ({ el: b, html: b.innerHTML, dis: b.disabled }));
+  btns.forEach(b => { b.disabled = true; b.style.opacity = '0.6'; b.style.cursor = 'wait'; });
+  try {
+    return await runAccountingImpl();
+  } catch(err){
     console.error('Run Accounting failed:', err);
     if(typeof toast === 'function') toast('Run Accounting failed: ' + err.message);
     // Try to surface the error somewhere visible
     const acctStatus = document.getElementById('acct-status');
     if(acctStatus){ acctStatus.className = 'chip red self-center'; acctStatus.textContent = 'Error — see console'; }
     alert('Run Accounting threw: ' + err.message + '\n\n' + (err.stack || '').slice(0, 400));
+  } finally {
+    /* finally, not after the try: a throw mid-persist must not leave the app
+       permanently refusing every future run — the same failure mode as the
+       stuck heavy-write gate, one layer up. */
+    window.__acctRunInFlight = false;
+    prior.forEach(p => { p.el.disabled = p.dis; p.el.style.opacity = ''; p.el.style.cursor = ''; p.el.innerHTML = p.html; });
   }
 }
-function runAccountingImpl(){
+async function runAccountingImpl(){
   // v2 — accept either PortF data OR a builder-generated instrument. If neither
   // is loaded, fall back to the active instrument from the dropdown so the
   // user can still run accounting on any seed deal without ingestion.
@@ -21556,13 +21610,41 @@ function runAccountingImpl(){
   // never occupy more than one or two connection slots at a time.
   if(typeof window.SB !== 'undefined' && window.SB.connected){
     const glPostingDate = (document.getElementById('opt-gl-date') || {}).value || null;
+
+    /* Freeze the payload BEFORE the first await.
+
+       _persist used to read M.acctJournals up front but M.schedule only
+       AFTER saveAccountingRun had returned — seconds later. M is a single
+       global: load another deal in the meantime and that second read picks up
+       the NEW deal's schedule, which then gets written under the FIRST deal's
+       run_id and deal_id. Deal B's cashflows, filed against deal A's run, with
+       nothing anywhere saying so.
+
+       Nobody has to do anything unusual to hit it. The console log from the
+       dev server shows exactly the sequence: run accounting, switch deal,
+       run again, while the first persist is still draining.
+
+       Snapshot once and never touch M again, so a run is immutable from the
+       moment it starts. Note `covenants` is a property hung off the schedule
+       ARRAY — .slice() drops it, so it is captured separately or the breach
+       log silently stops syncing. */
+    const _snap = {
+      inst:      inst,
+      dealLabel: (inst && (inst.deal || inst.id)) || 'deal',
+      journals:  Array.isArray(M.acctJournals) ? M.acctJournals.slice() : [],
+      summary:   M.summary,
+      schedule:  Array.isArray(M.schedule) ? M.schedule.slice() : null,
+      covenants: (M.schedule && Array.isArray(M.schedule.covenants))
+                   ? M.schedule.covenants.slice() : null
+    };
+
     const _persist = async () => {
       let res = null;
       try {
-        res = await window.SB.saveAccountingRun(inst, M.acctJournals, M.summary, {
+        res = await window.SB.saveAccountingRun(_snap.inst, _snap.journals, _snap.summary, {
           glPostingDate,
           glPostingMode: glPostingDate ? 'OVERRIDE' : 'AUTO',
-          participationPct: (inst.participationPct != null ? inst.participationPct : 100)
+          participationPct: (_snap.inst.participationPct != null ? _snap.inst.participationPct : 100)
         });
       } catch(err){
         console.warn('[V3] saveAccountingRun threw:', err && err.message);
@@ -21580,9 +21662,10 @@ function runAccountingImpl(){
       if(typeof window.refreshApprovalUI === 'function') window.refreshApprovalUI();
 
       // Persist the daily cashflow schedule — sequential, not racing.
-      if(Array.isArray(M.schedule) && M.schedule.length && res.runUuid && res.dealId){
+      // From the snapshot, NOT from M: by now the user may be on another deal.
+      if(Array.isArray(_snap.schedule) && _snap.schedule.length && res.runUuid && res.dealId){
         try {
-          const schRes = await window.SB.saveSchedule(res.runUuid, res.dealId, M.schedule);
+          const schRes = await window.SB.saveSchedule(res.runUuid, res.dealId, _snap.schedule);
           if(schRes && schRes.ok){
             toast('Cashflow schedule persisted · ' + schRes.rows + ' days', 4000);
             console.log('[V3] saved cashflow schedule to Supabase:', schRes);
@@ -21593,9 +21676,9 @@ function runAccountingImpl(){
       }
 
       // Phase B — sync covenant breach log if engine produced enriched covenants
-      if(res.dealId && M.schedule && Array.isArray(M.schedule.covenants) && M.schedule.covenants.length){
+      if(res.dealId && _snap.covenants && _snap.covenants.length){
         try {
-          const blRes = await window.SB.syncBreachLog(res.dealId, M.schedule.covenants, inst.principalSchedule);
+          const blRes = await window.SB.syncBreachLog(res.dealId, _snap.covenants, _snap.inst.principalSchedule);
           if(blRes && blRes.ok && blRes.stats){
             const s = blRes.stats;
             if(s.inserted || s.cured){
@@ -21609,15 +21692,29 @@ function runAccountingImpl(){
       }
 
       // Treatment overrides last — smallest write, safe to tail the queue.
-      if(inst.ifrs){
-        try { await window.SB.saveTreatmentOverride(inst, inst.ifrs); } catch(_){}
+      if(_snap.inst.ifrs){
+        try { await window.SB.saveTreatmentOverride(_snap.inst, _snap.inst.ifrs); } catch(_){}
       }
     };
-    // Pause the health ping for the whole sequence.
+    /* Awaited, and labelled with the deal.
+
+       This was fire-and-forget, so runAccountingImpl returned while the write
+       was still draining and nothing stopped a second run starting on top of
+       it. The dev-server log caught the result: "heavy-write START (depth 1)"
+       for one deal, then "(depth 2)" for another moments later, and neither
+       ever finished — the gate needs BOTH to complete, so two interleaved runs
+       are harder to recover from than one.
+
+       Awaiting here, plus the button guard in runAccounting, means one run at
+       a time. With 1,000-row batching the persist is about four round-trips,
+       so the wait is a second or two rather than the twenty it used to be.
+
+       The label carries the deal name: two anonymous STARTs in a log gave no
+       way to tell which deal never came back. */
     if(typeof window.SB.withHeavyWrite === 'function'){
-      window.SB.withHeavyWrite('accounting run persist', _persist);
+      await window.SB.withHeavyWrite('accounting run persist [' + _snap.dealLabel + ']', _persist);
     } else {
-      _persist();
+      await _persist();
     }
   }
 }
