@@ -52,9 +52,18 @@ if git diff --cached --name-only | grep -qx "$FILE" && [ -f "$FILE" ]; then
         NEXT=$((CUR + 1))
         sed -i.bak "${NUM}s/PCS_VERSION_MINOR *= *[0-9]*/PCS_VERSION_MINOR = ${NEXT}/" "$FILE"
         rm -f "$FILE.bak"
-        git add "$FILE"
         MAJOR=$(grep -E "PCS_VERSION_MAJOR *= *[0-9]+" "$FILE" | head -1 | sed -E 's/.*= *([0-9]+).*/\1/')
-        echo "pre-commit: version bumped to V${MAJOR}.${NEXT}"
+
+        # Cache busters on every local <script src>. A correctly deployed
+        # engine once sat on the server while browsers kept running a cached
+        # copy — every hash check passed, two accounting fixes were missing,
+        # and the only cure was telling each person to hard-reload. Changing
+        # the URL each version removes the problem instead of explaining it.
+        sed -i.bak -E "s|(<script src=\"[a-z0-9.-]+\.js)\?v=[^\"]*\"|\1?v=${MAJOR}.${NEXT}\"|g" "$FILE"
+        rm -f "$FILE.bak"
+
+        git add "$FILE"
+        echo "pre-commit: version bumped to V${MAJOR}.${NEXT} (script cache-busters updated)"
         ;;
     esac
   else

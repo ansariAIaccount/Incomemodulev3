@@ -768,7 +768,14 @@
      into the same snapshot object the pull API returns, so both routes share
      one validator, one importer and one set of tables. Loaded after SheetJS
      because it calls XLSX.utils. -->
-<script src="portf-excel-parser.js"></script>
+<!-- ?v= is the CACHE BUSTER, rewritten to the current version by
+     .githooks/pre-commit. Without it the browser reuses whatever copy it has:
+     a correctly deployed engine sat on the server while the page ran a cached
+     one, so two accounting fixes were absent and every hash check said the
+     deployment was fine — because it was. The stale copy was in the browser.
+     Changing the URL on each version is what makes a deploy actually take
+     effect without anyone having to know about Cmd+Shift+R. -->
+<script src="portf-excel-parser.js?v=4.1"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9038,14 +9045,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js"></script>
-<script src="loan-module-instruments.js"></script>
-<script src="loan-module-analytics.js?v=fix-multitranche-utilisation-v6"></script>
+<script src="loan-module-engine.js?v=4.1"></script>
+<script src="loan-module-instruments.js?v=4.1"></script>
+<script src="loan-module-analytics.js?v=4.1"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=v4-2026-07-22"></script>
-<script src="demo-assistant-system-prompt.js?v=v4-2026-07-22"></script>
+<script src="demo-assistant-kb.js?v=4.1"></script>
+<script src="demo-assistant-system-prompt.js?v=4.1"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
