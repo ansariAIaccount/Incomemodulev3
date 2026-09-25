@@ -316,6 +316,10 @@
 
   function makeValidator(lookups, warn, err) {
     var repairsReported = {};
+    /* Set only when a repair genuinely changed the accepted list — see
+       allowed() below. The warning is keyed off this, not off the mere
+       existence of a repair rule. */
+    var repairApplied = {};
 
     /* Some lookup columns exist under more than one spelling across template
        versions — the original tab said "Day Count Conversion", the corrected
@@ -340,8 +344,16 @@
          was rejected as invalid — against a list the workbook never contained.
          A missing column is "cannot validate", which the caller already
          reports; it is not a one-item vocabulary. */
+      /* Record whether the repair actually DID anything. A workbook that has
+         already been corrected needs no repair, and telling its author to fix
+         a defect they have just fixed is worse than saying nothing: it reads
+         as though the correction did not take, and the next person re-edits a
+         file that was already right. */
       if (rep && rep.add && vals.length) rep.add.forEach(function (v) {
-        if (vals.map(norm).indexOf(norm(v)) === -1) vals.push(v);
+        if (vals.map(norm).indexOf(norm(v)) === -1) {
+          vals.push(v);
+          repairApplied[key] = true;
+        }
       });
       return vals;
     }
@@ -380,7 +392,10 @@
       var rep = LOOKUP_REPAIRS[key];
       if (rep && rep.alias) {
         var aliased = rep.alias[norm(value)];
-        if (aliased) value = aliased;
+        // Mark it used, for the same reason as the add-repair above: the
+        // warning should follow the misspelling being encountered, not the
+        // rule existing. A file spelling it correctly gets no complaint.
+        if (aliased) { value = aliased; repairApplied[key] = true; }
       }
 
       var hit = list.filter(function (v) { return norm(v) === norm(value); })[0];
@@ -390,7 +405,14 @@
         return null;
       }
 
-      if (rep && rep.why && !repairsReported[key]) {
+      /* Only complain about a defect that is actually present.
+         This used to fire whenever a repair RULE existed for the column,
+         regardless of whether the workbook needed it — so a file with a
+         corrected Day Count list ("ACT/360, ACT/365, ACT/ACT, …") was still
+         told it had ACT/360 twice and no ACT/365. The rule is kept for files
+         that still carry the old tab; the message is now tied to the repair
+         having been used. */
+      if (rep && rep.why && repairApplied[key] && !repairsReported[key]) {
         repairsReported[key] = true;
         warn('Lookup values tab: ' + rep.why);
       }

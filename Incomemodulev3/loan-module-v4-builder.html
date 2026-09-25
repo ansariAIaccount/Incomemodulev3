@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 4; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 8; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -11010,18 +11010,39 @@ window.SB = (function(){
     // filter. Separate eq() calls are quoted properly by the client.
     const keys = [inst._presetKey, inst.id, inst.deal, inst.dealCode]
       .filter(k => k != null && String(k).trim() !== '');
-    for(const key of keys){
-      for(const col of ['preset_key', 'deal_code', 'name']){
-        try {
-          const { data, error } = await _client
-            .from('deals').select('id').eq(col, key).limit(1);
-          if(error) continue;
-          if(data && data.length){
-            console.log('[SB] _resolveDealId: matched', col, '=', key, '→', data[0].id);
-            return data[0].id;
+    if(!keys.length) return null;
+
+    /* THREE round trips, not twelve.
+
+       This used to loop keys × columns with an await inside both loops — four
+       candidate keys against three columns, one sequential request each. On a
+       fast link that is invisible; on a remote dev server at a few hundred ms
+       per call it is several seconds of dead time on every deal load, before
+       anything the user asked for has started.
+
+       .in() takes the whole key list in one request, so the same search is
+       three calls — one per column, still in priority order so preset_key
+       still wins over deal_code over name. */
+    for(const col of ['preset_key', 'deal_code', 'name']){
+      try {
+        const { data, error } = await _client
+          .from('deals').select('id, ' + col).in(col, keys).limit(keys.length);
+        if(error) continue;
+        if(data && data.length){
+          /* Preserve the old precedence WITHIN a column too: the first key in
+             the list wins, not whichever row the server happened to return
+             first. Two deals matching different keys on the same column is
+             rare but not impossible, and silently picking the wrong one would
+             attach a run to the wrong deal. */
+          for(const key of keys){
+            const hit = data.find(r => String(r[col]) === String(key));
+            if(hit){
+              console.log('[SB] _resolveDealId: matched', col, '=', key, '→', hit.id);
+              return hit.id;
+            }
           }
-        } catch(_){ /* try the next column */ }
-      }
+        }
+      } catch(_){ /* try the next column */ }
     }
     console.log('[SB] _resolveDealId: no deals row for any of', keys);
     return null;
@@ -22893,7 +22914,7 @@ function closeActiveDealModal(){
    creeps to 90% and sits there is worse than one that moves honestly.
    ═══════════════════════════════════════════════════════════════════════════ */
 window.PCSLoad = (function(){
-  let el = null, total = 1, done = 0, startedAt = 0;
+  let el = null, total = 1, done = 0, startedAt = 0, _tick = null;
   function ensure(){
     if(el) return el;
     el = document.createElement('div');
@@ -22930,6 +22951,19 @@ window.PCSLoad = (function(){
       el.querySelector('#pcs-load-bar').style.width = '0%';
       el.querySelector('#pcs-load-step').textContent = 'Starting…';
       el.style.display = 'flex';
+      /* Elapsed seconds, ticking.
+         The bar advances on real stages, so a slow stage leaves it motionless
+         — and a motionless bar reads as "hung", which is how a thirty-second
+         load becomes a reload, a second load on top of the first, and a much
+         worse thirty seconds. A counter that keeps moving says "still
+         working" without pretending to know how far along it is. */
+      if(_tick) clearInterval(_tick);
+      _tick = setInterval(function(){
+        if(!el || el.style.display === 'none') return;
+        var s = Math.round((Date.now() - startedAt) / 1000);
+        var t = el.querySelector('#pcs-load-title');
+        if(t) t.textContent = (title || 'Loading deal') + (s >= 3 ? '  ·  ' + s + 's' : '');
+      }, 1000);
     },
     step(msg){
       if(!el || el.style.display === 'none') return;
@@ -22944,15 +22978,19 @@ window.PCSLoad = (function(){
       const n = el.querySelector('#pcs-load-step'); if(n) n.textContent = msg || '';
     },
     done(){
+      if(_tick){ clearInterval(_tick); _tick = null; }
       if(!el) return;
       el.querySelector('#pcs-load-bar').style.width = '100%';
       const ms = Date.now() - startedAt;
       setTimeout(() => { if(el) el.style.display = 'none'; }, ms < 400 ? 0 : 180);
     },
     fail(msg){
+      if(_tick){ clearInterval(_tick); _tick = null; }
       if(!el) return;
       el.querySelector('#pcs-load-step').textContent = msg || 'Load failed';
-      setTimeout(() => { if(el) el.style.display = 'none'; }, 1600);
+      // Long enough to read. A failure that vanishes in 1.6s leaves the user
+      // with a blank screen and no idea what went wrong.
+      setTimeout(() => { if(el) el.style.display = 'none'; }, 6000);
     }
   };
 })();
@@ -23948,7 +23986,12 @@ window.loadExternalDeal = async function(dealId){
     trancheNames:   (snap.tranches   || []).reduce((m, t) => { m[t.externalTrancheId]   = t.name; return m; }, {}),
     /* Kept as-is, including the null: a snapshot imported before checkpoints
        were captured must not be presented as one whose workbook stated none. */
-    checkpoints: snapRow.checkpoints_jsonb
+    checkpoints: snapRow.checkpoints_jsonb,
+    /* Movements — drawdowns, repayments, PIK capitalisations. They were loaded
+       for the engine but never handed to the cashflow view, so the screen
+       showed interest and fees while the £50m of drawdowns that produced them
+       were nowhere on it. */
+    events: snap.events || []
   };
 
   _P.step('Building the deal…');
@@ -24211,7 +24254,8 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
     if(tranches.indexOf(k) === -1) tranches.push(k);
   });
   const f = window.__extCfFilter;
-  const rows = (f === 'all') ? all : all.filter(r => (r.external_tranche_id || '(facility)') === f);
+  // `let` — movement rows are merged in below, so this list is rebuilt.
+  let rows = (f === 'all') ? all : all.filter(r => (r.external_tranche_id || '(facility)') === f);
 
   /* Publish what this view is showing, so Export XLSX has something truthful to
      write. The exporter reads __cfLastEnrichedRows, which only the ENGINE path
@@ -24240,13 +24284,46 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
      and within each, paid versus capitalised. A single "interest" total would
      hide the fact that PIK never touches cash. */
   const tot = { interestCash:0, interestPik:0, feeCash:0, feePik:0, cashSettled:0 };
+  /* Per-fee, not one lump.
+     A single "Fees" figure hides the distinction that decides the effective
+     interest rate: an arrangement fee is part of the lender's return and is
+     spread over the life, an agency fee is payment for a service and is not.
+     Summing them into one number makes those indistinguishable on the one
+     screen where the difference is checkable. Each fee gets its own total,
+     tagged with whether it feeds the EIR, and the aggregate stays alongside
+     as "Total fees". */
+  const feeByComponent = {};
   rows.forEach(r => {
     const amt = +r.amount || 0;
     const pik = (r.settlement_type === 'pik' || r.settlement_type === 'capitalised');
     if(r.posting_type === 'interest')  tot[pik ? 'interestPik' : 'interestCash'] += amt;
-    else if(r.posting_type === 'fee')  tot[pik ? 'feePik' : 'feeCash'] += amt;
+    else if(r.posting_type === 'fee'){
+      tot[pik ? 'feePik' : 'feeCash'] += amt;
+      const id = r.external_component_id || '(unnamed)';
+      if(!feeByComponent[id]) feeByComponent[id] = { id: id, amount: 0, rows: 0 };
+      feeByComponent[id].amount += amt;
+      feeByComponent[id].rows++;
+    }
     tot.cashSettled += (+r.cash_settled || 0);
   });
+
+  /* Does this fee feed the EIR? Read from the builder's mapped fees, which
+     carry the v0.5 Yield Integral answer. null means the workbook did not say
+     — shown as "not stated" rather than guessed either way, because an
+     inference here moves a reported yield. */
+  const _yieldIntegralOf = (componentId) => {
+    const f = (window.B && Array.isArray(B.fees))
+      ? B.fees.find(x => x && (x.externalComponentId === componentId || x.id === componentId))
+      : null;
+    return f ? (f.ifrs && f.ifrs.treatment === 'IFRS9-EIR' ? true
+               : (f.yieldIntegral != null ? !!f.yieldIntegral : null)) : null;
+  };
+  const feeList = Object.keys(feeByComponent)
+    .map(id => Object.assign({}, feeByComponent[id], {
+      name: ctx.componentNames[id] || id,
+      yieldIntegral: _yieldIntegralOf(id)
+    }))
+    .sort((a, b) => b.amount - a.amount);
 
   const tabBtn = (key, label, n) =>
     '<button type="button" onclick="window.__extCfSetFilter(\'' + esc(key).replace(/'/g,"\\'") + '\')" ' +
@@ -24275,6 +24352,80 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
      painted in chunks and the next chunk is appended as you reach the bottom.
      The scroll bar therefore reflects what is rendered, not the whole set,
      which is why the footer states the running count. */
+  /* ─── Movements, interleaved by date ─────────────────────────────────────
+     Drawdowns, repayments and PIK capitalisations arrive on the Movements
+     sheet, not the Cashflows sheet, so this table showed the interest and
+     fees a balance produced while the balance's own movements were nowhere
+     on screen — £50m of drawdowns on the Smokey feed, invisible.
+
+     Shaped to look like a cashflow row so one sorted list carries both, and
+     marked `_isMovement` so the row renderer can style it and skip the
+     columns that do not apply (rate, basis, days). */
+  const MOVE_LABEL = {
+    initialPurchase: 'Initial purchase', drawdown: 'Drawdown',
+    principalPayment: 'Principal payment', capitalisation: 'PIK capitalisation'
+  };
+  const movementRows = (ctx.events || [])
+    .filter(e => e && e.eventDate)
+    .filter(e => f === 'all' || (e.externalTrancheId || '(facility)') === f)
+    .map(e => ({
+      _isMovement: true,
+      flow_date: e.eventDate,
+      period_start: null, period_end: null,
+      external_tranche_id: e.externalTrancheId || '(facility)',
+      external_component_id: null,
+      posting_type: MOVE_LABEL[e.eventType] || e.eventType || 'movement',
+      settlement_type: e.eventType === 'capitalisation' ? 'pik' : 'cash',
+      balance_basis: null, days_covered: null, days_covered_stated: false,
+      verification_status: null, basis_balance: null, rate: null,
+      amount: Math.abs(+e.amount || 0),
+      /* A repayment and a capitalisation both raise or lower the balance, but
+         only one of them is cash. Signed so the column reads as a ledger. */
+      _signed: (e.eventType === 'principalPayment' ? -1 : 1) * Math.abs(+e.amount || 0),
+      cash_settled: e.eventType === 'capitalisation' ? 0 : Math.abs(+e.amount || 0)
+    }));
+
+  /* One list, date order. Movements sort before cashflows on the same day —
+     the balance moves first, then accrues. */
+  rows = rows.concat(movementRows).sort((a, b) => {
+    const da = a.flow_date || a.period_end || '', db = b.flow_date || b.period_end || '';
+    if(da !== db) return da < db ? -1 : 1;
+    return (a._isMovement ? 0 : 1) - (b._isMovement ? 0 : 1);
+  });
+
+  /* ─── Carrying amount, opening and closing ───────────────────────────────
+     Ours to compute, not PortF's to send. Read from the engine's daily
+     schedule — the same source the accounting run uses — so the number on
+     this screen and the number in the ledger cannot disagree. Null outside
+     the schedule's span, shown as a dash rather than a misleading zero. */
+  const _cv = (function(){
+    let sched = (typeof M !== 'undefined' && Array.isArray(M.schedule)) ? M.schedule : null;
+    if(!sched || !sched.length) return null;
+    const m = new Map();
+    for(const s of sched) if(s && s.date) m.set(s.date, +s.carryingValue || 0);
+    return m;
+  })();
+  const carryingAt = (iso) => {
+    if(!iso || !_cv) return null;
+    if(_cv.has(iso)) return _cv.get(iso);
+    const d = new Date(iso + 'T00:00:00Z');
+    for(let k = 0; k < 7; k++){
+      d.setUTCDate(d.getUTCDate() - 1);
+      const key = d.toISOString().slice(0, 10);
+      if(_cv.has(key)) return _cv.get(key);
+    }
+    return null;
+  };
+  // Opening = the day before the period starts; closing = the period end.
+  const openingFor = (r) => {
+    const start = r.period_start || r.flow_date;
+    if(!start) return null;
+    const d = new Date(start + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() - 1);
+    return carryingAt(d.toISOString().slice(0, 10));
+  };
+  const closingFor = (r) => carryingAt(r.period_end || r.flow_date);
+
   const CHUNK_ROWS = 500;
   const shown = rows.slice(0, CHUNK_ROWS);
 
@@ -24288,7 +24439,21 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
     '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">' +
       '<span class="chip blue"   style="font-size:10.5px;" title="Interest settled in cash">Interest · cash ' + money(tot.interestCash) + '</span>' +
       (tot.interestPik ? '<span class="chip amber" style="font-size:10.5px;" title="Interest capitalised or paid in kind — never touches cash">Interest · PIK ' + money(tot.interestPik) + '</span>' : '') +
-      '<span class="chip purple" style="font-size:10.5px;">Fees · cash ' + money(tot.feeCash) + '</span>' +
+      /* One chip per fee, then the total. The ✓/✗ says whether it is in the
+         effective interest rate; "?" means the file did not state it, and the
+         fee is therefore kept OUT of the yield. */
+      feeList.map(function(fe){
+        var mark = fe.yieldIntegral === true  ? '<b title="Part of the effective interest rate">✓ EIR</b>'
+                 : fe.yieldIntegral === false ? '<span title="Payment for a service — recognised as performed, not in the EIR">service</span>'
+                 : '<span title="The workbook did not state Yield Integral, so this fee is kept out of the EIR">? not stated</span>';
+        var cls = fe.yieldIntegral === true ? 'chip green' : fe.yieldIntegral === false ? 'chip purple' : 'chip amber';
+        return '<span class="' + cls + '" style="font-size:10.5px;" title="' +
+          esc(fe.name) + ' · ' + fe.rows + ' row(s)">' + esc(fe.name) + ' ' + money(fe.amount) +
+          ' · ' + mark + '</span>';
+      }).join('') +
+      (feeList.length > 1
+        ? '<span class="chip gray" style="font-size:10.5px; font-weight:700;" title="Every fee on this selection, EIR-integral or not">Total fees ' + money(tot.feeCash + tot.feePik) + '</span>'
+        : '') +
       (tot.feePik ? '<span class="chip amber" style="font-size:10.5px;">Fees · PIK ' + money(tot.feePik) + '</span>' : '') +
       '<span class="chip green"  style="font-size:10.5px;">Cash settled ' + money(tot.cashSettled) + '</span>' +
       (function(){
@@ -24332,6 +24497,9 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
     '<table style="width:100%; border-collapse:collapse; font-size:11px;"><thead><tr>' +
       th('Date') + th('Days') + th('Tranche') + th('Component') + th('Posts as') + th('Settles') + th('Basis') +
       th('Basis balance', true) + th('Rate', true) + th('Amount', true) + th('Cash settled', true) +
+      /* Ours, not theirs — computed from the engine's daily schedule. Headed
+         so the provenance is on screen rather than implied. */
+      th('Opening carrying', true) + th('Closing carrying', true) +
     '</tr></thead><tbody>';
 
   const BASIS_LABEL = {
@@ -24343,6 +24511,31 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
   // One row's markup, reusable so the scroll-append below renders identically
   // to the first paint rather than drifting into a second implementation.
   const rowHTML = (r) => {
+    /* Movement rows: same columns, different meaning. Rate, basis and days do
+       not apply to a drawdown, so they are dashed rather than filled with a
+       zero that would read as a measured value. Tinted so the eye can tell a
+       balance movement from an accrual at a glance. */
+    if(r._isMovement){
+      const trM = (!r.external_tranche_id || r.external_tranche_id === '(facility)')
+        ? 'Facility' : (ctx.trancheNames[r.external_tranche_id] || r.external_tranche_id);
+      const isRepay = /payment|repay/i.test(r.posting_type);
+      const dash = '<span style="color:var(--n-400);">—</span>';
+      const oc = openingFor(r), cc = closingFor(r);
+      return '<tr style="background:#F5F8FF;">' +
+        td('<b>' + esc(r.flow_date) + '</b>') + td(dash, true) + td(esc(trM)) +
+        td('<span style="color:var(--n-500); font-style:italic;">movement</span>') +
+        td('<span class="chip ' + (isRepay ? 'red' : 'green') + '" style="font-size:9.5px;">' +
+           esc(r.posting_type) + '</span>') +
+        td('<span class="chip ' + (r.settlement_type === 'cash' ? 'green' : 'amber') +
+           '" style="font-size:9.5px;">' + esc(r.settlement_type) + '</span>') +
+        td(dash) + td(dash, true) + td(dash, true) +
+        td('<b style="color:' + (isRepay ? '#991B1B' : '#065F46') + ';">' +
+           (isRepay ? '−' : '+') + money(r.amount).replace(/^[^0-9]*/, function(m){ return m; }) + '</b>', true) +
+        td(+r.cash_settled ? money(r.cash_settled) : dash, true) +
+        td(oc == null ? dash : money(oc), true) +
+        td(cc == null ? dash : money(cc), true) +
+      '</tr>';
+    }
     const comp = ctx.componentNames[r.external_component_id] || r.external_component_id || '—';
     // The importer stores the literal '(facility)' for facility-level rows so
     // the column is never null; it is a sentinel, not a name, so it must not
@@ -24376,6 +24569,11 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
       td(r.rate == null ? '—' : (+r.rate * 100).toFixed(6) + '%', true) +
       td(money(r.amount), true) +
       td(+r.cash_settled ? money(r.cash_settled) : '<span style="color:var(--n-400);">—</span>', true) +
+      (function(){
+        const oc = openingFor(r), cc = closingFor(r);
+        const dash = '<span style="color:var(--n-400);">—</span>';
+        return td(oc == null ? dash : money(oc), true) + td(cc == null ? dash : money(cc), true);
+      })() +
     '</tr>';
   };
   shown.forEach(r => { html += rowHTML(r); });
@@ -24897,7 +25095,29 @@ window.importExternalSnapshot = function(snap, opts){
   // legitimately-busy pool as a dropped connection — this insert can run to
   // hundreds of thousands of rows. That misdiagnosis has bitten this app
   // before on exactly this shape of write.
-  return SB.withHeavyWrite('external snapshot import', () => _importExternalSnapshotInner(snap, opts));
+  /* Close the progress overlay here, not inside the inner function.
+     The inner one has several exit points — an unchanged re-import returns
+     early, and any of fifteen database calls can throw — and an overlay left
+     up after one of them covers the whole screen with a spinner that never
+     finishes. One finally, all paths. */
+  return SB.withHeavyWrite('external snapshot import', () => _importExternalSnapshotInner(snap, opts))
+    .then(function(res){
+      if(window.PCSLoad && window.PCSLoad.done) window.PCSLoad.done();
+      return res;
+    })
+    .catch(function(err){
+      if(window.PCSLoad && window.PCSLoad.fail){
+        var m = (err && err.message) || String(err);
+        // The 180s ceiling reads as jargon in an import context; say what it
+        // means for the file the user just chose.
+        if(/did not settle within/.test(m)){
+          m = 'Import timed out after 3 minutes. The rows already written are kept — ' +
+              're-import to finish, or check the connection.';
+        }
+        window.PCSLoad.fail('Import failed — ' + m);
+      }
+      throw err;
+    });
 };
 
 async function _importExternalSnapshotInner(snap, opts){
@@ -24905,6 +25125,21 @@ async function _importExternalSnapshotInner(snap, opts){
   if(!window.SB || !SB.isConnected) throw new Error('Not connected to the database');
   const sb = SB.client;
   if(!sb) throw new Error('No Supabase client');
+
+  /* Progress. An import is fifteen database calls plus a chunked insert whose
+     length depends on the file, and it reported nothing at all — the screen
+     simply sat there, which on a large workbook is indistinguishable from a
+     hang. The overlay is the same one the deal loader uses, so a long import
+     now shows a stage, a row count and a ticking elapsed time.
+
+     Falls back to a no-op if PCSLoad is unavailable, so the import never
+     depends on the progress UI existing. */
+  const _P = (window.PCSLoad && typeof window.PCSLoad.start === 'function')
+    ? window.PCSLoad
+    : { start(){}, step(){}, note(){}, done(){}, fail(){} };
+  // 6 stages: identify · deal · snapshot · cashflows · diff · promote.
+  _P.start('Importing ' + (snap.facility && snap.facility.company || 'external deal'), 6);
+  _P.note('Checking your session…');
 
   const system = snap.externalSystem || 'portf';
 
@@ -24924,6 +25159,7 @@ async function _importExternalSnapshotInner(snap, opts){
     throw new Error('Not signed in — cannot import. The deal row must record who created it.');
   }
 
+  _P.step('Matching the deal…');
   // 1 · Deal row. Matched on (external_system, external_deal_id) — never on
   //     name, which users rename.
   let created = false;
@@ -24993,6 +25229,7 @@ async function _importExternalSnapshotInner(snap, opts){
     deal = data; created = true;
   }
 
+  _P.step('Checking for an unchanged re-import…');
   // 2 · Skip an unchanged re-import outright. Re-uploading the same workbook
   //     is a normal thing to do by accident; it should not churn the tables.
   const { data: current } = await sb.from('external_snapshots')
@@ -25041,6 +25278,7 @@ async function _importExternalSnapshotInner(snap, opts){
   if(snapErr) throw snapErr;
   _snapRowId = snapRow.id;
 
+  _P.step('Saving the cashflow schedule…');
   // 4 · Cashflows, chunked. A 40-year daily deal runs to ~260k rows and a
   //     single insert of that size is what starved the pool in the past.
   const CHUNK = 900;
@@ -25074,11 +25312,19 @@ async function _importExternalSnapshotInner(snap, opts){
     amount: r.amount,
     cash_settled: r.cashSettled || 0
   }));
+  /* The long part of an import, and the only one whose duration scales with
+     the file. Report per chunk: a 40-year daily deal is tens of thousands of
+     rows, and a silent minute here is what makes an import look hung. */
+  const _chunks = Math.ceil(rows.length / CHUNK) || 1;
   for(let i = 0; i < rows.length; i += CHUNK){
+    _P.note('Saving cashflow rows — ' + Math.min(i + CHUNK, rows.length).toLocaleString() +
+            ' of ' + rows.length.toLocaleString() +
+            (_chunks > 1 ? '  (batch ' + (i / CHUNK + 1) + '/' + _chunks + ')' : ''));
     const { error } = await sb.from('external_cashflows').insert(rows.slice(i, i + CHUNK));
     if(error) throw error;
   }
 
+  _P.step('Comparing against the previous snapshot…');
   // 5 · Diff against the snapshot being replaced. PortF sends no restatement
   //     marker, so this is the only way a corrected prior period is visible.
   let changes = 0, postedAffected = 0;
@@ -25141,6 +25387,7 @@ async function _importExternalSnapshotInner(snap, opts){
     }
   }
 
+  _P.step('Making this the current snapshot…');
   // 6 · Promote. Order matters: clear the old flag before setting the new one,
   //     because a partial unique index allows only one current row per deal.
   if(current){
@@ -43322,8 +43569,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         } },
       { key:'fees', label:'Fees', align:'right',
         render:r => `<td style="padding:6px 10px; text-align:right; color:#B45309; font-weight:500;">${fmtCcy(r.fees)}</td>` },
-      { key:'cap_cost_to_date', label:'Cap. cost to date', align:'right', title:'Capitalised origination / arrangement / transaction costs — feeds realised G/L on sale',
-        render:r => `<td style="padding:6px 10px; text-align:right; color:${r.capCostToDate>0?'#7C2D12':'var(--n-400)'}; font-weight:${r.capCostToDate>0?'600':'400'};">${r.capCostToDate>0?fmtCcy(r.capCostToDate):'—'}</td>` },
+      /* 'Cap. cost to date' removed — the capitalised-cost figure it showed is
+         already inside Carrying value, so the column repeated a component of a
+         number sitting two columns away. The underlying capCostToDate field is
+         still computed and still exported; only the column is gone. */
       { key:'paydowns', label:'Paydowns', align:'right', title:'Principal paid down (incl. Stage 2 cash transtypes)',
         render:r => `<td style="padding:6px 10px; text-align:right; color:${r.repayments>0?'var(--fis-green-700,#15803D)':'var(--n-400)'}; font-weight:${r.repayments>0?'600':'400'};">${r.repayments>0 ? fmtCcy(r.repayments) : '—'}</td>` },
       { key:'net_cash', label:'Net cash', align:'right', title:'Interest + Fees + Paydowns − Drawdowns',
