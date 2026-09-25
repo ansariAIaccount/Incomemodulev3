@@ -132,14 +132,44 @@ deploy and is not otherwise visible.
    commit time by `.githooks/pre-commit`. Deploying uncommitted edits produces
    a manifest that does not match the files, and the self-check reports STALE
    for files that are in fact newer.
-3. **Ensure the commit hook runs in CI**, or generate the manifest in the
-   pipeline. If neither happens the version stops incrementing, the `?v=`
-   cache-buster stops changing, and stale-cache failures return. Hook install
-   is per-clone:
+3. **Verify the manifest in CI.** Add this as a build step, before anything is
+   copied anywhere:
    ```sh
+   ./check-manifest.sh
+   ```
+   It re-hashes all seven deployable files and compares them to
+   `build-manifest.json`. Exit 0 means the manifest describes the tree being
+   built and the build may proceed; exit 1 means it does not — fail the
+   pipeline rather than deploy.
+
+   **This step is not optional, and it is the one that catches the failure
+   mode this document exists for.** `build-manifest.json` is written by
+   `.githooks/pre-commit`, which runs on a developer's machine. Git hooks are
+   not cloned with a repository and cannot be enforced from the server side, so
+   a commit from a laptop where the hook was never installed carries a manifest
+   describing an *older* build. Nothing about the resulting page looks wrong —
+   the version label comes from the HTML, so it reads as expected while the
+   code beside it is stale. This has already happened on this project twice.
+
+   CI therefore cannot *install* the hook for anyone. It can only refuse to
+   build when the hook's output is missing or wrong, which is what the script
+   does.
+
+4. **Every developer clone needs the hook installed once**, by the developer,
+   on their own machine:
+   ```sh
+   chmod +x .githooks/pre-commit
    git config core.hooksPath .githooks
    ```
-4. **Fail the pipeline if any of the eight files is missing** from the source
+   `core.hooksPath` is written to `.git/config`, which is not cloned — so this
+   is per-machine and per-clone, and has to be repeated after every fresh
+   clone. Without it the version stops incrementing, the `?v=` cache-buster
+   stops changing, and stale-cache failures return.
+
+   Do not use `git commit --no-verify` on this repository: it skips the hook,
+   which is exactly how a commit ends up with a stale manifest.
+
+5. **Fail the pipeline if any of the eight files is missing** from the source
    tree rather than deploying a partial set. `deploy.sh` already does this —
    it verifies all eight exist before copying any.
 

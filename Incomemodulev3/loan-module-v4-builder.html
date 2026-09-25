@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 8; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 9; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.4"></script>
+<script src="portf-excel-parser.js?v=4.9"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9045,14 +9045,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.4"></script>
-<script src="loan-module-instruments.js?v=4.4"></script>
-<script src="loan-module-analytics.js?v=4.4"></script>
+<script src="loan-module-engine.js?v=4.9"></script>
+<script src="loan-module-instruments.js?v=4.9"></script>
+<script src="loan-module-analytics.js?v=4.9"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.4"></script>
-<script src="demo-assistant-system-prompt.js?v=4.4"></script>
+<script src="demo-assistant-kb.js?v=4.9"></script>
+<script src="demo-assistant-system-prompt.js?v=4.9"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -23892,6 +23892,12 @@ window.externalSnapshotToBuilder = function(snap){
           : /over time/i.test(c.revenueTreatment || '') ? 'IFRS15-overTime'
           : 'IFRS15-pointInTime',
       yieldIntegralStated: c.yieldIntegral != null,
+      /* Tri-state, kept separate from `ifrs`. `ifrs` can read 'IFRS9-EIR'
+         because revenueTreatment said so, which is not the same claim as the
+         workbook answering the Yield Integral question — and the Cashflow tab
+         has to be able to say "not stated" without guessing from the
+         treatment. null = unstated. */
+      yieldIntegral: c.yieldIntegral == null ? null : !!c.yieldIntegral,
       trancheId: c.externalTrancheId || ''
     };
   });
@@ -24313,10 +24319,16 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
      inference here moves a reported yield. */
   const _yieldIntegralOf = (componentId) => {
     const f = (window.B && Array.isArray(B.fees))
-      ? B.fees.find(x => x && (x.externalComponentId === componentId || x.id === componentId))
+      ? B.fees.find(x => x && (x.id === componentId || x.externalComponentId === componentId))
       : null;
-    return f ? (f.ifrs && f.ifrs.treatment === 'IFRS9-EIR' ? true
-               : (f.yieldIntegral != null ? !!f.yieldIntegral : null)) : null;
+    if(!f) return null;
+    /* The mapped fee carries the answer explicitly. `ifrs` on these objects is
+       a plain string ('IFRS9-EIR'), not an object — reading `f.ifrs.treatment`
+       returned undefined for every fee, so every chip said "not stated"
+       including the ones the workbook answered Yes. */
+    if(f.yieldIntegral != null) return !!f.yieldIntegral;
+    if(f.yieldIntegralStated) return f.ifrs === 'IFRS9-EIR';
+    return null;
   };
   const feeList = Object.keys(feeByComponent)
     .map(id => Object.assign({}, feeByComponent[id], {
@@ -24462,7 +24474,14 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
            things, and totalling them together without saying so is the quiet
            way to imply assurance that does not exist. */
         var v = { full:0, flat:0, unverified:0 };
-        rows.forEach(function(r){ var k = r.verification_status || 'unverified'; v[k] = (v[k]||0) + 1; });
+        /* Cashflow rows only. Movements are balance events, not accruals —
+           there is nothing to recalculate, so counting them as "unverified"
+           reported 132 on Smokey (39 interest + 93 movements) and made a
+           clean feed look unchecked. */
+        rows.forEach(function(r){
+          if(r._isMovement) return;
+          var k = r.verification_status || 'unverified'; v[k] = (v[k]||0) + 1;
+        });
         var out = '';
         if(v.unverified) out += '<span class="chip red" style="font-size:10.5px;" ' +
           'title="Amount only — the file does not give enough to recalculate it, so PCS cannot check it.">' +
@@ -24621,7 +24640,11 @@ window.__renderExternalCashflows = function(host, chip, kpis, status){
       while(box.scrollHeight <= box.clientHeight && painted < rows.length && guard++ < 20) more();
     }
   }
-  if(chip) chip.textContent = rows.length.toLocaleString() + ' received rows';
+  /* Cashflows and movements arrive on different sheets and are counted
+     separately. One combined figure labelled "received rows" overstated the
+     schedule by every drawdown and repayment on screen. */
+  if(chip) chip.textContent = (rows.length - movementRows.length).toLocaleString() + ' cashflow rows' +
+    (movementRows.length ? ' · ' + movementRows.length.toLocaleString() + ' movements' : '');
   if(kpis) kpis.innerHTML = '';
   if(status){
     status.textContent = 'Received from ' + ((window.B && B.deal && B.deal.externalSystem) || 'PortF');
