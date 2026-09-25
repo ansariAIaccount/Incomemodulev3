@@ -22973,9 +22973,35 @@ function loadActiveDealByKey(key){
     window.loadExternalDeal(_extCand.dealId)
       .then(() => {
         window.PCSLoad.step('Finishing up…');
+        /* Mark it current, exactly as the DB path does below.
+           The deal picker decides which row is CURRENT by comparing its row
+           value ('v2:' + key) against #sel-instrument. This branch never set
+           it, so after loading an external deal the select stayed empty, no
+           row matched, and the picker showed no current deal at all — the
+           button still read "Load" rather than "Reload", and the green
+           highlight never appeared. Set BEFORE registerBuilderInstrument,
+           which rebuilds the dropdown and re-applies the value once the
+           matching <option> exists. */
+        const _sel = document.getElementById('sel-instrument');
+        if(_sel) _sel.value = 'v2:' + key;
         if(typeof closeActiveDealModal === 'function') closeActiveDealModal();
         if(typeof window.registerBuilderInstrument === 'function'){
           try { window.registerBuilderInstrument(); } catch(e){ console.warn('[V3] registerBuilderInstrument threw:', e); }
+        }
+        /* Re-apply AFTER registering, unlike the DB path.
+           registerBuilderInstrument rebuilds the dropdown and re-applies the
+           value from INSTRUMENTS — but external deals are never added to
+           INSTRUMENTS, so it has nothing of this deal to restore and puts
+           back whatever was selected before. That silently overwrote the
+           value set above with the PREVIOUS deal's key, which is why the
+           picker kept marking the old deal as current after loading an
+           external one. The option itself exists; only the assignment was
+           being clobbered. */
+        if(_sel && _sel.value !== 'v2:' + key){
+          _sel.value = 'v2:' + key;
+          if(_sel.value !== 'v2:' + key){
+            console.warn('[V3] no <option> for ' + key + ' — picker cannot mark it current');
+          }
         }
         if(typeof refreshActiveDealChip === 'function') refreshActiveDealChip();
         window.PCSLoad.done();
