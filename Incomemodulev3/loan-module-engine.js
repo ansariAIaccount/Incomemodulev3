@@ -4253,7 +4253,11 @@ function splitECLByReportingPeriod(journals, inst, schedule, opts){
     jeIndex++;
   }
 
-  return kept.concat(out);
+  /* As above: this is a post-processor, so it runs after generateDIU's GL
+     pass and nothing maps its output unless it does so itself. Unmapped, the
+     ECL pair carried 70100 / 15500 — the engine's internal codes — instead of
+     470000 Impairment / 145000 Loan Loss Allowance, with no account name. */
+  return kept.concat(applyInvestranGLMapping(out));
 }
 if(typeof window !== 'undefined') window.splitECLByReportingPeriod = splitECLByReportingPeriod;
 
@@ -4323,7 +4327,16 @@ function emitPrincipalMovementsFromSchedule(journals, inst, schedule, opts){
       jeIndex++;
     }
   }
-  return rows.concat(out);
+  /* Map the new rows into the Investran chart before returning them.
+
+     generateDIU ends with applyInvestranGLMapping, so anything it emits is
+     already translated — but this runs AFTER that, as a post-processor, and
+     nothing re-runs the mapping afterwards. The rows therefore reached the
+     ledger carrying the engine's internal codes (15000, 10000) with no
+     glAccountName at all: an account nobody recognises and a blank name.
+
+     Only the NEW rows are mapped. `rows` has been through the pass already.  */
+  return rows.concat(applyInvestranGLMapping(out));
 }
 if(typeof window !== 'undefined') window.emitPrincipalMovementsFromSchedule = emitPrincipalMovementsFromSchedule;
 
