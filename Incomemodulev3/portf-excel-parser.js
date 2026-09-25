@@ -67,13 +67,83 @@
        a UK deal's April payment becomes an August one with nothing to show for
        it. Refuse it here; the caller scans the whole column and passes the
        convention it can actually evidence (see scanDateConvention). */
+    /* Fall back to the convention established for the whole workbook.
+
+       scanDateConvention existed but was wired into exactly one v0.3-era
+       reader. Every v0.4 reader called iso() with no convention, so a slash
+       date returned null and the row was discarded as a placeholder — the
+       Smokey v0.5 file writes all 93 movements as "22/08/2024" text and lost
+       every one of them, then failed with "no movements found". Files whose
+       dates happen to be real Excel dates were unaffected, which is why this
+       went unnoticed.
+
+       _fileDateConv is only ever set from evidence (a component above 12
+       somewhere in the file), never guessed — an all-ambiguous file still
+       refuses, exactly as before. */
     var sl = SLASH_DATE.exec(s);
-    if (sl) return conv ? fromSlash(sl, conv) : null;
+    if (sl) {
+      var c = conv || _fileDateConv;
+      return c ? fromSlash(sl, c) : null;
+    }
     var p = new Date(s);
     return isNaN(p.getTime()) ? null : iso(p);
   }
 
   var SLASH_DATE = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/;
+
+  /* Workbook-wide date convention, established once per parse from evidence
+     across every sheet, then used by iso() above. Scoped to one parse and
+     cleared at the start of the next — a stale convention carried from a
+     previous file would be worse than none. */
+  var _fileDateConv = null;
+
+  /* Look at EVERY cell in the workbook, not one column.
+     A file usually writes dates the same way throughout, so evidence in any
+     sheet settles the reading for all of them. That matters here: Movements
+     might be all day-first-unprovable while Cashflows contains a 22/08 that
+     settles it, and reading the sheets independently would refuse the first
+     while accepting the second — same file, two answers. */
+  function establishFileDateConvention(grids, warn, err) {
+    _fileDateConv = null;
+    var samples = [];
+    Object.keys(grids).forEach(function (k) {
+      var g = grids[k];
+      if (!g) return;
+      for (var r = 0; r < g.length; r++) {
+        var row = g[r];
+        if (!row) continue;
+        for (var c = 0; c < row.length; c++) {
+          var v = row[c];
+          if (v === null || v === undefined || v instanceof Date) continue;
+          if (SLASH_DATE.test(String(v).trim())) samples.push(v);
+        }
+      }
+    });
+    if (!samples.length) return true;            // no slash dates: nothing to settle
+
+    var dc = scanDateConvention(samples);
+    if (dc.conflict) {
+      err('The workbook contains both day-first and month-first dates (' +
+          dc.sampleD + ' and ' + dc.sampleM + '). One reading cannot be right for both, so ' +
+          'the file is not imported. Ask the sender for ISO dates (YYYY-MM-DD).');
+      return false;
+    }
+    if (dc.ambiguous) {
+      err('Dates are written as text like "' + txt(samples[0]) + '" and every value in the ' +
+          'workbook is valid read either day-first or month-first, so the order cannot be ' +
+          'established from the file. Guessing would silently move amounts by months. Ask the ' +
+          'sender for ISO dates (YYYY-MM-DD), or state the convention.');
+      return false;
+    }
+    if (dc.conv) {
+      _fileDateConv = dc.conv;
+      warn('Dates are text, not dates. Read as ' +
+           (dc.conv === 'dmy' ? 'day-first (DD/MM/YYYY)' : 'month-first (MM/DD/YYYY)') +
+           ' on the evidence of "' + dc.evidence + '", which is only valid that way round. ' +
+           'ISO dates (YYYY-MM-DD) would remove the inference.');
+    }
+    return true;
+  }
 
   function fromSlash(m, conv) {
     var a = +m[1], b = +m[2], y = +m[3];
@@ -1344,6 +1414,15 @@
     var warnings = [], errors = [];
     function warn(m) { warnings.push(m); }
     function err(m) { errors.push(m); }
+
+    /* Settle how this workbook writes dates BEFORE reading anything from it.
+       Every reader below calls iso(), which cannot interpret "22/08/2024"
+       without knowing the order — and silently returned null when it did not,
+       discarding the row. Establish it once, from evidence, for the whole
+       file. Refuses (rather than guesses) when the file cannot prove it. */
+    if (!establishFileDateConvention(grids, warn, err)) {
+      return { snapshot: null, warnings: rollUp(warnings), errors: errors };
+    }
 
     var loanKey = null, lookupKey = null, trancheKeys = [];
     Object.keys(grids).forEach(function (k) {
