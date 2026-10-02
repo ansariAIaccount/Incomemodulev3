@@ -2971,6 +2971,13 @@ function applyInvestranGLMapping(entries){
     if(/^debt-for-equity swap — restructuring loss$/.test(t))      return INVESTRAN_GL.d4eRestructLoss;
     if(/^debt-for-equity swap — restructuring gain$/.test(t))      return INVESTRAN_GL.d4eRestructGain;
     if(/pik (investment|capitalization)/.test(t))                  return INVESTRAN_GL.loanPikCapitalisation;
+    // PIK legs on the external-feed path. 'PIK Interest Capitalised' raises the
+    // loan asset; 'PIK Interest Income' is the income credit. Neither matched
+    // any rule before, so both fell through to UNMAPPED and kept the hardcoded
+    // 23000 they were emitted with.
+    if(/^pik interest capitalised$/.test(t))                       return INVESTRAN_GL.loanPikCapitalisation;
+    if(/pik interest income/.test(t))                              return INVESTRAN_GL.interestIncomePIK;
+    if(/pik interest receivable/.test(t))                          return INVESTRAN_GL.pikReceivable;
     // Per IFRS 9 §B5.4 / ASC 310-20-35-26: discount accretion = income side; the
     // offset (asset side) goes to 141000 carrying value. So the "Offset" leg routes
     // to loanOID (141000), and the income leg routes to interestIncomeAccrued (421000).
@@ -4084,7 +4091,6 @@ function splitInterestJEsByCouponPeriod(journals, inst, schedule){
         jeIndex, txIndex: 1,
         glDate: p.end, effectiveDate: p.end,
         transactionType: 'Income - Daily Accrued Interest',
-        account: '23000',
         originalAmount: p.sum, amountLE: p.sum, amountLocal: p.sum,
         isDebit: false, transactionComments: memo
       }));
@@ -4103,14 +4109,21 @@ function splitInterestJEsByCouponPeriod(journals, inst, schedule){
         jeIndex, txIndex: 1,
         glDate: p.end, effectiveDate: p.end,
         transactionType: 'Interest Receivable Clear',
-        account: '23000',
         originalAmount: p.sum, amountLE: p.sum, amountLocal: p.sum,
         isDebit: false, transactionComments: 'Interest cash settlement · period ending ' + p.end
       }));
       jeIndex++;
     }
   }
-  return kept.concat(newRows);
+  /* Route the new rows through the GL mapper.
+     These rows are CLONES of the template line, so without this they inherit
+     the template's account on every leg — the receivable legs would carry the
+     income account, and the two credit legs carried a hardcoded '23000'.
+     Every other DIU generator ends with this call; this one did not, which is
+     why the per-period interest lines were the only ones still showing 23000
+     instead of 421000 (Income - Daily Accrued Interest) and 113000
+     (Interest Receivable Clear). One source of truth: INVESTRAN_GL. */
+  return kept.concat(applyInvestranGLMapping(newRows));
 }
 
 if(typeof window !== 'undefined') window.splitInterestJEsByCouponPeriod = splitInterestJEsByCouponPeriod;

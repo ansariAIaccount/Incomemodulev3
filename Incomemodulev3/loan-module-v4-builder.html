@@ -9080,7 +9080,7 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.9"></script>
+<script src="loan-module-engine.js?v=4.11"></script>
 <script src="loan-module-instruments.js?v=4.9"></script>
 <script src="loan-module-analytics.js?v=4.9"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
@@ -16887,7 +16887,24 @@ function __diuBuildInner(inst, kind){
   const _postback = (document.getElementById('opt-postback-status') || {}).value
                  || (window.B && window.B.deal && window.B.deal.postbackStatus)
                  || 'held';
-  const _batchStatus = ({ held: 'Held', posted: 'Posted' })[_postback] || 'Held';
+  /* Held unless someone deliberately turns Posted on.
+     This used to be ({ held:'Held', posted:'Posted' })[_postback] || 'Held',
+     which contradicted the comment above it: draft and approved fell through
+     to Held because they are not in the map, but 'posted' WAS in the map and
+     came straight back as 'Posted'. Any deal saved before the status was
+     pinned still carries postbackStatus:'posted', and the || chain reaches for
+     it whenever the select's value is empty — so an old deal silently posted
+     straight into the general ledger instead of landing as Held for review.
+     The UI has disabled every option except Held since then, which made the
+     path invisible rather than closed.
+     The escape hatch is explicit and global: nothing in the UI sets it, so
+     Posted now requires a deliberate act rather than a stale saved field. */
+  const _batchStatus = (_postback === 'posted' && window.PCS_ALLOW_POSTED_BATCH === true)
+    ? 'Posted' : 'Held';
+  if(_postback === 'posted' && window.PCS_ALLOW_POSTED_BATCH !== true){
+    console.warn('[DIU] deal carries postbackStatus "posted" — submitting as Held. ' +
+                 'Set window.PCS_ALLOW_POSTED_BATCH = true to override.');
+  }
   const _ccy = inst.currency || (window.B && window.B.deal && window.B.deal.currency) || 'USD';
 
   // Deal Domain is mandatory in the template and had no source at all. Prefer
