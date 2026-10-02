@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 12; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 15; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.12"></script>
+<script src="portf-excel-parser.js?v=4.15"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9080,14 +9080,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.12"></script>
-<script src="loan-module-instruments.js?v=4.12"></script>
-<script src="loan-module-analytics.js?v=4.12"></script>
+<script src="loan-module-engine.js?v=4.15"></script>
+<script src="loan-module-instruments.js?v=4.15"></script>
+<script src="loan-module-analytics.js?v=4.15"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.12"></script>
-<script src="demo-assistant-system-prompt.js?v=4.12"></script>
+<script src="demo-assistant-kb.js?v=4.15"></script>
+<script src="demo-assistant-system-prompt.js?v=4.15"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -13378,6 +13378,12 @@ window.SB = (function(){
           mod_reir_on_substantial:      (ov.modRecomputeEIROnSubstantial != null ? !!ov.modRecomputeEIROnSubstantial : null),
           mod_default_classification:   ov.modDefaultTreatment || null,
           continuing:                   (ov.modContinuingInvolvement != null ? !!ov.modContinuingInvolvement : null),
+          // POCI — §B5.4.7. The acquisition-date lifetime ECL and any dated
+          // restatements of it. Both nullable: a non-POCI deal carries neither.
+          lifetime_ecl_at_acquisition:  (ov.lifetimeECLAtAcquisition != null && ov.lifetimeECLAtAcquisition !== ''
+                                           ? +ov.lifetimeECLAtAcquisition : null),
+          lifetime_ecl_revisions:       (Array.isArray(ov.lifetimeECLRevisions) && ov.lifetimeECLRevisions.length
+                                           ? ov.lifetimeECLRevisions : null),
           // Tax + FX cadence
           wht_rate:                     (ov.taxWhtRate != null ? +ov.taxWhtRate : null),
           wht_recoverable:              (ov.taxWhtRecoverability === 'recoverable'),
@@ -13948,6 +13954,9 @@ window.SB = (function(){
               hedgeDeDesignationReason:    o.hedge_de_designation_reason,
               allowanceReversalAmount:     o.allowance_reversal_amount != null ? +o.allowance_reversal_amount : null,
               allowanceReversalDate:       o.allowance_reversal_date,
+              // POCI — §B5.4.7 credit-adjusted rate inputs
+              lifetimeECLAtAcquisition:    o.lifetime_ecl_at_acquisition != null ? +o.lifetime_ecl_at_acquisition : null,
+              lifetimeECLRevisions:        Array.isArray(o.lifetime_ecl_revisions) ? o.lifetime_ecl_revisions : null,
               // ───────── V3 — 22 legacy fields (now wired) ─────────
               ifrs9Classification:         o.ifrs9_classification,
               businessModel:               o.business_model,
@@ -41728,6 +41737,22 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         if(ov.taxWhtRate != null)        inst.ifrs.tax.whtRate          = +ov.taxWhtRate;
         if(ov.taxWhtRecoverability)      inst.ifrs.tax.whtRecoverability= ov.taxWhtRecoverability;
         if(ov.taxDeferred != null)       inst.ifrs.tax.deferredTax      = !!ov.taxDeferred;
+      }
+      /* POCI — IFRS 9 §B5.4.7. The lifetime expected credit loss AT
+         ACQUISITION is an input to the credit-adjusted effective rate, not
+         something derivable from the purchase price: a discount to par may be
+         credit, liquidity or a bargain. Revisions are dated restatements of
+         that lifetime expectation; only the change since acquisition reaches
+         profit or loss. Both are passed straight through — the engine refuses
+         to solve a credit-adjusted rate without the first of them. */
+      if(ov.lifetimeECLAtAcquisition != null && ov.lifetimeECLAtAcquisition !== ''){
+        inst.ifrs.lifetimeECLAtAcquisition = +ov.lifetimeECLAtAcquisition;
+      }
+      if(Array.isArray(ov.lifetimeECLRevisions) && ov.lifetimeECLRevisions.length){
+        inst.ifrs.lifetimeECLRevisions = ov.lifetimeECLRevisions
+          .filter(r => r && r.date && r.amount != null)
+          .map(r => ({ date: r.date, amount: +r.amount, note: r.note || null }))
+          .sort((a, b) => a.date < b.date ? -1 : 1);
       }
       // PIK — legacy block (pikRateOverride was already handled above for the new path)
       if(ov.pikEnabled != null || ov.pikRate != null || ov.pikCapitalizationFrequency){

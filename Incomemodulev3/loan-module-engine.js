@@ -569,6 +569,165 @@ function computeEIR(instr){
   };
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   deriveModificationGainLoss — IFRS 9 §5.4.3 / §B5.4.6
+   ───────────────────────────────────────────────────────────────────────────
+   On a non-substantial modification the lender does not derecognise. It
+   recalculates the gross carrying amount as the present value of the REVISED
+   contractual cash flows, discounted at the ORIGINAL effective interest rate,
+   and takes the difference to profit or loss.
+
+   Until now PCS took `gainLoss` as a figure typed in by the user. That makes
+   the headline number of a restructuring an assertion rather than a
+   calculation: nothing checked it, nothing could reproduce it, and an auditor
+   asking "how did you arrive at that?" would have had no answer. Worse, a
+   blank field silently produced a modification with no gain or loss at all.
+
+   This derives it. The supplied value still wins when one is given — a user
+   may be booking a figure agreed elsewhere — but the derivation is always
+   computed alongside so the two can be compared and a disagreement surfaced.
+
+   Returns null when it cannot be computed (no original EIR, no horizon), so
+   the caller can fall back rather than publish a zero that looks deliberate.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function deriveModificationGainLoss(instr, o){
+  const modDate = o && o.modDate;
+  const originalEIR = o && o.originalEIR;
+  const daysPerYear = (o && o.daysPerYear) || 360;
+  if(!modDate || originalEIR == null || !isFinite(originalEIR) || originalEIR <= -0.99) return null;
+  const start = parseISO(modDate);
+  const end   = parseISO(instr.maturityDate);
+  if(!start || !end || end <= start) return null;
+
+  /* Post-modification nominal coupon. Read AFTER the caller has applied the
+     event's newCoupon, so this is the revised rate, not the original one. */
+  const c = instr.coupon || {};
+  let rate = 0;
+  if(c.type === 'Fixed') rate = +c.fixedRate || 0;
+  else rate = ((+c.floatingRate || 0) || ((instr.rfr && +instr.rfr.baseRate) || 0)) + (+c.spread || 0);
+  if(c.floor != null) rate = Math.max(rate, +c.floor);
+  if(c.cap   != null) rate = Math.min(rate, +c.cap);
+
+  /* Principal movements. Three kinds, and the distinction matters:
+       draw        — lender pays out, balance up    → NEGATIVE cash flow
+       repayment   — lender receives, balance down  → POSITIVE cash flow
+       write-off   — forgiveness, balance down      → NO cash flow at all
+     Treating forgiveness as a receipt would turn a loss into a wash, which is
+     precisely the error this function exists to prevent. */
+  const cashIn = {}, balanceOnly = {};
+  let openingWriteOff = 0;
+  const bump = (m, iso, amt) => { if(amt) m[iso] = (m[iso] || 0) + amt; };
+  for(const e of (instr.principalSchedule || [])){
+    if(!e || !e.date || e.date < modDate) continue;
+    const amt = Math.abs(+e.amount || 0);
+    if(!amt) continue;
+    const ty = String(e.type || '');
+    if(ty === 'writeOff' || ty === 'forgiveness'){
+      // A write-off dated ON the modification date is part of the restructuring
+      // itself: it reduces the balance the revised cash flows are projected on.
+      if(e.date === modDate) openingWriteOff += amt;
+      else bump(balanceOnly, e.date, -amt);
+      continue;
+    }
+    if(e.date === modDate) continue;      // other same-day events already in `balance`
+    if(ty === 'draw' || ty === 'initialPurchase')                         bump(cashIn, e.date, -amt);
+    else if(/^(paydown|repayment|prepayment|mandatoryPrepayment)$/.test(ty)) bump(cashIn, e.date,  amt);
+  }
+
+  /* Fees paid between the parties are part of the revised cash flows
+     (IFRS 9 §B5.4.6) — an amendment fee received on the modification date
+     belongs in the discounting, not in income on receipt. */
+  const base = (+instr.commitment || +instr.faceValue || 0);
+  for(const f of (instr.fees || [])){
+    if(!f || !f.paymentDate || f.paymentDate < modDate) continue;
+    const mode = String(f.mode || '');
+    const amt = (mode === 'fixed' || mode === 'fixAmount')
+      ? (+f.amount || +f.flatAmount || 0)
+      : ((+f.rate || +f.pct || 0) * base);
+    if(amt) bump(cashIn, f.paymentDate, amt);
+  }
+
+  // Interest payment dates across the revised horizon.
+  const freq = String(instr.couponFrequency || 'quarterly').toLowerCase();
+  const sched = generatePaymentSchedule(start, freq, end, instr.holidayCalendar, instr.rollConvention) || [];
+  const endISO = toISO(end);
+  const payable = new Set(sched.map(s => s.paymentDate).filter(dt => dt > modDate));
+  payable.add(endISO);                    // the final coupon always settles at maturity
+
+  /* Walk the revised horizon, accruing interest and collecting dated flows.
+
+     The walk starts the day AFTER the modification, so anything falling ON the
+     modification date has to be taken first or it is silently lost. An
+     amendment fee received on the day of the restructuring is the ordinary
+     case, not an edge case — dropping it understated the gain by the whole
+     fee. It discounts at t=0, so it enters at face. */
+  let bal = Math.max(0, (+o.balance || 0) - openingWriteOff);
+  let accrued = 0;
+  const flows = [];
+  if(Math.abs(cashIn[modDate] || 0) > 0.005){
+    flows.push({ date: modDate, amount: cashIn[modDate] });
+  }
+
+  /* Interest settled in kind is NOT a cash receipt. It capitalises into the
+     balance and comes back as a larger repayment later — which is the whole
+     economic point of a PIK amendment, and the reason exposure at default
+     rises. Discounting it as though it were received quarterly in cash would
+     erase the deferral the modification was granted to achieve, and report no
+     loss on the very change that caused one. */
+  const pikRate = (instr.pik && instr.pik.enabled) ? (+instr.pik.rate || 0) : 0;
+  let pikAccrued = 0;
+  const pikDates = pikRate > 0
+    ? new Set((generatePaymentSchedule(
+        start,
+        String((instr.pik && (instr.pik.capitalizationFrequency || instr.pik.freq)) || 'quarterly').toLowerCase(),
+        end, instr.holidayCalendar, instr.rollConvention) || []
+      ).map(s => s.paymentDate))
+    : new Set();
+
+  for(let dd = addDays(start, 1); dd <= end; dd = addDays(dd, 1)){
+    const iso = toISO(dd);
+    accrued += bal * rate / daysPerYear;
+    if(pikRate > 0){
+      pikAccrued += bal * pikRate / daysPerYear;
+      if(pikDates.has(iso) || iso === endISO){ bal += pikAccrued; pikAccrued = 0; }
+    }
+    let cash = cashIn[iso] || 0;
+    if(payable.has(iso)){ cash += accrued; accrued = 0; }
+    bal += (balanceOnly[iso] || 0) - (cashIn[iso] > 0 ? cashIn[iso] : 0)
+         + (cashIn[iso] < 0 ? -cashIn[iso] : 0);
+    if(bal < 0) bal = 0;
+    if(Math.abs(cash) > 0.005) flows.push({ date: iso, amount: cash });
+    if(flows.length > 5000) break;        // safety on a very long-dated loan
+  }
+  // Anything still outstanding at maturity is contractually repayable.
+  if(bal > 0.005) flows.push({ date: endISO, amount: bal });
+
+  // Discount at the ORIGINAL EIR. Not the revised one — that is the whole
+  // point of §5.4.3: the rate is held, the cash flows move.
+  let pv = 0;
+  for(const f of flows){
+    const t = Math.round((parseISO(f.date) - start) / ONE_DAY) / daysPerYear;
+    pv += f.amount / Math.pow(1 + originalEIR, t);
+  }
+  const carrying = +o.carrying || 0;
+  const gainLoss = pv - carrying;
+  return {
+    gainLoss,
+    pv,
+    preModCarrying: carrying,
+    originalEIR,
+    couponAfterMod: rate,
+    forgivenAtMod: openingWriteOff,
+    flowCount: flows.length,
+    firstFlow: flows.length ? flows[0].date : null,
+    lastFlow:  flows.length ? flows[flows.length-1].date : null,
+    // §5.4.3's 10% test: the PV change against the pre-modification carrying
+    // amount is what decides substantial vs non-substantial.
+    pvChangePct: carrying ? (gainLoss / carrying) * 100 : null
+  };
+}
+if(typeof window !== 'undefined') window.deriveModificationGainLoss = deriveModificationGainLoss;
+
 /* ---------- Core schedule builder ----------
    Walks the day grid from settlement → maturity and maintains:
      balance              (principal outstanding, includes PIK capitalizations)
@@ -1080,14 +1239,96 @@ function buildSchedule(instr){
      and the reason is carried out to the caller. Deliberately loud: silence
      here produces a plausible number that is wrong by design. */
   const pociFlag = instr.creditImpairedAtAcquisition === true;
-  if(pociFlag && amort.method === 'effectiveInterestPrice'){
-    eirRefusal = 'Credit-impaired at acquisition. This asset requires a '
-               + 'credit-adjusted effective interest rate, which embeds lifetime '
-               + 'expected credit losses in the yield. PCS does not yet compute '
-               + 'one, and the ordinary method would overstate interest income '
-               + 'for the life of the asset, so no rate has been applied.';
-  }
+  /* ─── POCI — credit-adjusted effective interest rate (IFRS 9 §B5.4.7) ─────
+     The ordinary EIR discounts the CONTRACTUAL cash flows. A credit-adjusted
+     EIR discounts the cash flows the holder actually EXPECTS to collect —
+     contractual less lifetime expected credit losses — back to the amount
+     paid. On a distressed purchase the two are far apart: 100m of contractual
+     principal bought for 60m because 40m is not expected to arrive. Discount
+     the contractual flows and the 40m accretes into interest income as though
+     it were yield; discount the expected flows and the rate reflects what the
+     buyer is really earning on the money at risk.
 
+     The lifetime ECL at acquisition is supplied — it is the fund's own
+     underwriting view, not something the engine can infer from a price. When
+     it has not been stated the solve is still refused, because inferring it
+     from the discount would assume the entire discount is credit (it may be
+     liquidity, or a bargain) and would silently manufacture the input the
+     whole method rests on. */
+  let caEIR = null;
+  let caEIRBuild = null;
+  if(pociFlag){
+    const lifetimeECLAtAcq = (instr.ifrs && instr.ifrs.lifetimeECLAtAcquisition != null)
+      ? +instr.ifrs.lifetimeECLAtAcquisition : null;
+    const considerationPOCI = (instr.purchasePrice != null ? +instr.purchasePrice : null);
+    if(lifetimeECLAtAcq == null || !(lifetimeECLAtAcq >= 0)){
+      eirRefusal = 'Credit-impaired at acquisition, but no lifetime expected '
+                 + 'credit loss was stated at the acquisition date. The credit-'
+                 + 'adjusted effective rate discounts the cash flows expected to '
+                 + 'be collected, so that figure is an input, not something that '
+                 + 'can be read off the purchase price — a discount to par may be '
+                 + 'credit, liquidity or a bargain, and assuming it is all credit '
+                 + 'would invent the number the whole calculation depends on. '
+                 + 'Enter the lifetime ECL at acquisition in Accounting Treatment.';
+    } else if(!(considerationPOCI > 0)){
+      eirRefusal = 'Credit-impaired at acquisition, but no consideration was '
+                 + 'stated. A credit-adjusted rate is solved against what was '
+                 + 'actually paid; without it there is nothing to solve to.';
+    } else {
+      /* Expected cash flows = contractual, less the lifetime loss. The loss is
+         applied against the final principal recovery, which is where a
+         distressed recovery shortfall actually falls — interest on a
+         non-performing loan is collected or it is not, but the principal
+         haircut crystallises at the end. */
+      const horizonD = parseISO(instr.expectedRedemptionDate || instr.maturityDate) || maturity;
+      const yrs = Math.max(0.0001, Math.round((horizonD - settle)/ONE_DAY) / daysPerYear);
+      const face = +instr.faceValue || 0;
+      const expectedPrincipal = Math.max(0, face - lifetimeECLAtAcq);
+      const cfs = [];
+      const whole = Math.floor(yrs);
+      const annualCoupon = face * (couponRateNominal || 0);
+      /* Interest is projected at the full contractual rate and the whole of the
+         expected shortfall is taken against principal. That is not an optimism
+         about the borrower — it is what the stated input means. The lifetime
+         ECL supplied IS the expected shortfall; haircutting interest as well
+         would make total expected losses exceed the figure the user entered and
+         contradict the number the rate is being solved against. A fund that
+         expects to lose interest too should say so by raising that figure. */
+      const recoveryRatio = face > 0 ? (expectedPrincipal / face) : 0;
+      for(let y = 1; y <= whole; y++) cfs.push({ t: y, amount: annualCoupon });
+      const stub = yrs - whole;
+      cfs.push({ t: yrs, amount: expectedPrincipal + (stub > 0 ? annualCoupon * stub : 0) });
+      const solved = solveYield(considerationPOCI, cfs);
+      if(solved == null || !isFinite(solved)){
+        eirRefusal = 'Credit-impaired at acquisition. The credit-adjusted rate '
+                   + 'did not converge on the expected cash flows supplied — check '
+                   + 'that the lifetime ECL at acquisition is below face value and '
+                   + 'that a redemption horizon is set.';
+      } else {
+        caEIR = solved;
+        effectiveYield = solved;
+        caEIRBuild = {
+          consideration:        considerationPOCI,
+          faceValue:            face,
+          lifetimeECLAtAcq:     lifetimeECLAtAcq,
+          expectedPrincipal:    expectedPrincipal,
+          recoveryRatio:        recoveryRatio,
+          contractualCoupon:    couponRateNominal || 0,
+          horizon:              toISO(horizonD),
+          yearsToHorizon:       yrs,
+          creditAdjustedEIR:    solved,
+          // What the ordinary method would have produced, for contrast. The
+          // gap between the two is the overstatement POCI treatment avoids.
+          ordinaryEIRWouldBe:   solveYield(considerationPOCI, (function(){
+                                  const c = [];
+                                  for(let y = 1; y <= whole; y++) c.push({ t:y, amount: annualCoupon });
+                                  c.push({ t: yrs, amount: face + (stub > 0 ? annualCoupon*stub : 0) });
+                                  return c;
+                                })())
+        };
+      }
+    }
+  }
   if(!pociFlag && amort.method === 'effectiveInterestPrice' && instr.faceValue && couponRateNominal){
     /* The rate is solved against the OPENING CARRYING AMOUNT — consideration
        net of yield-integral fees received and gross of transaction costs — not
@@ -1282,6 +1523,10 @@ function buildSchedule(instr){
   const isFloatingCoupon = !!(instr.coupon && instr.coupon.type && instr.coupon.type !== 'Fixed');
   let activeYield = effectiveYield;      // the rate actually driving accretion today
   let eirRevisions = 0;
+  /* One entry per modification event: what was supplied, what the §5.4.3
+     derivation produced, and whether they agree. Carried out on the schedule
+     so the UI can show the build-up rather than a bare figure. */
+  const modDerivations = [];
 
   /* Re-estimation at a reset. Uses the periodic solve rather than the daily
      walk: the daily walk is O(days) and a 39-year facility resetting twice a
@@ -1850,11 +2095,10 @@ function lookupMarginBps(dateISO){
     const dISO = toISO(d);
     for(const mev of (instr.modificationEvents || [])){
       if(mev.date !== dISO) continue;
-      const gainLoss = mev.gainLoss || 0;
-      dailyModGain += gainLoss;
-      modEventDescription = (mev.modType === 'substantial' ? 'Substantial' : 'Non-substantial')
-                          + ' modification' + (mev.reason ? ' — ' + mev.reason : '');
-      // Apply forward-looking term changes
+      /* Apply the revised terms BEFORE deriving the gain or loss. The
+         derivation discounts the REVISED cash flows, so it has to see the new
+         coupon and the new maturity; deriving first would re-price the old
+         deal and report no change. */
       if(mev.newCoupon){
         instr.coupon = Object.assign({}, instr.coupon || {}, mev.newCoupon);
       }
@@ -1864,6 +2108,44 @@ function lookupMarginBps(dateISO){
         // extend rows — set a flag for the user.
         instr.maturityDate = mev.newMaturity;
       }
+      /* IFRS 9 §5.4.3 — derive, don't assume. The original EIR is the rate
+         solved at initial recognition, NOT activeYield: under the 'revise'
+         floating policy activeYield has already moved with the resets, and
+         discounting at it would hold the carrying amount flat by construction
+         and report a gain or loss of nil on every modification. */
+      let derived = null;
+      try {
+        derived = deriveModificationGainLoss(instr, {
+          modDate:     dISO,
+          balance:     balance,
+          carrying:    carryingValue,
+          originalEIR: (effectiveYield != null ? effectiveYield : couponRateNominal),
+          daysPerYear: daysPerYear
+        });
+      } catch(err){
+        console.warn('[engine] modification gain/loss derivation failed on ' + dISO + ':', err && err.message);
+        derived = null;
+      }
+      const supplied = (mev.gainLoss != null && mev.gainLoss !== '') ? +mev.gainLoss : null;
+      const gainLoss = (supplied != null) ? supplied : (derived ? derived.gainLoss : 0);
+      /* Both are carried out. A supplied figure that disagrees with the
+         derivation is not silently preferred — it is reported next to it, so
+         the difference is a question somebody can answer rather than a number
+         nobody can reproduce. */
+      modDerivations.push({
+        date: dISO,
+        modType: mev.modType || 'non_substantial',
+        reason: mev.reason || null,
+        supplied,
+        derived: derived ? derived.gainLoss : null,
+        source: (supplied != null) ? 'supplied' : (derived ? 'derived' : 'none'),
+        disagreement: (supplied != null && derived && Math.abs(supplied - derived.gainLoss) > 0.5)
+                        ? (supplied - derived.gainLoss) : null,
+        detail: derived
+      });
+      dailyModGain += gainLoss;
+      modEventDescription = (mev.modType === 'substantial' ? 'Substantial' : 'Non-substantial')
+                          + ' modification' + (mev.reason ? ' — ' + mev.reason : '');
       // For non-substantial mods, adjust carrying value by gain/loss (P&L pair posted via DIU)
       if(mev.modType !== 'substantial' && gainLoss){
         carryingValue += gainLoss;
@@ -1970,7 +2252,46 @@ function lookupMarginBps(dateISO){
     //   Stage 3: lifetime ECL on net carrying (= gross - existing allowance)
     // Daily change = target - allowance (positive grows allowance, negative reverses).
     let dailyECLChange = 0;
-    if(instr.ifrs && instr.ifrs.computeECL !== false){
+    /* ─── POCI — IFRS 9 §5.5.13 / §5.5.14 ──────────────────────────────────
+       A purchased or originated credit-impaired asset is measured differently
+       from everything else, and the differences are absolute rather than
+       matters of degree:
+
+         • NO day-one loss allowance. The expected losses are already in the
+           price and already in the credit-adjusted rate. Raising an allowance
+           as well would charge for them twice.
+         • NO stage transfers. There is no Stage 1, 2 or 3 for a POCI asset
+           and no SICR assessment — it starts impaired and stays POCI for life.
+         • Only the CUMULATIVE CHANGE in lifetime expected losses since
+           acquisition goes to profit or loss. A favourable change is an
+           impairment GAIN, recognised even where it takes the allowance below
+           nil against the acquisition-date expectation.
+
+       So the allowance carried here is the movement, not the level: expected
+       losses of 40m at acquisition falling to 25m is a 15m gain, and rising to
+       50m is a 10m further charge. */
+    if(pociFlag && instr.ifrs && instr.ifrs.computeECL !== false){
+      const baseECL = (instr.ifrs.lifetimeECLAtAcquisition != null)
+        ? +instr.ifrs.lifetimeECLAtAcquisition : null;
+      if(baseECL != null){
+        /* Revised lifetime expectations, each dated. Supplied by the fund's
+           own credit process — nothing about a POCI asset can be inferred from
+           a PD/LGD grid, which is why these are facts the user states. */
+        const revisions = Array.isArray(instr.ifrs.lifetimeECLRevisions)
+          ? instr.ifrs.lifetimeECLRevisions : [];
+        let currentExpected = baseECL;
+        for(const rv of revisions){
+          if(rv && rv.date && rv.date <= todayISO && rv.amount != null){
+            currentExpected = +rv.amount;
+          }
+        }
+        // Allowance = cumulative change since acquisition. Negative is a gain.
+        const targetAllowance = currentExpected - baseECL;
+        dailyECLChange = targetAllowance - eclAllowance;
+        eclAllowance += dailyECLChange;
+        cumECLChange += dailyECLChange;
+      }
+    } else if(instr.ifrs && instr.ifrs.computeECL !== false){
       // Phase A #2 — SICR auto-migration on covenant breach.
       // Per IFRS 9 §B5.5.17(k) and ASC 326-20-30-2, a covenant breach is a
       // qualitative indicator of significant increase in credit risk. When
@@ -2391,6 +2712,13 @@ function lookupMarginBps(dateISO){
   rows.effectiveYield = effectiveYield;
   rows.feeBreakdown   = feeAccum;          // per-fee cumulative accrual
   rows.deferredEIRPool = deferredEIRPool;  // total IFRS-9 deferred income at t0
+  rows.modDerivations  = modDerivations;   // §5.4.3 build-up, one per modification event
+  rows.poci = pociFlag ? {                 // §B5.4.7 credit-adjusted rate build-up
+    applied: caEIR != null,
+    creditAdjustedEIR: caEIR,
+    build: caEIRBuild,
+    refusal: caEIR == null ? eirRefusal : null
+  } : null;
   // Phase A covenants — surface enriched covenant array for Dashboard / JE
   // generator to render breach banners + framework-aware memos.
   rows.covenants = enrichedCovenants;
