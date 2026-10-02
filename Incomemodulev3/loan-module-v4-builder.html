@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 9; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 11; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -5645,7 +5645,13 @@
 
   <!-- ─────────── IFRS Capabilities Demonstrator ───────────
        data-substab="evidence" → only rendered on the Evidence pack tab.
-       Removed from Run&JE and Treatment overrides per user request. -->
+       Removed from Run&JE and Treatment overrides per user request.
+
+       NOTE ON ORDER: this panel, the 3-card Initial Recognition / EIR / Fair
+       Value grid, and the Change Handling panel below all sit ABOVE
+       #evidence-pack in this file, but are moved BELOW it at load time — see
+       the hoist script immediately after #evidence-pack closes. The evidence
+       pack is what a reviewer opens this tab for; these three are context. -->
   <div class="mb-4 acct-capabilities-panel" data-substab="evidence">
     <div class="flex items-center gap-2 mb-2">
       <span class="material-icons-outlined text-[18px]" style="color:var(--brand-600)">checklist</span>
@@ -5743,6 +5749,23 @@
     <!-- Print-only cover page — hidden on screen, first page in printed output -->
     <div id="evidence-pack-print-cover" style="display:none;"></div>
 
+    <!-- EIR Calculation Trace — first, not last.
+         It answers the question the rest of the pack is evidence FOR: what rate
+         is income being recognised at, and how was it arrived at. Sitting at the
+         bottom of eight collapsible panels, it was the last thing a reviewer
+         found and the first thing they asked for. -->
+    <div class="bg-white border border-gray-200 rounded-lg mb-2 p-3 flex items-center gap-2 flex-wrap">
+      <span class="material-icons-outlined text-[16px]" style="color:var(--brand-600)">functions</span>
+      <div>
+        <div class="font-semibold text-[12.5px]">EIR Calculation Trace</div>
+        <div class="text-[11px] text-gray-500">Auto-detects deal type · cites IFRS 9 §B5.4 / ASC 310-20-35 / ASPE 3856.16 by deal framework</div>
+      </div>
+      <button id="btn-show-eir-trace" class="mat-btn !py-1 !px-3 ml-auto" style="background:#10B981;color:#FFFFFF;border-color:#10B981">
+        <span class="material-icons-outlined text-[14px]" style="vertical-align:middle">open_in_new</span>
+        Show EIR Trace
+      </button>
+    </div>
+
     <!-- A) Month-End Close Workflow + Run Metadata -->
     <details class="bg-white border border-gray-200 rounded-lg mb-2 p-3" open>
       <summary class="font-semibold text-[12.5px] cursor-pointer flex items-center gap-2">
@@ -5824,19 +5847,31 @@
       <div id="covenant-adjustments" class="mt-3"></div>
     </details>
 
-    <!-- G) IFRS 9 EIR Calculation Trace — opens in popup with 3 worked examples -->
-    <div class="bg-white border border-gray-200 rounded-lg mb-2 p-3 flex items-center gap-2 flex-wrap">
-      <span class="material-icons-outlined text-[16px]" style="color:var(--brand-600)">functions</span>
-      <div>
-        <div class="font-semibold text-[12.5px]">EIR Calculation Trace</div>
-        <div class="text-[11px] text-gray-500">Auto-detects deal type · cites IFRS 9 §B5.4 / ASC 310-20-35 / ASPE 3856.16 by deal framework</div>
-      </div>
-      <button id="btn-show-eir-trace" class="mat-btn !py-1 !px-3 ml-auto" style="background:#10B981;color:#FFFFFF;border-color:#10B981">
-        <span class="material-icons-outlined text-[14px]" style="vertical-align:middle">open_in_new</span>
-        Show EIR Trace
-      </button>
-    </div>
+    <!-- G) EIR Calculation Trace now sits at the TOP of this pack, above panel
+         A. Moved rather than duplicated: two elements carrying id
+         "btn-show-eir-trace" would leave the handler bound to whichever the
+         DOM returned first, and the other button silently dead. -->
   </div>
+
+  <script>
+  /* Hoist the evidence pack above the three context panels that precede it in
+     the markup (IFRS Capabilities, the Initial Recognition / EIR / Fair Value
+     grid, and Change Handling & Audit).
+
+     Done by moving the node rather than by re-ordering the file: the pack is
+     ~120 lines of markup and every id inside it is referenced by the renderers,
+     so a hand transcription is the kind of edit that loses one panel quietly.
+     Moving the element preserves identity, listeners and content exactly.
+
+     Runs inline, immediately after the pack closes, so all four nodes exist and
+     the order is correct on first paint — no visible reflow. */
+  (function(){
+    var pack  = document.getElementById('evidence-pack');
+    var first = pack && pack.parentNode
+                  ? pack.parentNode.querySelector('.acct-capabilities-panel') : null;
+    if(pack && first && first !== pack) pack.parentNode.insertBefore(pack, first);
+  })();
+  </script>
 
   <!-- ═══════════════════════════════════════════════════════════════
        Inline Journal Entries panel — full JE detail on the page (was
@@ -6793,7 +6828,7 @@
                 <label style="display:block; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">
                   Position template
                 </label>
-                <input id="diucfg-position-template" type="text" inputmode="numeric" placeholder="e.g. 309"
+                <input id="diucfg-position-template" type="text" inputmode="numeric" placeholder="318 (default)"
                        oninput="try{ localStorage.setItem('pcs_v3_diu_position_template', this.value.trim()); }catch(_){}"
                        style="width:100%; padding:7px 10px; border:1px solid #334155; border-radius:5px; background:rgba(255,255,255,0.06); color:white; font-family:ui-monospace,monospace; font-size:11px;"/>
                 <div style="font-size:10.5px; color:#94A3B8; margin-top:4px;">Deal / issuer / security master data — 13 columns, sheet <b>PortfolioPosition</b>.</div>
@@ -16060,7 +16095,7 @@ function renderPortFMarginSchedulePanel(inst){
     `<div class="text-[11px] text-gray-500 mt-1">
        Read-only. The engine resolves the active margin per day from this schedule.
        All-in rate = ${blocks[0].index} base + margin (+ ESG adjustment, if applicable). For period-by-period
-       EIR construction, see the EIR Calculation Trace at the bottom of Stage 2.
+       EIR construction, see the EIR Calculation Trace at the top of the Evidence pack tab.
      </div>`;
 
   section.classList.remove('hidden');
@@ -16658,18 +16693,40 @@ const PP_SHEET_NAME = 'PortfolioPosition';
 // sanitising, Held status) happens here, once.
 //
 // Returns { wb, glRows, ppRows, filename, inst, batchCount } or throws.
-function buildDIUWorkbook(){
-  if(!M.acctJournals || !M.acctJournals.length) throw new Error('Run accounting first — no JE rows to export');
+function buildDIUWorkbook(kind){
+  /* A position import carries deal / issuer / security master data and does
+     not need a single journal entry, so the run-accounting gate applies to the
+     transaction path only. Requiring a run before a position push would block
+     the one export you need BEFORE any accounting exists. */
+  if(kind !== 'position' && (!M.acctJournals || !M.acctJournals.length)){
+    throw new Error('Run accounting first — no JE rows to export');
+  }
   if(typeof XLSX === 'undefined') throw new Error('XLSX library not loaded — refresh the page');
-  const inst = currentInstrument();
-  if(!inst) throw new Error('No active deal — pick one from the header');
-  return __diuBuildInner(inst);
+  /* The Position card sits in the Loan Builder, which is BEFORE the step that
+     registers an instrument — currentInstrument() only resolves once "Send to
+     cashflow" has run. Requiring it here made the button do nothing at all on
+     the page it lives on. Position rows are built from Builder state anyway,
+     so fall back to the live Builder instrument. Transaction exports keep the
+     registered instrument, because they must match the accounting run that
+     produced the journals. */
+  let inst = currentInstrument();
+  if(!inst && kind === 'position' && typeof builderToInstrument === 'function'){
+    inst = builderToInstrument();
+  }
+  if(!inst) throw new Error(kind === 'position'
+    ? 'Fill in Deal Setup and at least one tranche before sending the position'
+    : 'No active deal — pick one from the header');
+  return __diuBuildInner(inst, kind);
 }
 if(typeof window !== 'undefined') window.buildDIUWorkbook = buildDIUWorkbook;
 
-function __diuBuildInner(inst){
+function __diuBuildInner(inst, kind){
   {
-  console.log('[DIU] build start — journals:', M.acctJournals.length, 'deal:', inst.id);
+  /* Position master data exists before any accounting does, so this must not
+     assume a journal array. Normalised once rather than null-checked at each
+     of the dozen downstream uses. */
+  if(!Array.isArray(M.acctJournals)) M.acctJournals = [];
+  console.log('[DIU] build start — journals:', M.acctJournals.length, 'deal:', inst.id, 'kind:', kind || 'transaction');
   // Apply client GL account remapping (same as pushToWorkday). Overwrites the
   // in-memory journals so downstream sanitisers, batch grouping and CSV/XLSX
   // rendering all use the mapped codes. Pass-through when no mappings exist.
@@ -16882,21 +16939,35 @@ function __diuBuildInner(inst){
   console.log('[DIU] step: built glRows =', glRows.length);
   const ppRows  = buildPortfolioPositionRows(inst).map(r => sanitiseRow(r, PORTFOLIO_POSITION_COLS, /*useFieldMap=*/false));
   console.log('[DIU] step: built ppRows =', ppRows.length);
-  // Use SheetJS (already loaded for Excel parsing) to build the workbook.
+  /* ─── One workbook, one entity ───────────────────────────────────────────
+     Both sheets used to go into a single workbook sent under one template id.
+     A DIU template binds to ONE entity: template 308 is Transaction (internal
+     entity "Batch", groups Parameters / Transactions / UDFs) and 318 is
+     Position (groups Deal / Issuer / Security / Position). Their required
+     fields barely overlap — Transaction wants batch and JE indices and dates,
+     Position wants Deal, Issuer and Security identifiers — so a Transaction
+     template has nowhere to put a PortfolioPosition sheet. The second sheet
+     was either ignored or rejected, and nobody had checked which: the comment
+     that used to sit here admitted the sheet binding was "not yet confirmed
+     against the tenant".
+
+     Sheet names and column headers match the blank template sources exactly,
+     including the leading spaces on " Security", " Security Type" and
+     " Security Currency" — DIU matches headers literally, so those spaces are
+     load-bearing rather than a typo to tidy up. */
   const wb = XLSX.utils.book_new();
-  const wsGL = XLSX.utils.json_to_sheet(glRows, { header: DIU_HEADERS });
-  // Sheet name matches the template's "Transaction (2)". DIU binds sheet to
-  // entity, so a sheet called "GL" may not map to Transaction at all. Not yet
-  // confirmed against the tenant — if the import can't find the sheet, this
-  // is the first thing to check.
-  XLSX.utils.book_append_sheet(wb, wsGL, DIU_SHEET_NAME);
-  const wsPP = XLSX.utils.json_to_sheet(ppRows, { header: PORTFOLIO_POSITION_COLS });
-  XLSX.utils.book_append_sheet(wb, wsPP, PP_SHEET_NAME);
-  console.log('[DIU] step: workbook assembled with 2 sheets');
+  const isPosition = kind === 'position';
+  const wsGL = isPosition ? null : XLSX.utils.json_to_sheet(glRows, { header: DIU_HEADERS });
+  const wsPP = isPosition ? XLSX.utils.json_to_sheet(ppRows, { header: PORTFOLIO_POSITION_COLS }) : null;
+  if(wsGL) XLSX.utils.book_append_sheet(wb, wsGL, DIU_SHEET_NAME);
+  if(wsPP) XLSX.utils.book_append_sheet(wb, wsPP, PP_SHEET_NAME);
+  console.log('[DIU] step: workbook assembled · kind=' + (kind || 'transaction') +
+              ' · sheet ' + (isPosition ? PP_SHEET_NAME : DIU_SHEET_NAME) +
+              ' · rows ' + (isPosition ? ppRows.length : glRows.length));
   // Auto-size columns roughly by header text length. Be defensive about cell
   // shape — Object.keys(ws) includes '!ref'/'!cols'/'!merges' meta which we
   // filter out, and ws[k] could be missing .v in degenerate cases.
-  for(const ws of [wsGL, wsPP]){
+  for(const ws of [wsGL, wsPP].filter(Boolean)){
     try {
       const headers = Object.keys(ws)
         .filter(k => /^[A-Z]+1$/.test(k))
@@ -16908,7 +16979,10 @@ function __diuBuildInner(inst){
   }
   return {
     wb, glRows, ppRows, inst, dateStamp,
-    filename:   `investran-diu-${inst.id}-${dateStamp}.xlsx`,
+    kind: isPosition ? 'position' : 'transaction',
+    filename: isPosition
+      ? `investran-position-${inst.id}-${dateStamp}.xlsx`
+      : `investran-diu-${inst.id}-${dateStamp}.xlsx`,
     batchCount: glDateToBatchId.size,
     batchStatus: _batchStatus
   };
@@ -16975,23 +17049,28 @@ if(typeof window !== 'undefined') window.downloadDIUFilled = downloadDIUFilled;
 // and it's much cheaper to see it here than in an import error log.
 let _diuPreview = null;
 
-window.__previewDIUTemplate = function(){
+window.__previewDIUTemplate = function(kind){
   try {
-    if(!M.acctJournals || !M.acctJournals.length){
+    /* Only the transaction path needs a run. Positions are master data and
+       exist before any accounting does — see buildDIUWorkbook. */
+    if(kind !== 'position' && (!M.acctJournals || !M.acctJournals.length)){
       if(typeof runAccounting === 'function'){
         toast('Running accounting first…', 2000);
         runAccounting();
       }
     }
-    _diuPreview = buildDIUWorkbook();
+    _diuPreview = buildDIUWorkbook(kind);
   } catch(err){
     toast(String(err.message || err), 5000, { kind:'error' });
     return;
   }
-  const m = document.getElementById('diu-preview-modal');
-  if(m) m.style.display = 'flex';
-  __diuPreviewRender('GL');
+  __diuShowPreviewModal();
+  __diuPreviewRender(kind === 'position' ? 'PP' : 'GL');
 };
+/* Loan Builder entry point — position master data, template 318. Separate
+   function rather than a flag at the call site so the button wiring reads as
+   what it does. */
+window.__previewInvestranPosition = function(){ return window.__previewDIUTemplate('position'); };
 
 window.__diuPreviewRender = function(sheet){
   if(!_diuPreview) return;
@@ -17185,10 +17264,18 @@ window.__diuSubmit = async function(mode){
       },
       // Positions use a different template — different columns entirely. Sent
       // explicitly so the proxy doesn't fall back to the Transaction default.
+      /* Positions go to their own template — a different entity with different
+         required fields. Defaulted to 318 (goldenliveuat) so a fresh browser
+         works without someone first discovering the setting; override in DIU
+         Settings for another tenant, where the id will differ. Sent explicitly
+         so the proxy never falls back to the Transaction default, which would
+         push position rows at template 308 and fail validation in a way that
+         reads as a data problem rather than a routing one. */
       _diuPreview.kind === 'position'
         ? { templateId: (function(){
-              try { const v = localStorage.getItem('pcs_v3_diu_position_template'); if(v) return +v; } catch(_){}
-              return null;
+              try { const v = localStorage.getItem('pcs_v3_diu_position_template');
+                    if(v && !isNaN(+v)) return +v; } catch(_){}
+              return 318;
             })() }
         : {}))
     })).json();
@@ -17257,36 +17344,56 @@ window.__diuSubmit = async function(mode){
 // own template id, because the column mapping is completely different from the
 // Transaction template.
 window.__ppPreview = function(){
-  const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
-  if(!inst){ toast('Load a deal first', 3000, { kind:'info' }); return; }
+  /* No currentInstrument() guard here — buildDIUWorkbook('position') resolves
+     the instrument itself and falls back to the Builder state. This guard used
+     to return silently-ish on the one page where the button lives, which read
+     to the user as the button doing nothing at all. */
   if(typeof XLSX === 'undefined'){ toast('XLSX not loaded — refresh', 4000, { kind:'error' }); return; }
 
-  const rows = buildPortfolioPositionRows(inst);
+  /* Built by the SAME function the send path uses, not a second copy of the
+     workbook logic. This used to assemble its own sheet inline — which meant
+     the preview could drift from what was actually transmitted, and a preview
+     that disagrees with the payload is worse than none: it tells you the batch
+     is fine when it isn't. The sanitisers, column order and header spelling
+     now have exactly one implementation. */
+  let built;
+  try {
+    built = buildDIUWorkbook('position');
+  } catch(err){
+    toast(String(err.message || err), 5000, { kind:'error' });
+    return;
+  }
+  const rows = built.ppRows || [];
   if(!rows.length){
     toast('Nothing to send — add a legal entity allocation first', 5000, { kind:'info' });
     return;
   }
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows, { header: PORTFOLIO_POSITION_COLS });
-  ws['!cols'] = PORTFOLIO_POSITION_COLS.map(h => ({ wch: Math.min(34, Math.max(14, h.length + 4)) }));
-  XLSX.utils.book_append_sheet(wb, ws, PP_SHEET_NAME);
-
-  _diuPreview = {
-    wb,
-    glRows:  rows,                       // preview renders whatever sits here
-    ppRows:  [],
-    inst,
-    filename: 'investran-position-' + (inst.id || 'deal') + '-' +
-              new Date().toISOString().slice(0,10) + '.xlsx',
-    batchCount: 1,
-    batchStatus: '—',
-    kind: 'position'                     // routes __diuSubmit to the position template
-  };
+  /* glRows carries the rows the preview renderer reads; ppRows carries the
+     same rows under their real name, so the send path reports "position rows"
+     rather than counting them as journal entries. */
+  _diuPreview = Object.assign({}, built, { glRows: rows, ppRows: rows });
   window.__diuIssues = [];
-  const m = document.getElementById('diu-preview-modal');
-  if(m) m.style.display = 'flex';
+  __diuShowPreviewModal();
   __diuPreviewRenderPosition(rows);
 };
+
+/* Open the DIU preview modal from anywhere in the app.
+   The modal markup sits inside <section id="stage-2">, which is display:none
+   whenever you are not on the Accounting tab. A position:fixed element inside
+   a display:none ancestor is not rendered at ALL — so setting display:flex on
+   it from the Loan Builder produced a 0x0 box and, to the user, a button that
+   did nothing. The transaction preview never hit this because you are already
+   on stage-2 when you use it.
+   Re-parented to <body> once, on first open: moving the node keeps its
+   identity, listeners and content, and it is position:fixed so it has no
+   layout relationship with its old parent to preserve. */
+function __diuShowPreviewModal(){
+  const m = document.getElementById('diu-preview-modal');
+  if(!m) return;
+  if(m.parentElement !== document.body) document.body.appendChild(m);
+  m.style.display = 'flex';
+}
+if(typeof window !== 'undefined') window.__diuShowPreviewModal = __diuShowPreviewModal;
 
 function __diuPreviewRenderPosition(rows){
   document.querySelectorAll('.diu-prev-tab').forEach(b => { b.style.display = 'none'; });
@@ -23587,6 +23694,74 @@ window.__portfImportRenderReview = function(){
     : 'Ready to import.';
 };
 
+/* ─── Re-import: Update or Override ──────────────────────────────────────
+   A second workbook for a deal we already hold is a fork in the road, and
+   the two branches produce different numbers. Until now the import took one
+   of them silently — it superseded whatever was there — so a user sending a
+   partial top-up file lost the earlier periods without being told.
+
+   Resolves to 'update' | 'override' | 'cancel'. Never resolves on its own:
+   the user has to choose, because defaulting here is the behaviour that was
+   wrong in the first place. */
+window.__confirmReimportMode = function(info){
+  return new Promise(function(resolve){
+    const money = n => (n == null ? '—' : Number(n).toLocaleString());
+    const when  = info.receivedAt ? new Date(info.receivedAt).toLocaleString() : 'unknown';
+    const wrap = document.createElement('div');
+    wrap.id = 'reimport-choice';
+    wrap.style.cssText = 'position:fixed; inset:0; z-index:1000002; background:rgba(15,23,42,0.55);' +
+      'display:flex; align-items:center; justify-content:center; padding:24px;';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff; border-radius:12px; max-width:680px; width:100%;' +
+      'box-shadow:0 24px 60px rgba(0,0,0,0.3); font-family:system-ui,-apple-system,sans-serif; overflow:hidden;';
+
+    const opt = (mode, title, body, tone) =>
+      '<button type="button" data-mode="' + mode + '" style="display:block; width:100%; text-align:left;' +
+      'padding:13px 15px; margin-bottom:9px; border:1px solid ' + (tone==='warn'?'#FCD34D':'#D6DCE8') + ';' +
+      'border-radius:8px; background:' + (tone==='warn'?'#FFFBEB':'#F8FAFF') + '; cursor:pointer;">' +
+      '<div style="font-weight:700; font-size:13.5px; color:#1E2761; margin-bottom:3px;">' + title + '</div>' +
+      '<div style="font-size:11.5px; color:#5A6070; line-height:1.45;">' + body + '</div></button>';
+
+    card.innerHTML =
+      '<div style="padding:18px 22px 10px;">' +
+        '<div style="font-size:16.5px; font-weight:700; color:#1E2761;">This deal already has data</div>' +
+        '<div style="font-size:12px; color:#5A6070; margin-top:5px; line-height:1.5;">' +
+          '<b>' + (info.dealName || info.externalDealId || 'This deal') + '</b> already holds snapshot <code>' +
+          (info.snapshotId || '—') + '</code> with <b>' + money(info.cashflowRows) + '</b> cashflow rows, ' +
+          'received ' + when + '.</div>' +
+      '</div>' +
+      (info.postedRuns
+        ? '<div style="margin:0 22px 12px; padding:10px 12px; background:#FEF2F2; border:1px solid #FCA5A5;' +
+          'border-radius:6px; font-size:11.5px; color:#991B1B; line-height:1.5;">' +
+          '<b>Accounting has already been posted for this deal.</b> Whichever option you choose, the ledger ' +
+          'will no longer tie to PCS until you re-run accounting and re-post.</div>'
+        : '') +
+      '<div style="padding:0 22px 6px;">' +
+        opt('update','Update — add to what is already here',
+            'Keeps every existing row and layers this workbook on top. Where a row covers the same tranche, ' +
+            'component and period, the new one replaces it. Use for a top-up or a correction.') +
+        opt('override','Override — replace with this workbook only',
+            'Everything currently held is set aside and only this workbook counts. The previous snapshot is ' +
+            'kept for history, not deleted. Use when this file is the complete picture.', 'warn') +
+      '</div>' +
+      '<div style="padding:4px 22px 18px; text-align:right;">' +
+        '<button type="button" data-mode="cancel" style="padding:8px 16px; border:1px solid #D6DCE8;' +
+        'border-radius:6px; background:#fff; cursor:pointer; font-size:12.5px; color:#5A6070;">Cancel import</button>' +
+      '</div>';
+
+    wrap.appendChild(card);
+    document.body.appendChild(wrap);
+    const finish = (m) => { try{ wrap.remove(); }catch(_){ } resolve(m); };
+    card.querySelectorAll('button[data-mode]').forEach(b => {
+      b.onclick = () => finish(b.getAttribute('data-mode'));
+    });
+    // Escape cancels. Clicking the backdrop does NOT — too easy to lose a
+    // parsed workbook by a stray click at the edge of the dialog.
+    const onKey = e => { if(e.key === 'Escape'){ document.removeEventListener('keydown', onKey); finish('cancel'); } };
+    document.addEventListener('keydown', onKey);
+  });
+};
+
 window.__portfImportCommit = async function(){
   const S = window._portfImport;
   if(!S.snapshot || S.errors.length) return;
@@ -23595,18 +23770,41 @@ window.__portfImportCommit = async function(){
   go.disabled = true;
   foot.textContent = 'Importing…';
   try {
-    const out = await window.importExternalSnapshot(S.snapshot, { warnings: S.warnings });
+    const out = await window.importExternalSnapshot(S.snapshot, {
+      warnings: S.warnings,
+      onExistingSnapshot: window.__confirmReimportMode
+    });
+    if(out && out.cancelled){
+      go.disabled = false;
+      foot.textContent = 'Import cancelled — nothing was changed.';
+      return;
+    }
     document.getElementById('portf-import-step-review').style.display = 'none';
     document.getElementById('portf-import-step-done').style.display = '';
     document.getElementById('portf-import-back').style.display = 'none';
     go.style.display = 'none';
     document.getElementById('portf-import-done-msg').textContent =
-      (out.created ? 'Created ' : 'Updated ') + (S.snapshot.facility.company || S.snapshot.externalDealId);
+      (out.created ? 'Created ' : (out.mode === 'update' ? 'Merged into ' : 'Replaced ')) +
+      (S.snapshot.facility.company || S.snapshot.externalDealId);
     const _snap = S.snapshot;
+    /* Say what the merge actually did. "Updated" on its own does not
+       distinguish 40 rows layered onto 900 from 40 rows that replaced 900 —
+       and those are very different ledgers. */
+    const _m = out.merge;
+    const _mergeLine = _m
+      ? `<br><b>Merged:</b> ${_m.keptFromPrior.toLocaleString()} row(s) kept, ` +
+        `${_m.replaced.toLocaleString()} replaced, ${_m.added.toLocaleString()} added — ` +
+        `${_m.totalRows.toLocaleString()} in total.` +
+        (_m.eventsCollapsed
+          ? `<br><span style="color:#B45309;">${_m.eventsCollapsed} duplicate movement(s) collapsed — ` +
+            `identical date, tranche, type and amount. Check this was a resend, not two real movements.</span>`
+          : '')
+      : '';
     document.getElementById('portf-import-done-sub').innerHTML =
       `${_snap.tranches.length} tranche${_snap.tranches.length===1?'':'s'} · ` +
       `${_snap.components.length} components · ${out.cashflowRows.toLocaleString()} cashflow rows` +
       (out.changes ? ` · ${out.changes} change${out.changes===1?'':'s'} against the previous snapshot` : '') +
+      _mergeLine +
       (out.postedAffected ? `<br><b style="color:#B45309;">${out.postedAffected} restated period(s) have already been posted to Investran — review before re-running accounting.</b>` : '') +
       `<br>Opening it in the Loan Builder…`;
 
@@ -23854,10 +24052,22 @@ window.externalSnapshotToBuilder = function(snap){
      they already sent and attributing it to the fee it belongs to. Without it
      the engine's deferred-income pool sees a fee of zero and no arrangement
      fee ever reaches the effective interest rate. */
+  /* Two callers, two row shapes. The import path hands over rows straight from
+     the parser (camelCase: postingType / externalComponentId); the deal loader
+     hands over rows straight from Supabase (snake_case: posting_type /
+     external_component_id). Reading only the camelCase names meant every row
+     from the loader failed the `=== 'fee'` test, the map stayed empty, and
+     every fee was mapped with no amount — which is what reported Fees £0 and
+     Effective yield 0.000% on a deal carrying £1.7m of fees.
+
+     Read both rather than normalising at one call site: this function is the
+     single place that knows what it needs, and a third caller tomorrow should
+     not have to discover this by watching a dashboard go to zero. */
   const _feeCashByComponent = {};
   (snap.cashflows || []).forEach(cf => {
-    if(cf.postingType !== 'fee') return;
-    const k = cf.externalComponentId;
+    const pt = cf.postingType != null ? cf.postingType : cf.posting_type;
+    if(String(pt || '').toLowerCase() !== 'fee') return;
+    const k = cf.externalComponentId != null ? cf.externalComponentId : cf.external_component_id;
     if(!k) return;
     _feeCashByComponent[k] = (_feeCashByComponent[k] || 0) + (+cf.amount || 0);
   });
@@ -23929,8 +24139,20 @@ window.loadExternalDeal = async function(dealId){
     events:     snapRow.events_jsonb     || []
   };
 
-  const built = window.externalSnapshotToBuilder(snap);
-  if(!built) throw new Error('Snapshot could not be mapped');
+  /* The mapping used to happen HERE, before the cashflows were fetched — and
+     under v0.4/v0.5 a fee's AMOUNT lives on the Cashflows sheet, not on
+     Components. externalSnapshotToBuilder sums each fee from its own cashflow
+     rows, so with snap.cashflows still undefined every fee mapped to
+     flatAmount 0 / pct 0.
+
+     The consequence was not a missing fee chip. It was: no yield-integral fee
+     reached the engine, so amortization.method fell to 'none', so no EIR was
+     ever solved, so the Dashboard reported Effective yield 0.000% ("none"),
+     Fees earned £0 and Total income £0 — on a deal whose feed carries
+     £1.7m of fees. The Cashflow tab looked right throughout because it reads
+     the feed directly and never went through this mapping.
+
+     So the fetch now comes first and the mapping second. */
   _P.step('Loading the received cashflow schedule…');
 
   /* Pull the received schedule now rather than on first render, so the
@@ -23976,6 +24198,25 @@ window.loadExternalDeal = async function(dealId){
   /* A failure partway through leaves a partial schedule that looks whole.
      Say so rather than letting the tab total a fragment. */
   const cfLoadError = cfErr ? (cfErr.message || String(cfErr)) : null;
+
+  /* Now the fees can be priced from the schedule that was actually received. */
+  _P.step('Mapping deal, tranches and fees…');
+  snap.cashflows = rows;
+  const built = window.externalSnapshotToBuilder(snap);
+  if(!built) throw new Error('Snapshot could not be mapped');
+  /* Loud, because a silent zero here is what produced a dashboard of zeros for
+     weeks. A deal that genuinely has no fees logs 0 of 0 and is fine; a deal
+     with fee components and no amounts is not. */
+  (function(){
+    const fees = built.fees || [];
+    const priced = fees.filter(f => (+f.flatAmount || 0) !== 0 || (+f.pct || 0) !== 0).length;
+    if(fees.length && !priced){
+      console.warn('[ext] ' + fees.length + ' fee component(s) mapped with NO amount — ' +
+        'the Cashflows sheet carries no rows for them, so fee income and the EIR will read zero.');
+    } else {
+      console.log('[ext] fees priced from the feed: ' + priced + ' of ' + fees.length);
+    }
+  })();
 
   window._externalDealCtx = {
     dealId: dealId,
@@ -25256,12 +25497,158 @@ async function _importExternalSnapshotInner(snap, opts){
   // 2 · Skip an unchanged re-import outright. Re-uploading the same workbook
   //     is a normal thing to do by accident; it should not churn the tables.
   const { data: current } = await sb.from('external_snapshots')
-    .select('id, content_hash, snapshot_id')
+    // cashflow_rows / received_at are read by the Update-or-Override prompt
+    // below, which has to state what is already held before the user chooses.
+    .select('id, content_hash, snapshot_id, cashflow_rows, received_at, ' +
+            'facility_jsonb, components_jsonb, tranches_jsonb, events_jsonb, checkpoints_jsonb')
     .eq('deal_id', deal.id).eq('is_current', true).maybeSingle();
 
   if(current && current.content_hash === snap.contentHash){
     return { created, dealId: deal.id, unchanged: true,
              cashflowRows: snap.cashflows.length, changes: 0, postedAffected: 0 };
+  }
+
+  /* 2b · Update or Override.
+     Only asked when there is genuinely something to lose: an existing current
+     snapshot whose content differs from this file. A first import, or a
+     byte-identical re-upload (returned above), asks nothing.
+
+     The caller supplies the prompt — the importer must stay usable from the
+     pull poller and from tests, neither of which has a user to ask. When no
+     prompt is supplied the historic behaviour applies, which is 'override'. */
+  let importMode = opts.mode || null;
+  if(current && !importMode && typeof opts.onExistingSnapshot === 'function'){
+    // Tell the user what is already posted before they choose, not after.
+    const { count: postedRuns } = await sb.from('accounting_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('deal_id', deal.id).in('status', ['Posted','Approved']);
+    if(window.PCSLoad && window.PCSLoad.pause) window.PCSLoad.pause();
+    importMode = await opts.onExistingSnapshot({
+      dealId: deal.id,
+      dealName: (snap.facility && snap.facility.company) || null,
+      externalDealId: snap.externalDealId,
+      snapshotId: current.snapshot_id,
+      cashflowRows: current.cashflow_rows,
+      receivedAt: current.received_at,
+      postedRuns: postedRuns || 0
+    });
+    if(importMode === 'cancel' || !importMode){
+      return { created, dealId: deal.id, cancelled: true, unchanged: false,
+               cashflowRows: 0, changes: 0, postedAffected: 0 };
+    }
+  }
+  if(!importMode) importMode = 'override';
+
+  /* 2c · Update — carry the existing snapshot forward and lay this file on top.
+     The result is still a NEW immutable snapshot containing the merged set,
+     not an append to the old one. That keeps every reader unchanged (they are
+     all scoped by snapshot_id already), leaves the pre-merge state intact for
+     history, and makes the merge itself reversible.
+
+     Conflicts resolve to the NEW row. Keeping both would double-count: a
+     corrected resend of one period would add its interest a second time, and
+     nothing on screen would say so. */
+  let _mergeStats = null;
+  if(importMode === 'update' && current){
+    _P.step('Merging with the existing snapshot…');
+    /* Paged. PostgREST caps a response at 1,000 rows and returns a short page
+       with no error, so an unpaged read of a large prior snapshot would drop
+       everything past the first thousand — and in a merge that reads as
+       "those rows were never there", silently deleting them. */
+    const MPAGE = 1000;
+    const prior = [];
+    for(let from = 0; ; from += MPAGE){
+      const { data: pg, error: pErr } = await sb.from('external_cashflows')
+        .select('flow_date, external_tranche_id, external_component_id, drawdown_lot_id, posting_type, ' +
+                'settlement_type, balance_basis, is_flat, days_covered, days_covered_stated, ' +
+                'period_start, period_end, verification_status, basis_balance, rate, amount, cash_settled')
+        .eq('snapshot_id', current.id)
+        .order('flow_date', { ascending:true }).order('id', { ascending:true })
+        .range(from, from + MPAGE - 1);
+      if(pErr) throw pErr;
+      const got = pg || [];
+      prior.push.apply(prior, got);
+      if(got.length < MPAGE) break;
+    }
+
+    // Back to the parser's shape so everything downstream is unchanged.
+    const asSnapRow = r => ({
+      date: r.flow_date,
+      externalTrancheId: r.external_tranche_id === '(facility)' ? null : r.external_tranche_id,
+      externalComponentId: r.external_component_id,
+      drawdownLotId: r.drawdown_lot_id,
+      postingType: r.posting_type,
+      settlementType: r.settlement_type,
+      balanceBasis: r.balance_basis,
+      isFlat: !!r.is_flat,
+      daysCovered: r.days_covered,
+      daysCoveredStated: !!r.days_covered_stated,
+      periodStart: r.period_start,
+      periodEnd: r.period_end,
+      verificationStatus: r.verification_status,
+      basisBalance: r.basis_balance,
+      rate: r.rate,
+      amount: r.amount,
+      cashSettled: r.cash_settled
+    });
+
+    /* What makes two cashflow rows "the same charge". Period is part of the
+       key, not just the flow date — one component can settle twice on a date
+       for different periods, and collapsing those would lose money. */
+    const cfKey = r => [
+      r.externalTrancheId || '(facility)',
+      r.externalComponentId || '',
+      r.postingType || '',
+      r.periodStart || '',
+      r.periodEnd || '',
+      r.date || ''
+    ].join('|');
+
+    const bag = new Map();
+    prior.forEach(r => { const s = asSnapRow(r); bag.set(cfKey(s), s); });
+    let replaced = 0, added = 0;
+    (snap.cashflows || []).forEach(r => {
+      if(bag.has(cfKey(r))) replaced++; else added++;
+      bag.set(cfKey(r), r);
+    });
+    snap.cashflows = Array.from(bag.values())
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+
+    const mergeBy = (oldArr, newArr, keyFn) => {
+      const m = new Map();
+      (Array.isArray(oldArr) ? oldArr : []).forEach(x => m.set(keyFn(x), x));
+      (Array.isArray(newArr) ? newArr : []).forEach(x => m.set(keyFn(x), x));
+      return Array.from(m.values());
+    };
+    snap.tranches = mergeBy(current.tranches_jsonb, snap.tranches,
+      x => x.externalTrancheId || x.sourceKey || JSON.stringify(x));
+    snap.components = mergeBy(current.components_jsonb, snap.components,
+      x => x.externalComponentId || x.sourceKey || JSON.stringify(x));
+    /* Movements are deduped on date + tranche + type + amount. Two genuinely
+       identical movements on one day therefore collapse into one — which is
+       the safe direction: the alternative is a resent file doubling the
+       balance every account then accrues on. Reported, not hidden. */
+    const evKey = x => [x.eventDate, x.externalTrancheId || '', x.eventType || '', x.amount].join('|');
+    const evBefore = (Array.isArray(current.events_jsonb) ? current.events_jsonb.length : 0) +
+                     (Array.isArray(snap.events) ? snap.events.length : 0);
+    snap.events = mergeBy(current.events_jsonb, snap.events, evKey);
+    const evCollapsed = evBefore - snap.events.length;
+    snap.balanceCheckpoints = mergeBy(current.checkpoints_jsonb, snap.balanceCheckpoints,
+      x => [x.date, x.externalTrancheId || ''].join('|'));
+    // Facility terms are one object, not a set — the new file wins outright.
+
+    /* snapshot_id is unique per deal and derived from the parse, so a merged
+       result must not reuse the incoming file's id: re-importing that same
+       file later would collide and fail on a duplicate key. The suffix also
+       makes the merge visible wherever the snapshot id is displayed. */
+    snap.snapshotId = String(snap.snapshotId || 'snap') + '+upd' + Date.now().toString(36);
+
+    _mergeStats = { mode:'update', priorRows: prior.length, replaced, added,
+                    keptFromPrior: prior.length - replaced,
+                    totalRows: snap.cashflows.length, eventsCollapsed: evCollapsed };
+    console.log('[portf] update-merge: kept ' + _mergeStats.keptFromPrior + ', replaced ' + replaced +
+                ', added ' + added + ' → ' + snap.cashflows.length + ' rows' +
+                (evCollapsed ? ' · ' + evCollapsed + ' duplicate movement(s) collapsed' : ''));
   }
 
   /* 3 · New snapshot row.
@@ -25352,9 +25739,21 @@ async function _importExternalSnapshotInner(snap, opts){
   //     marker, so this is the only way a corrected prior period is visible.
   let changes = 0, postedAffected = 0;
   if(current){
-    const { data: prior } = await sb.from('external_cashflows')
-      .select('flow_date, external_tranche_id, external_component_id, drawdown_lot_id, amount')
-      .eq('snapshot_id', current.id);
+    /* Paged for the same reason as the merge read above: an unpaged select
+       stops at 1,000 rows with no error, and every row past that would be
+       reported as "added" on a deal that merely has a long schedule. */
+    const DPAGE = 1000;
+    const prior = [];
+    for(let from = 0; ; from += DPAGE){
+      const { data: pg } = await sb.from('external_cashflows')
+        .select('flow_date, external_tranche_id, external_component_id, drawdown_lot_id, amount')
+        .eq('snapshot_id', current.id)
+        .order('flow_date', { ascending:true }).order('id', { ascending:true })
+        .range(from, from + DPAGE - 1);
+      const got = pg || [];
+      prior.push.apply(prior, got);
+      if(got.length < DPAGE) break;
+    }
 
     if(prior){
       const key = r => [r.flow_date || r.date, r.external_tranche_id || r.externalTrancheId || '(facility)',
@@ -25421,6 +25820,7 @@ async function _importExternalSnapshotInner(snap, opts){
   if(promErr) throw promErr;
 
   return { created, dealId: deal.id, snapshotRowId: snapRow.id, unchanged: false,
+           mode: importMode, merge: _mergeStats,
            cashflowRows: rows.length, changes, postedAffected };
 
   } catch(err){
@@ -31828,9 +32228,167 @@ function renderECLTrace(inst, summary){
   const allowLabel   = fw.ecl.model === 'cecl'   ? 'Allowance for Credit Losses (Contra-Asset)'
                     : fw.ecl.model === 'incurred' ? 'Loan Loss Allowance (Contra-Asset)'
                                                    : 'Loan Loss Allowance (Contra-Asset)';
-  const journalPair = expectedLoss > 0
+  /* ─── Period-by-period allowance, and the entries actually posted ────────
+     This used to print ONE "Resulting JE pair (period close)" carrying the
+     closing allowance. That is not what reaches the ledger: the engine
+     measures the allowance every day and posts the MOVEMENT at each reporting
+     date, so a deal can have dozens of pairs of varying sign. Showing a single
+     gross pair made the ledger look like one entry, and left the reader to
+     reconcile it against a trace that admitted a -£47,020 variance.
+
+     Built from the same two sources the ledger uses — the daily schedule for
+     the allowance, M.acctJournals for what was posted — so the table and the
+     GL cannot drift. Periods where the allowance did not move are listed with
+     an empty JE column rather than omitted: an allowance sitting flat for two
+     years is itself a fact worth seeing, and its absence from a list of
+     movements reads as missing data. */
+  const eclPeriodTable = (function(){
+    try {
+    const sched = (typeof M !== 'undefined' && Array.isArray(M.schedule)) ? M.schedule : null;
+    if(!sched || !sched.length) return '';
+
+    // Reporting grid: same default and same override the posting splitter uses.
+    const freq = (typeof window !== 'undefined' && window.__ECL_REPORTING_FREQ) || 'monthly';
+    const stepMonths = freq === 'annual' ? 12 : freq === 'semi-annual' ? 6 : freq === 'quarterly' ? 3 : 1;
+
+    const byDate = new Map();
+    for(const r of sched) if(r && r.date) byDate.set(String(r.date), r);
+    /* Coerced to String deliberately. A schedule row carrying a Date rather
+       than an ISO string makes `iso >= lastISO` compare a string against a
+       Date's text form — "2026-10-23" is never >= "Fri Sep 07 2029", so the
+       loop below never terminates and freezes the tab. That is exactly what
+       happened the first time this ran. */
+    const firstISO = String(sched[0].date || '');
+    const lastISO  = String(sched[sched.length - 1].date || '');
+    const d0 = parseISO(firstISO);
+    if(!d0 || !lastISO || !(stepMonths > 0)) return '';
+
+    const ends = [];
+    /* Hard bound as well as the date test. 2000 monthly periods is ~166 years —
+       far beyond any real facility — so hitting it means the termination
+       condition is wrong, and stopping with a short table beats hanging the
+       browser while the reader waits for an evidence pack. */
+    for(let i = 1; i <= 2000; i++){
+      const d = new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth() + i * stepMonths, d0.getUTCDate()));
+      if(isNaN(d.getTime())) break;
+      const iso = d.toISOString().slice(0, 10);
+      if(iso >= lastISO) break;
+      ends.push(iso);
+    }
+    ends.push(lastISO);                       // the close to zero lands here
+
+    /* A period end on a non-schedule day (weekend, holiday roll) walks back up
+       to 7 days — the same tolerance the splitter applies, so the two agree. */
+    const rowAt = (iso) => {
+      let d = parseISO(iso);
+      for(let k = 0; k < 8 && d; k++){
+        const key = d.toISOString().slice(0, 10);
+        if(byDate.has(key)) return byDate.get(key);
+        d = new Date(d.getTime() - 86400000);
+      }
+      return null;
+    };
+
+    // What actually reached the ledger, keyed by effective date.
+    const posted = new Map();
+    const J = (typeof M !== 'undefined' && Array.isArray(M.acctJournals)) ? M.acctJournals : [];
+    for(const j of J){
+      if(!/ECL|Impairment|Loan Loss/i.test(j.transactionType || '')) continue;
+      if(!j.isDebit) continue;                // one row per pair; the DR carries the sign
+      const k = j.effectiveDate;
+      posted.set(k, (posted.get(k) || 0) + (+j.originalAmount || 0));
+    }
+
+    /* Display cap. A daily-grid 37-year facility yields hundreds of periods and
+       the panel is for reading, not export — and an unbounded row count is how
+       a rendering helper turns into a frozen tab. */
+    const ROW_CAP = 480;
+    const truncated = ends.length > ROW_CAP;
+    if(truncated) ends.length = ROW_CAP;
+
+    let prev = 0, cumCharge = 0, movements = 0;
+    const body = ends.map(iso => {
+      const r = rowAt(iso);
+      if(!r) return '';
+      const allowance = +r.eclAllowance || 0;
+      const bal       = +r.balance || 0;
+      const move      = allowance - prev;
+      const open      = prev;
+      prev = allowance;
+      const hasJE = Math.abs(move) > 0.005;
+      if(hasJE){ movements++; cumCharge += move; }
+      const pj = posted.has(iso) ? posted.get(iso) : null;
+      /* Posted and derived should agree. Where they do not, say so on the row
+         rather than letting the reader assume the table is the ledger. */
+      const mismatch = hasJE && pj != null && Math.abs(pj - Math.abs(move)) > 0.01;
+      const jeCell = !hasJE
+        ? '<span class="text-gray-400">—</span>'
+        : (move > 0
+            ? 'DR 470000 / CR 145000'
+            : 'DR 145000 / CR 470000')
+          + (pj == null ? ' <span style="color:#B45309;" title="No matching journal found for this date — run accounting to post it">·&nbsp;not&nbsp;posted</span>'
+             : mismatch ? ' <span style="color:#DC2626;" title="Posted amount differs from the derived movement">·&nbsp;differs</span>'
+             : '');
+      return `<tr${hasJE ? '' : ' style="color:#94A3B8;"'}>
+        <td class="left text-[11.5px]">${iso}</td>
+        <td style="text-align:right" class="text-[11.5px]">${fmtMoney(bal, ccy)}</td>
+        <td style="text-align:right" class="text-[11.5px]">${fmtMoney(open, ccy)}</td>
+        <td style="text-align:right" class="text-[11.5px]${hasJE ? ' font-bold' : ''}">${hasJE ? (move > 0 ? '+' : '−') + fmtMoney(Math.abs(move), ccy) : '—'}</td>
+        <td style="text-align:right" class="text-[11.5px]">${fmtMoney(allowance, ccy)}</td>
+        <td class="left text-[11px]">${jeCell}</td>
+      </tr>`;
+    }).join('');
+
+    const tie = Math.abs(cumCharge - prev) <= 1.0;
+    return `
+      <div class="mt-3">
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <div class="font-semibold text-[11.5px]">Allowance by reporting period</div>
+          <span class="text-[10.5px] text-gray-500">${ends.length} period${ends.length === 1 ? '' : 's'} ·
+            ${freq} grid · ${movements} with a movement · ${movements * 2} journal line${movements * 2 === 1 ? '' : 's'}${
+            truncated ? ' · <b style="color:#B45309;">showing the first ' + ROW_CAP + ' periods</b>' : ''}</span>
+        </div>
+        <div style="max-height:360px; overflow:auto; border:0.5px solid #E2E8F0; border-radius:6px;">
+          <table class="data" style="width:100%">
+            <thead><tr>
+              <th class="left">Period end</th>
+              <th style="text-align:right">Balance (EAD)</th>
+              <th style="text-align:right">Opening allowance</th>
+              <th style="text-align:right">Movement</th>
+              <th style="text-align:right">Closing allowance</th>
+              <th class="left">Journal entry</th>
+            </tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+        <div class="text-[11px] mt-1" style="color:${tie ? '#15803D' : '#B45309'};">
+          ${tie
+            ? 'Roll-forward ties: movements sum to ' + fmtMoney(cumCharge, ccy) +
+              ' against a closing allowance of ' + fmtMoney(prev, ccy) + '.'
+            : 'Roll-forward does NOT tie: movements sum to ' + fmtMoney(cumCharge, ccy) +
+              ' against a closing allowance of ' + fmtMoney(prev, ccy) +
+              '. Investigate before relying on these figures.'}
+        </div>
+        <div class="text-[10.5px] text-gray-500 mt-1">
+          Movements are posted as ${expenseLabel} (470000) against ${allowLabel} (145000); a release reverses the pair.
+          Periods with no movement are listed for completeness and carry no entry.
+        </div>
+      </div>`;
+    } catch(err){
+      /* Never take the evidence pack down. A trace panel that fails to render
+         is a nuisance; one that throws mid-build leaves the whole pack blank
+         with nothing on screen explaining why. */
+      console.error('[ecl] period table failed:', err);
+      return '<div class="text-[11px] mt-3" style="color:#B45309;">Period-by-period allowance could not be built (' +
+             String(err && err.message || err).replace(/[<>]/g, '') + '). The single-period view below still applies.</div>';
+    }
+  })();
+
+  const journalPair = eclPeriodTable
+    || (expectedLoss > 0
     ? `<div class="bg-gray-50 border border-gray-200 rounded p-2 mt-3 text-[11px]">
          <div class="font-semibold mb-1">Resulting JE pair (period close)</div>
+         <div class="text-[10.5px] text-gray-500 mb-1">Single-period view — run accounting to see the full period-by-period series.</div>
          <table class="data" style="width:100%">
            <thead><tr><th class="left">Account</th><th class="left">Description</th><th>DR</th><th>CR</th></tr></thead>
            <tbody>
@@ -31839,7 +32397,7 @@ function renderECLTrace(inst, summary){
            </tbody>
          </table>
        </div>`
-    : '<div class="text-[11px] text-gray-500 italic mt-3">No allowance posted — instrument has no PD/LGD configured, balance is zero, or (ASPE) no impairment trigger.</div>';
+    : '<div class="text-[11px] text-gray-500 italic mt-3">No allowance posted — instrument has no PD/LGD configured, balance is zero, or (ASPE) no impairment trigger.</div>');
 
   $('ecl-trace').innerHTML = `
     <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-[12px]">
@@ -35571,10 +36129,33 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     const peakBalance = sched.length ? Math.max(...sched.map(r => +r.balance || 0)) : 0;
     const utilPct = commitment ? (peakBalance / commitment * 100) : 0;
 
-    // Interest / fee totals from summary.
-    const totalInterest = summary ? (+summary.totalCashAccrual || 0) : 0;
-    const totalFees     = summary ? (+summary.totalFees        || 0) : 0;
-    const totalIncome   = totalInterest + totalFees;
+    /* ─── Income: the feed, where there is one ───────────────────────────
+       On an imported deal PortF calculates and PCS accounts. Reporting income
+       from buildSchedule() here meant the Dashboard showed what PCS WOULD have
+       accrued rather than what was actually received — and on a deal whose
+       interest component carries no rate, that is £0 against a feed of
+       £29.5m. The two can legitimately differ even when both are populated,
+       so the source is now named on the card rather than left to be assumed. */
+    const _feedRows = (window.B && B.deal && B.deal.source === 'external' &&
+                       window._externalDealCtx && Array.isArray(window._externalDealCtx.cashflows))
+                        ? window._externalDealCtx.cashflows : null;
+    let totalInterest, totalFees, incomeSource;
+    if(_feedRows && _feedRows.length){
+      totalInterest = _feedRows.reduce((s, r) =>
+        s + (String(r.posting_type).toLowerCase() === 'interest' ? (+r.amount || 0) : 0), 0);
+      totalFees = _feedRows.reduce((s, r) =>
+        s + (String(r.posting_type).toLowerCase() === 'fee' ? (+r.amount || 0) : 0), 0);
+      incomeSource = 'received from ' + ((B.deal && B.deal.externalSystem) || 'PortF');
+    } else {
+      totalInterest = summary ? (+summary.totalCashAccrual || 0) : 0;
+      totalFees     = summary ? (+summary.totalFees        || 0) : 0;
+      incomeSource  = 'calculated by PCS';
+    }
+    const totalIncome = totalInterest + totalFees;
+    /* A partially-loaded feed totals a fragment. Said out loud, because a
+       number that reconciles to nothing is worse than a missing one. */
+    const _feedPartial = !!(window._externalDealCtx &&
+      (window._externalDealCtx.cashflowsTruncated || window._externalDealCtx.cashflowLoadError));
     // Days to maturity + life days.
     const dLife = sched.length;
     let dToMat = null;
@@ -35638,6 +36219,8 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
       +     '</div>'
       +     '<div style="font-size:28px; font-weight:600; color:var(--n-900); line-height:1.05; letter-spacing:-0.6px; font-variant-numeric:tabular-nums;">' + fmtMoneyDash(totalIncome, ccy) + '</div>'
       +     '<div style="font-size:11.5px; color:var(--n-500); margin-top:4px;">Interest ' + fmtMoneyDash(totalInterest, ccy) + ' · Fees ' + fmtMoneyDash(totalFees, ccy) + '</div>'
+      +     '<div style="font-size:10.5px; color:var(--n-400,#9CA3AF); margin-top:2px;">' + escapeHTML(incomeSource)
+      +       (_feedPartial ? ' · <span style="color:#B45309; font-weight:600;">partial schedule</span>' : '') + '</div>'
       +     sparkline(cumInterestSeries, { color: '#0F766E', h: 36 })
       +   '</div>'
       + '</div>';
@@ -35645,10 +36228,21 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     heroHTML += '</div>';
 
     // ── Secondary metrics strip — compact 5-6 cards below the hero row.
-    const yieldPct = (eirVal != null) ? (eirVal * 100).toFixed(3) + '%' : '—';
+    /* A solved yield of 0.000% and a yield that could not be solved are
+       different answers, and printing the method name underneath made the
+       second look like the first — "0.000% · effectiveInterestPrice" reads as
+       a rate that was calculated and came out at zero. When the schedule says
+       the figure is the coupon rather than an effective rate, say so. */
+    const _basis = (sched && sched.eirBasis) || null;
+    const _notSolved = !!(_basis && _basis.status !== 'calculated');
+    const yieldPct = _notSolved ? '—'
+                   : (eirVal != null) ? (eirVal * 100).toFixed(3) + '%' : '—';
+    const yieldSub = _notSolved
+      ? (_basis.status === 'refused' ? 'not applied — see Cashflow tab' : 'no effective rate solved')
+      : ((eir && (eir.eirMethodLabel || eir.method)) || '');
     const secondary = [
       { icon: 'ti-currency-dollar', label: 'Face value',     value: fmtMoneyDash(inst.faceValue, ccy), sub: ccy },
-      { icon: 'ti-target',          label: 'Effective yield', value: yieldPct, sub: (eir && (eir.eirMethodLabel || eir.method)) || '' },
+      { icon: 'ti-target',          label: 'Effective yield', value: yieldPct, sub: yieldSub },
       { icon: 'ti-calendar-event',  label: 'Days to maturity', value: dToMat != null ? dToMat.toLocaleString() : '—', sub: inst.maturityDate || '' },
       { icon: 'ti-scale-outline',   label: 'Framework',      value: escapeHTML(fw.label), sub: escapeHTML(fw.ecl && fw.ecl.name || '') },
       { icon: 'ti-briefcase',       label: 'Legal entity',   value: escapeHTML(inst.legalEntity || '—'), sub: 'Counterparty' }
@@ -36279,6 +36873,12 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
       const out = [];
       const insFees = Array.isArray(inst.fees) ? inst.fees : [];
       for(const f of insFees){
+        /* A yield-integral fee is deferred at t0 and accreted back daily as
+           dailyEIRAccretion, which this chart already counts via q.eirFees.
+           Emitting it here as well books the same fee twice — £750,000 of
+           arrangement fee showing as £1.5m of income. It belongs to the yield,
+           not to point-in-time fee income. */
+        if(/EIR$/.test(String(f.ifrs || ''))) continue;
         const isFlat  = (f.mode === 'fixed' || f.mode === 'flat' || f.mode === 'fixAmount');
         const isPct   = (f.mode === 'percent' || f.mode === 'fixPct' || f.mode === 'rate_of_principal' || f.mode === 'rate_of_commitment');
         const base    = inst.commitment || inst.faceValue || 0;
@@ -36291,7 +36891,15 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
         const anchor = new Date(first + 'T12:00:00');
         const stopAt = new Date(endDate + 'T12:00:00');
         const freq = (f.frequency || 'one_time').toLowerCase();
-        if(freq === 'one_time' || freq === 'onetime' || freq === 'once'){
+        /* 'oneOff' is the vocabulary the external importer uses (_EXT_FEEFREQ
+           maps both oneOff and atMaturity to it). It was missing from this
+           list, so a one-off fee fell through to the recurring branch below,
+           where an unrecognised frequency defaults to ANNUAL — repeating a
+           single £750,000 arrangement fee once a year for the life of the
+           deal. On Smokey that painted £18,971,089 of fees against a feed
+           carrying £1,724,644. Invisible until the fee amounts were fixed,
+           because until then every amount here was zero. */
+        if(freq === 'one_time' || freq === 'onetime' || freq === 'once' || freq === 'oneoff'){
           if(anchor >= new Date(startDate + 'T00:00:00') && anchor <= stopAt){
             out.push({ date: first, amount: perPay });
           }
@@ -36309,7 +36917,14 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
       }
       return out.sort((a,b) => a.date.localeCompare(b.date));
     }
-    const feePayments = _feePaymentsBetween(
+    /* This helper exists for fees the daily schedule does NOT carry. Where the
+       engine already accrues them — which it does for flat fees on their
+       payment date — adding them again books the same income twice: Smokey's
+       £974,644 of IFRS 15 fees appeared in both, painting £2,699,289 against
+       a feed of £1,724,644. So it only contributes when the schedule carries
+       no fee accrual at all. */
+    const _dailyFeeTotal = quarterly.reduce((s, q) => s + (q.fees || 0), 0);
+    const feePayments = _dailyFeeTotal > 0.005 ? [] : _feePaymentsBetween(
       quarterly[0].startDate,
       quarterly[quarterly.length-1].endDate || quarterly[quarterly.length-1].startDate
     );
@@ -36330,11 +36945,54 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     // each stream distinctly. Interest = engine-computed daily cash interest +
     // PIK + default interest. Fees = engine-computed daily fee accruals (EIR
     // amortisation) + lump-sum point-in-time fee payments derived from inst.fees.
+    /* On an imported deal the lines come from the FEED, same as the totals.
+       They used to come from the engine's own accrual, and on a workbook that
+       states no interest rate that accrual is zero — so the chart drew a flat
+       £0 interest line directly beneath a card reading £29,576,625. Two
+       sources on one chart, with nothing saying which was which.
+
+       Bucketed by the quarter each received row falls in, so the line is the
+       received schedule accumulating, not a re-derivation of it. */
+    const _feedRows = (window.B && B.deal && B.deal.source === 'external' &&
+                       window._externalDealCtx && Array.isArray(window._externalDealCtx.cashflows))
+                        ? window._externalDealCtx.cashflows : null;
+    let feedIntByQ = null, feedFeeByQ = null;
+    if(_feedRows && _feedRows.length){
+      feedIntByQ = new Array(quarterly.length).fill(0);
+      feedFeeByQ = new Array(quarterly.length).fill(0);
+      const idxFor = (iso) => {
+        if(!iso) return -1;
+        const d = new Date(String(iso).slice(0, 10) + 'T12:00:00');
+        if(isNaN(d.getTime())) return -1;
+        const y = d.getFullYear(), q = Math.floor(d.getMonth() / 3) + 1;
+        let i = quarterly.findIndex(x => x.year === y && x.quarter === q);
+        if(i < 0) i = quarterly.findIndex(x => x.year > y || (x.year === y && x.quarter > q));
+        /* A row dated before the first bucket belongs in the first, not the
+           last — findIndex returning -1 for an early date would otherwise dump
+           it at the end and kink the curve upward at maturity. */
+        if(i < 0) i = (y < quarterly[0].year) ? 0 : quarterly.length - 1;
+        return i;
+      };
+      for(const r of _feedRows){
+        const i = idxFor(r.flow_date || r.period_end);
+        if(i < 0) continue;
+        const amt = +r.amount || 0;
+        const pt = String(r.posting_type || '').toLowerCase();
+        if(pt === 'interest') feedIntByQ[i] += amt;
+        else if(pt === 'fee') feedFeeByQ[i] += amt;
+      }
+    }
+
     let cumInt = 0, cumFee = 0;
     const interestPts = [], feesPts = [];
     quarterly.forEach((q, i) => {
-      cumInt += (q.interest || 0) + (q.pik || 0) + (q.defaultInt || 0);
-      cumFee += (q.fees || 0) + (q.eirFees || 0) + (feeByQuarterIdx[i] || 0);
+      if(feedIntByQ){
+        cumInt += feedIntByQ[i] || 0;
+        cumFee += feedFeeByQ[i] || 0;
+      } else {
+        cumInt += (q.interest || 0) + (q.pik || 0) + (q.defaultInt || 0);
+        cumFee += (q.fees || 0) + (q.eirFees || 0) + (feeByQuarterIdx[i] || 0);
+      }
       const x = padL + i * xStep;
       interestPts.push({ x, cum: cumInt });
       feesPts.push({ x, cum: cumFee });
@@ -36493,10 +37151,23 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     // right-hand line — so the strip and the axis tell the same story). Fees
     // include BOTH engine-computed daily accruals (EIR-amortised fees) AND the
     // lump-sum point-in-time fees we just derived from inst.fees.
-    const totalInterest    = quarterly.reduce((s, q) => s + (q.interest || 0) + (q.pik || 0) + (q.defaultInt || 0), 0);
+    let totalInterest    = quarterly.reduce((s, q) => s + (q.interest || 0) + (q.pik || 0) + (q.defaultInt || 0), 0);
     const totalFeesDaily   = quarterly.reduce((s, q) => s + (q.fees || 0) + (q.eirFees || 0), 0);
     const totalFeesPointIn = feePayments.reduce((s, p) => s + (+p.amount || 0), 0);
-    const totalFees        = totalFeesDaily + totalFeesPointIn;
+    let totalFees        = totalFeesDaily + totalFeesPointIn;
+    /* Same rule as the KPI card above: on an imported deal the received
+       schedule is the income, not PCS's re-derivation of it. Kept in step
+       deliberately — the strip and the card disagreeing is worse than either
+       being wrong, because then neither can be trusted. */
+    const _cfFeed = (window.B && B.deal && B.deal.source === 'external' &&
+                     window._externalDealCtx && Array.isArray(window._externalDealCtx.cashflows))
+                      ? window._externalDealCtx.cashflows : null;
+    if(_cfFeed && _cfFeed.length){
+      totalInterest = _cfFeed.reduce((s, r) =>
+        s + (String(r.posting_type).toLowerCase() === 'interest' ? (+r.amount || 0) : 0), 0);
+      totalFees = _cfFeed.reduce((s, r) =>
+        s + (String(r.posting_type).toLowerCase() === 'fee' ? (+r.amount || 0) : 0), 0);
+    }
     const totalIncome      = totalInterest + totalFees;
     const summaryChips = [
       { label:'Peak balance',   value: fmtMoneyDash(peakBal, ccy),      color:'#21295C' },
@@ -36509,7 +37180,7 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
 
     return `<div class="chart-card" style="grid-column:span 2">
       <div class="chart-card-title">Loan Balance, Interest & Fees</div>
-      <div class="chart-card-sub">Navy = principal balance (left axis) · teal = cumulative interest accrued · amber = cumulative fees earned (both right axis). Dots on the balance line mark drawdowns / paydowns — hover for details.</div>
+      <div class="chart-card-sub">Navy = principal balance (left axis) · teal = cumulative interest accrued · amber = cumulative fees earned (both right axis). Dots on the balance line mark drawdowns / paydowns — hover for details.${_cfFeed && _cfFeed.length ? ' <b>Interest and fees — both the totals and the plotted lines — are the amounts received from ' + ((B.deal && B.deal.externalSystem) || 'PortF') + '</b>, accumulated by quarter. The navy balance line remains PCS’s own derivation from the movements.' : ''}</div>
       <!-- Summary stat strip -->
       <div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px;">
         ${summaryChips.map(c => `
