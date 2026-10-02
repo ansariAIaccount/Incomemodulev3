@@ -1161,13 +1161,22 @@ function buildSchedule(instr){
   const totalLifeDays = Math.max(1, Math.round((maturity - settle)/ONE_DAY));
   // For IFRS9-EIR fees: deferred income at t0 = sum(flat one-off) + 0 (% accrue daily over life)
   let deferredEIRPool = 0;
+  /* On a facility that is undrawn at settlement the fee cannot reduce a
+     carrying amount that is still nil — doing so opens the asset at MINUS the
+     fee, which is not a conservative presentation but an impossible one, and
+     it sends the EIR solve looking for a yield on a negative investment. The
+     reduction is held here and applied on the first drawdown instead, which is
+     also when the deferred fee liability is released. */
+  const _drawnAtSettle = balance > 0.005;
+  let pendingEIRFeeOffset = 0;
   for(const f of fees){
     // Accept both 'flat' (engine-native) and 'fixed' (v3 builder mapping of 'fixAmount').
     if(/EIR$/.test(f.ifrs || '') && (f.mode === 'flat' || f.mode === 'fixed') && f.frequency === 'oneOff'){
       deferredEIRPool += (f.amount || 0);
       // Reduce initial carrying value by the deferred fee (cash received at signing
       // is offset against carrying amount; it accretes back into interest income).
-      carryingValue -= (f.amount || 0);
+      if(_drawnAtSettle) carryingValue -= (f.amount || 0);
+      else               pendingEIRFeeOffset += (f.amount || 0);
     } else if(/EIR$/.test(f.ifrs || '') && f.mode === 'percent' && f.frequency === 'oneOff'){
       const baseAmt = ((b)=>{
         if(b==='commitment') return commitment;
@@ -1178,7 +1187,8 @@ function buildSchedule(instr){
       })(f.base);
       const oneOff = baseAmt * (f.rate || 0);
       deferredEIRPool += oneOff;
-      carryingValue -= oneOff;
+      if(_drawnAtSettle) carryingValue -= oneOff;
+      else               pendingEIRFeeOffset += oneOff;
     }
   }
   /* IFRS 9 measures a financial asset initially at fair value PLUS directly
@@ -1335,9 +1345,19 @@ function buildSchedule(instr){
        against the headline price. Solving on the price alone and then releasing
        the fee separately produces two half-answers: a yield that ignores the
        fee, and a fee release that ignores the yield. */
+    /* An undrawn facility has an opening carrying amount of nil, so this used
+       to fall through to face value and solve a yield that ignored the fee
+       entirely. The amount at risk is what will be advanced, net of the fee
+       already held — 100m drawn against a 2m fee is 98m invested. */
+    const _firstDrawAmt = (!_drawnAtSettle)
+      ? events.filter(e => e && e.type === 'draw' && e.date > toISO(settle))
+              .reduce((a, e) => a + (+e.amount || 0), 0)
+      : 0;
     const eirT0 = eirOpeningCarrying > 0
       ? eirOpeningCarrying
-      : (instr.purchasePrice || instr.faceValue || 0);
+      : (_firstDrawAmt > 0
+           ? Math.max(1, _firstDrawAmt - pendingEIRFeeOffset)
+           : (instr.purchasePrice || instr.faceValue || 0));
 
     /* Horizon: the EXPECTED life, not the contractual one. IFRS 9 spreads the
        yield over the period the instrument is expected to be held, and on a
@@ -1345,9 +1365,19 @@ function buildSchedule(instr){
        Falls back to contractual maturity when nothing was stated. */
     const expISO = instr.expectedRedemptionDate || null;
     const expDate = expISO ? parseISO(expISO) : null;
-    const horizonDays = (expDate && expDate > settle && expDate <= maturity)
-      ? Math.round((expDate - settle)/ONE_DAY)
-      : totalDays;
+    /* On a facility undrawn at signing the effective rate is not earned from
+       the signing date — there is nothing invested yet. It runs from the first
+       drawdown, on the amount advanced net of any fee held since signing.
+       Anchoring on settlement instead produced an EIR equal to the coupon with
+       the fee ignored entirely, and a carrying amount that drifted DOWN from 98
+       toward 97 over the life instead of accreting back to par. */
+    const _firstDrawDate = (!_drawnAtSettle)
+      ? (events.filter(e => e && e.date && e.type === 'draw' && e.date > toISO(settle))
+                .map(e => e.date).sort()[0] || null)
+      : null;
+    const eirStart = _firstDrawDate ? parseISO(_firstDrawDate) : settle;
+    const horizonEnd = (expDate && expDate > eirStart && expDate <= maturity) ? expDate : maturity;
+    const horizonDays = Math.max(1, Math.round((horizonEnd - eirStart)/ONE_DAY));
 
     // Build cashflows aligned to the scheduler's day-count: coupon annually + face at maturity.
     const yearsToMat = horizonDays / daysPerYear;
@@ -1382,7 +1412,9 @@ function buildSchedule(instr){
     for(const e of _pSched){
       if(!e || !e.date) continue;
       // Day-zero funding is already inside eirOpeningCarrying / eirOpeningBalance.
-      if(e.date <= _settleISO) continue;
+      // On a deferred-draw facility the walk starts at the first drawdown and
+      // opens with that balance, so movements on or before it are already in.
+      if(e.date <= (_firstDrawDate || _settleISO)) continue;
       const amt = +e.amount || 0;
       if(!amt) continue;
       const isDraw = (e.type === 'draw' || e.type === 'initialPurchase');
@@ -1394,8 +1426,14 @@ function buildSchedule(instr){
 
     const runCarrying = (y) => {
       let cv  = eirT0;
-      let bal = eirOpeningBalance || instr.faceValue || 0;
-      const d = new Date(settle);
+      /* Walk from the date the money actually went out. On a facility undrawn
+         at signing that is the first drawdown, with the balance already at the
+         drawn amount and the carrying amount at that figure net of the fee —
+         so the draw itself must NOT be applied again inside the loop. */
+      let bal = (!_drawnAtSettle && _firstDrawAmt > 0)
+        ? _firstDrawAmt
+        : (eirOpeningBalance || instr.faceValue || 0);
+      const d = new Date(eirStart);
       for(let k = 0; k <= horizonDays; k++){
         const iso = toISO(d);
         const delta = _deltaByDay[iso] || 0;
@@ -1825,6 +1863,15 @@ function lookupMarginBps(dateISO){
         // detection (otherwise balance/carryingValue would double-count).
         if(e._consumedAsInitial){ draw += e.amount; /* counted into starting balance */ }
         else { draw += e.amount; balance += e.amount; drawnBalance += e.amount; carryingValue += e.amount; }
+        /* First drawdown on a facility that was undrawn at settlement: this is
+           the moment the deferred fee stops being a liability and becomes a
+           reduction in the carrying amount of the asset. 100m drawn against a
+           2m fee held since signing carries at 98m from today, and the fee
+           accretes back through the EIR from here. Applied once. */
+        if(pendingEIRFeeOffset > 0 && balance > 0.005){
+          carryingValue -= pendingEIRFeeOffset;
+          pendingEIRFeeOffset = 0;
+        }
       }
       // 'repayment' is an alias for 'paydown' used by guarantee / equity-fund
       // examples — semantically clearer when reading the schedule.
@@ -3105,6 +3152,23 @@ const INVESTRAN_GL = {
   loanPikCapitalisation:  { account:'141000', accountName:'Investments at Cost', transType:'Purchase of investment - Notes - principal from capitalization' },
   loanOID:                { account:'141000', accountName:'Investments at Cost', transType:'Investment accretion - Original issue discount' },
   loanPIKAccretion:       { account:'141000', accountName:'Investments at Cost', transType:'Investment accretion - PIK interest' },
+  /* ─── Deferred fee liability (IFRS 9 §B5.4.1 / §B5.4.2) ───────────────
+     A fee that is integral to the effective interest rate, received BEFORE
+     any loan asset exists — an arrangement fee on signing, a commitment fee
+     on an undrawn facility where drawdown is probable — cannot be netted
+     against a carrying amount that is not there yet. Until first drawdown it
+     is a liability: cash the lender holds against a loan it has not made.
+
+     Posting it straight to income would recognise revenue for a service not
+     yet delivered; netting it against a nil asset would produce a negative
+     loan balance. Both are wrong, and the second is the one that quietly
+     looks plausible on a balance sheet. At drawdown the liability is released
+     against the loan asset, so amortised cost opens net of the fee and the
+     fee accretes back through the EIR over the life. */
+  deferredFeeLiability: { account:'211000', accountName:'Deferred Fee Liability (IFRS 9 §B5.4.1)',
+                          transType:'Deferred fee received – integral to EIR' },
+  deferredFeeRelease:   { account:'211000', accountName:'Deferred Fee Liability (IFRS 9 §B5.4.1)',
+                          transType:'Deferred fee released to loan asset on drawdown' },
   // ─── Receivables ──────────────────────────────────────────────
   interestReceivable:  { account:'113000', accountName:'Accounts Receivable', transType:'Interest receivable' },
   interestReceived:    { account:'113000', accountName:'Accounts Receivable', transType:'Interest received' },
@@ -3386,6 +3450,19 @@ function applyInvestranGLMapping(entries){
     if(/dividend.*receivable clear/.test(t))                       return INVESTRAN_GL.feeReceivedDividend;
     if(/dividend.*receivable/.test(t))                             return INVESTRAN_GL.feeReceivableDividend;
     if(/dividend income.*income \(ifrs 15\)|dividend.*\(ifrs 15\)/.test(t)) return INVESTRAN_GL.dividendIncome;
+    /* Deferred fee liability — checked BEFORE the generic fee patterns below,
+       which would otherwise catch "deferred fee received" on /receivable/ or
+       /fee income/ and route a liability to a receivable or to income. */
+    /* Order matters more than usual here. All four legs of the deferred-fee
+       pair carry "Deferred Fee" in the label, but only two of them belong to
+       the liability account — the other two are the cash received and the loan
+       asset it is released against. A bare /deferred fee/ rule sent all four
+       to 211000, producing a DR 211000 / CR 211000 pair twice over: a batch
+       that balances and says nothing. */
+    if(/deferred fee.*cash received/.test(t))                               return INVESTRAN_GL.cashReceipt;
+    if(/deferred fee.*loan asset/.test(t))                                  return INVESTRAN_GL.loanDrawdownInitial;
+    if(/deferred fee.*(release|drawdown)|release.*deferred fee/.test(t))    return INVESTRAN_GL.deferredFeeRelease;
+    if(/deferred fee/.test(t))                                              return INVESTRAN_GL.deferredFeeLiability;
     // Generic IFRS 15 fee / PortF fallback
     if(/income \(ifrs 15\)|fee income \(ifrs 15\)|income \(portf\)/.test(t)) return INVESTRAN_GL.feeIncome;
     if(/cash receipt/.test(t))                                     return INVESTRAN_GL.cashReceipt;
@@ -3443,6 +3520,60 @@ function generateDIU(instr, summary, opts){
       isDebit, leDomain: 'NWF'                    // NWF instead of generic Investran Global
     });
   };
+
+  /* ─── Fees received before any drawdown (IFRS 9 §B5.4.1) ───────────────────
+     An arrangement or commitment fee that is integral to the effective rate
+     and lands before the facility is drawn has no loan asset to net against.
+     Two moments, not one:
+
+       on receipt    DR Cash                      CR Deferred Fee Liability
+       on drawdown   DR Deferred Fee Liability    CR Loan Asset
+
+     After the release the asset opens at principal less the fee — 100m drawn
+     against a 2m fee carries at 98m — and the fee accretes back into interest
+     income over the life through the EIR, which is what makes it integral.
+
+     Only fired when the fee genuinely precedes the first draw. A fee paid on
+     the drawdown date itself needs no liability leg: the existing opening
+     carrying amount already nets it, and emitting both would double-count. */
+  (function emitDeferredFeeOnUndrawnFacility(){
+    const feesAll = Array.isArray(instr.fees) ? instr.fees : [];
+    if(!feesAll.length) return;
+    // First drawdown: an explicit draw in the schedule, else the settlement
+    // date when the loan was funded at inception.
+    const draws = (Array.isArray(instr.principalSchedule) ? instr.principalSchedule : [])
+      .filter(e => e && e.date && (e.type === 'draw' || e.type === 'initialPurchase'))
+      .map(e => e.date).sort();
+    const drawnAtSettle = (+instr.drawnInitially || 0) > 0 || !draws.length;
+    const firstDraw = drawnAtSettle ? instr.settlementDate : draws[0];
+    if(!firstDraw) return;
+    const base = (+instr.commitment || +instr.faceValue || 0);
+    for(const f of feesAll){
+      if(!f || !/EIR$/.test(f.ifrs || '')) continue;
+      if(f.frequency !== 'oneOff') continue;
+      const paid = f.paymentDate || instr.settlementDate;
+      if(!paid || paid >= firstDraw) continue;        // not an undrawn-period fee
+      const amt = (f.mode === 'flat' || f.mode === 'fixed')
+        ? (+f.amount || 0)
+        : ((+f.rate || 0) * base);
+      if(!(Math.abs(amt) > 0.005)) continue;
+      const label = f.label || f.kind || 'fee';
+      add('Deferred Fee — Cash Received', amt, true, '111000', paid,
+          label + ' received ' + paid + ' — no loan asset exists yet, so the fee is '
+          + 'carried as a liability rather than netted against a nil balance');
+      add('Deferred Fee Liability', amt, false, '211000', paid,
+          label + ' — integral to the effective interest rate (IFRS 9 §B5.4.1), '
+          + 'deferred until first drawdown');
+      jeIndex++;
+      add('Deferred Fee Release on Drawdown', amt, true, '211000', firstDraw,
+          label + ' released on first drawdown ' + firstDraw);
+      add('Deferred Fee — Loan Asset Adjustment', amt, false, '141000', firstDraw,
+          label + ' netted against the loan asset — amortised cost opens at '
+          + 'principal less the deferred fee, which then accretes back through the EIR');
+      jeIndex++;
+    }
+  })();
+
   // Interest pair
   if(summary.totalCashAccrual){
     // Direction fix: accrual JE is DR Receivable / CR Income (asset up, revenue
