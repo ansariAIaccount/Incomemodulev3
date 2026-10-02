@@ -11655,6 +11655,10 @@ window.SB = (function(){
   }
 
   // ─── Portfolio position (Investran deal / issuer / security master) ───
+  /* null = not yet established, true/false = the sent_to_pcs column is/isn't
+     present. Cached so a database without the migration costs one failed
+     upsert per session rather than one per save. */
+  let _ppSentColumn = null;
   async function fetchPortfolioPosition(dealId){
     if(!_client || !_connected || !dealId) return null;
     const { data, error } = await _client
@@ -11684,10 +11688,36 @@ window.SB = (function(){
       created_by:               _currentUser ? _currentUser.id : null,
       updated_at:               new Date().toISOString()
     };
-    const { data, error } = await _client
+    /* "Sent to PCS" — when the position records were created in Investran.
+       On the row rather than in localStorage so a second person opening the
+       deal can see it has already been pushed; the whole value of the mark is
+       that someone else acts on it. */
+    if(_ppSentColumn !== false) row.sent_to_pcs = pp.sentToPcs || null;
+
+    let { data, error } = await _client
       .from('deal_portfolio_position')
       .upsert(row, { onConflict: 'deal_id' })
       .select().single();
+
+    /* The column is new. Rather than make every save fail on a database that
+       has not had the migration, detect the one error that means "no such
+       column", drop the field and retry — once. A position card that will not
+       save is a much worse outcome than a label that does not persist, and the
+       console says exactly which it is. */
+    if(error && /sent_to_pcs/.test(error.message || '')){
+      _ppSentColumn = false;
+      console.warn('[SB] deal_portfolio_position.sent_to_pcs is missing — the ' +
+        '"sent to PCS" label will not persist across machines. Add it with:\n' +
+        '  alter table deal_portfolio_position add column sent_to_pcs jsonb;');
+      delete row.sent_to_pcs;
+      ({ data, error } = await _client
+        .from('deal_portfolio_position')
+        .upsert(row, { onConflict: 'deal_id' })
+        .select().single());
+    } else if(!error){
+      _ppSentColumn = true;
+    }
+
     if(error){ console.error('[SB] savePortfolioPosition:', error); return { ok:false, reason: error.message }; }
     return { ok:true, position: data };
   }
@@ -14082,7 +14112,11 @@ window.SB = (function(){
               security:             p.security,
               securityType:         p.security_type,
               securityCurrency:     p.security_currency,
-              notes:                p.notes
+              notes:                p.notes,
+              /* Undefined rather than null when the column is absent, so the
+                 card falls through to its localStorage mirror instead of
+                 treating "this database has no such column" as "never sent". */
+              sentToPcs:            p.sent_to_pcs || undefined
             };
           })()
         };
@@ -14594,6 +14628,10 @@ window.SB = (function(){
     fetchFunds, upsertFund, deleteFund,
     fetchLegalEntities, fetchLegalEntityAllocations, replaceLegalEntityAllocations,
     fetchPortfolioPosition, savePortfolioPosition,
+    /* Exported so callers outside this module can turn the in-memory deal into
+       a deals.id without re-implementing the three-column lookup. Underscore
+       kept: it is internal plumbing, not part of the friendly surface. */
+    _resolveDealId,
     fetchFundAllocations, upsertFundAllocation, deleteFundAllocation,
     replaceFundAllocationsForDeal,
     // Notice email delivery (Phase 2A)
@@ -17207,14 +17245,31 @@ window.__diuSubmit = async function(mode){
   // Posting writes to the tenant's ledger. Say what and where, then ask.
   if(mode === 'load'){
     const n = _diuPreview.glRows.length;
-    const ok = confirm(
-      'Post ' + n + ' journal row' + (n === 1 ? '' : 's') + ' to Investran?\n\n' +
-      'Tenant : goldenliveuat\n' +
-      'Batch  : ' + _diuPreview.batchCount + ' · status ' + _diuPreview.batchStatus + '\n' +
-      'Deal   : ' + (_diuPreview.inst && _diuPreview.inst.deal || '—') + '\n\n' +
-      'This writes to Investran. Batches arrive as ' + _diuPreview.batchStatus +
-      ', so nothing reaches the general ledger until approved there.'
-    );
+    /* A position load and a journal load are different kinds of write and the
+       prompt should not pretend otherwise. Positions CREATE master records —
+       deal, issuer, security — and there is no approval gate behind them: they
+       exist in the tenant the moment the job processes. Saying "nothing
+       reaches the general ledger until approved" would be true and completely
+       beside the point. */
+    const ok = _diuPreview.kind === 'position'
+      ? confirm(
+          'Create ' + n + ' position record' + (n === 1 ? '' : 's') + ' in Investran?\n\n' +
+          'Tenant   : goldenliveuat\n' +
+          'Template : ' + (function(){ try { const v = localStorage.getItem('pcs_v3_diu_position_template');
+                                             if(v && !isNaN(+v)) return +v; } catch(_){} return 318; })() + '\n' +
+          'Deal     : ' + (_diuPreview.inst && _diuPreview.inst.deal || '—') + '\n\n' +
+          'New lookup values WILL be created — deal, issuer and security records ' +
+          'that do not already exist are added to the tenant. There is no approval ' +
+          'step behind this: they are live as soon as the job processes.'
+        )
+      : confirm(
+          'Post ' + n + ' journal row' + (n === 1 ? '' : 's') + ' to Investran?\n\n' +
+          'Tenant : goldenliveuat\n' +
+          'Batch  : ' + _diuPreview.batchCount + ' · status ' + _diuPreview.batchStatus + '\n' +
+          'Deal   : ' + (_diuPreview.inst && _diuPreview.inst.deal || '—') + '\n\n' +
+          'This writes to Investran. Batches arrive as ' + _diuPreview.batchStatus +
+          ', so nothing reaches the general ledger until approved there.'
+        );
     if(!ok) return;
   }
 
@@ -17276,7 +17331,29 @@ window.__diuSubmit = async function(mode){
               try { const v = localStorage.getItem('pcs_v3_diu_position_template');
                     if(v && !isNaN(+v)) return +v; } catch(_){}
               return 318;
-            })() }
+            })(),
+            /* AddNewLookupValues is TRUE here and false for transactions, and
+               the difference is the whole point of the two paths.
+
+               On the transaction side, letting an import mint lookup values
+               would create GL accounts and transaction types on the fly — the
+               silent-mess outcome the chart-of-accounts mapping exists to
+               prevent. On the position side, creating the deal, issuer and
+               security records IS the job: they are the master data that later
+               journal entries resolve against, so a position import that
+               cannot add them can only ever re-state records that already
+               exist, which is the one thing you do not need it for.
+
+               Sent as a complete ImportJobOptions object because the proxy
+               treats it as a replacement, not a merge — omitting a key here
+               drops the proxy's default for it rather than inheriting it. */
+            importJobOptions: {
+              SkipOnError:            true,
+              AllowUpdates:           true,
+              AddNewLookupValues:     true,
+              IgnoreEmptyFields:      true,
+              IgnoreCriticalWarnings: false
+            } }
         : {}))
     })).json();
     if(!job.ok) throw new Error('Job creation failed — ' + JSON.stringify(job.error).slice(0,300));
@@ -17322,10 +17399,28 @@ window.__diuSubmit = async function(mode){
     const lres = await poll(ld.processId, 'Posting');
 
     if(lres.succeeded){
-      step('<i class="ti ti-circle-check"></i> <b>Posted.</b> ' + _diuPreview.glRows.length +
-           ' rows · job ' + job.jobId + ' · batch status ' + _diuPreview.batchStatus +
-           '. Approve in Investran to reach the general ledger.', 'ok');
-      toast('Posted ' + _diuPreview.glRows.length + ' JE rows to Investran', 6000, { kind:'success' });
+      if(_diuPreview.kind === 'position'){
+        /* Record the send against the deal. Only on a TERMINAL success — not
+           on validate, and not on a load that merely started — because a label
+           that says "sent" when nothing was created is worse than no label:
+           the next person reads it and skips the step. */
+        const n = _diuPreview.ppRows ? _diuPreview.ppRows.length : _diuPreview.glRows.length;
+        let mark = null;
+        try {
+          mark = window.__ppSetSentMark({ jobId: job.jobId, rows: n, templateId: job.templateId || null });
+        } catch(markErr){ console.warn('[DIU] sent-mark not stored:', markErr); }
+        step('<i class="ti ti-circle-check"></i> <b>Sent to PCS.</b> ' + n + ' position record' +
+             (n === 1 ? '' : 's') + ' created in Investran · job ' + job.jobId +
+             ' · template ' + (job.templateId || '—') +
+             '. They are live now — there is no approval step behind a position load.' +
+             (mark ? '' : '<br><span style="color:#B45309;">The send succeeded but the "sent" label could not be stored.</span>'), 'ok');
+        toast('Sent to PCS — ' + n + ' position record' + (n === 1 ? '' : 's') + ' created', 6000, { kind:'success' });
+      } else {
+        step('<i class="ti ti-circle-check"></i> <b>Posted.</b> ' + _diuPreview.glRows.length +
+             ' rows · job ' + job.jobId + ' · batch status ' + _diuPreview.batchStatus +
+             '. Approve in Investran to reach the general ledger.', 'ok');
+        toast('Posted ' + _diuPreview.glRows.length + ' JE rows to Investran', 6000, { kind:'success' });
+      }
     } else {
       const fb = await (await fetch(proxy + '/api/diu/processes/' + ld.processId + '/feedback')).json();
       __diuRenderFeedback(fb, ld.processId, lres.status);
@@ -17375,6 +17470,79 @@ window.__ppPreview = function(){
   window.__diuIssues = [];
   __diuShowPreviewModal();
   __diuPreviewRenderPosition(rows);
+};
+
+/* ─── "Sent to PCS" mark for the Investran position card ──────────────────
+   Keyed by deal, written on a successful position load, read on every render
+   of the card.
+
+   STORE: deal_portfolio_position.sent_to_pcs (jsonb), written on the send
+   itself rather than deferred to the next Save to DB — the records already
+   exist in Investran, and leaving the only record of that in one browser is
+   how two people push the same position twice. A position load has no approval
+   gate, so a duplicate push is a real cost rather than a harmless retry.
+
+   localStorage mirrors it, keyed by deal, for the window before a deal has
+   been saved to the database at all, and as a fallback on a database that has
+   not had the column added. __ppSentMark reads the in-memory copy, then the
+   mirror; savePortfolioPosition drops the field and retries once if the column
+   is missing, so an un-migrated database still saves positions normally and
+   says so in the console.
+
+   Shape: { at, jobId, rows, templateId }. Null/absent = never sent. */
+function __ppSentKey(){
+  const id = (window.B && B.deal && (B.deal.dealId || B.deal.name)) || '';
+  return id ? ('pcs_pp_sent:' + id) : null;
+}
+window.__ppSentMark = function(){
+  // In-session copy first (set by the send just now), then the stored one.
+  const onDeal = window.B && B.portfolioPosition && B.portfolioPosition.sentToPcs;
+  if(onDeal && onDeal.at) return onDeal;
+  const k = __ppSentKey();
+  if(!k) return null;
+  try {
+    const raw = localStorage.getItem(k);
+    if(raw) return JSON.parse(raw);
+  } catch(_){}
+  return null;
+};
+window.__ppSetSentMark = function(info){
+  const mark = Object.assign({ at: new Date().toISOString() }, info || {});
+  if(window.B){
+    B.portfolioPosition = B.portfolioPosition || {};
+    B.portfolioPosition.sentToPcs = mark;
+  }
+  const k = __ppSentKey();
+  if(k){ try { localStorage.setItem(k, JSON.stringify(mark)); } catch(_){} }
+
+  /* Persist immediately rather than waiting for the next Save to DB. The send
+     has already happened in Investran; leaving the record of it sitting in one
+     browser until someone remembers to save is how two people end up pushing
+     the same position twice. Fire-and-forget — a failure here must not make a
+     successful send look failed, so it logs and the local mirror still holds. */
+  (async function(){
+    try {
+      if(!(window.SB && SB.isConnected && SB.savePortfolioPosition && SB._resolveDealId)) return;
+      const dealId = await SB._resolveDealId(B.deal);
+      if(!dealId) return;
+      const res = await SB.savePortfolioPosition(dealId,
+        Object.assign({}, B.portfolioPosition || {}, { sentToPcs: mark }));
+      if(!res || !res.ok) console.warn('[pp] sent-mark not persisted:', res && res.reason);
+      else console.log('[pp] sent-mark persisted for deal', dealId);
+    } catch(err){ console.warn('[pp] sent-mark persist failed:', err); }
+  })();
+
+  // Repaint the card so the label appears without a reload.
+  try { if(typeof window.__ppRender === 'function') window.__ppRender(); } catch(_){}
+  try {
+    const chip = document.getElementById('pp-status-chip');
+    if(chip){
+      chip.textContent = 'sent to PCS';
+      chip.style.background = '#DBEAFE';
+      chip.style.color = '#1E40AF';
+    }
+  } catch(_){}
+  return mark;
 };
 
 /* Open the DIU preview modal from anywhere in the app.
@@ -40261,9 +40429,26 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const chip = $b('pp-status-chip');
     const ready = !!(pp.issuer && pp.security);
     if(chip){
-      chip.textContent = ready ? 'ready' : 'not set';
-      chip.style.background = ready ? '#DCFCE7' : '#F1F5F9';
-      chip.style.color      = ready ? '#166534' : '#475569';
+      /* "Sent" outranks "ready": once the records exist in Investran that is
+         the fact worth showing, and it must survive editing the card, moving
+         between deals and reloading the page. Re-reads the stored mark on
+         every render rather than trusting a flag set earlier in the session. */
+      const sent = window.__ppSentMark && window.__ppSentMark();
+      if(sent){
+        chip.textContent = 'sent to PCS';
+        chip.style.background = '#DBEAFE';
+        chip.style.color      = '#1E40AF';
+        chip.title = 'Position records created in Investran on ' +
+                     new Date(sent.at).toLocaleString() +
+                     (sent.jobId ? ' · job ' + sent.jobId : '') +
+                     (sent.rows ? ' · ' + sent.rows + ' row(s)' : '') +
+                     '\nEditing this card does not re-send — use Preview & send again.';
+      } else {
+        chip.textContent = ready ? 'ready' : 'not set';
+        chip.style.background = ready ? '#DCFCE7' : '#F1F5F9';
+        chip.style.color      = ready ? '#166534' : '#475569';
+        chip.title = '';
+      }
     }
     const box = $b('pp-le-preview');
     if(box){
