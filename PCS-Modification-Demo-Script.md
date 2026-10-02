@@ -1,25 +1,28 @@
 ---
 title: "PCS Loan Module — Demo Script"
-subtitle: "Four worked IFRS 9 examples — modifications and POCI"
-author: "FIS Private Capital Suite · Loan Module V4.14"
+subtitle: "Five worked IFRS 9 examples — modifications, POCI and integral fees"
+author: "FIS Private Capital Suite · Loan Module V4.17"
 date: "2 October 2026"
 ---
 
 # How to use this document
 
-Four internally-built deals, all IFRS. The first three demonstrate different
+Five internally-built deals, all IFRS. The first three demonstrate different
 kinds of change to contractual cash flows; the fourth demonstrates a purchased
-credit-impaired asset, which is measured on an entirely different basis. All are
-saved in the workspace and ready to open — no import step, no file to load.
+credit-impaired asset, measured on an entirely different basis; the fifth shows
+what happens to a fee that is integral to the effective rate, including the
+awkward case where it arrives before the loan does. All are saved in the
+workspace and ready to open — no import step, no file to load.
 
 Each section gives you: the business story, the exact screens to open in order,
 what to point at on each screen, and the accounting outcome to land. The figures
 quoted are the ones the module produces, verified against the engine.
 
-Total running time, all four deals, roughly **50 minutes**. Deal 1 alone is a
+Total running time, all five deals, roughly **60 minutes**. Deal 1 alone is a
 workable 12-minute demo if that is all you have; deals 1 and 4 together make the
 strongest 25-minute pairing, because they contrast the two completely different
-ways IFRS 9 handles a distressed borrower.
+ways IFRS 9 handles a distressed borrower. Deal 5 is the one to lead with for a
+finance audience that cares about revenue recognition rather than credit.
 
 | | Deal code | Shows |
 |---|---|---|
@@ -27,9 +30,10 @@ ways IFRS 9 handles a distressed borrower.
 | **2** | `DEMO-DEFER-PIK` | Twelve-month principal holiday; cash coupon splits to cash + PIK; EAD grows |
 | **3** | `DEMO-FORGIVE-S3` | Principal forgiveness, extension, covenant reset, fee into EIR |
 | **4** | `DEMO-POCI` | Distressed secondary purchase; credit-adjusted EIR; no day-one allowance |
+| **5** | `DEMO-FEES-EIR` | Integral fees; a fee received before drawdown; deferred fee liability |
 
-**Before you start.** Open the module, confirm the version banner reads V4.14 or
-later, and check the Active Deal dropdown lists all four deal names. If a deal
+**Before you start.** Open the module, confirm the version banner reads V4.17 or
+later, and check the Active Deal dropdown lists all five deal names. If a deal
 is missing, the workspace connection has dropped — reconnect before you begin
 rather than mid-demo.
 
@@ -673,6 +677,202 @@ everything downstream follows from the answer.
 
 ---
 
+# Deal 5 — Fees integral to the effective rate
+
+**`DEMO-FEES-EIR` · Pennine Infrastructure Partners · USD 100,000,000**
+
+## The story
+
+A 100,000,000 facility is committed on 1 January 2026 at 8% fixed, maturing 28
+February 2031. The borrower pays a 2% arrangement fee — 2,000,000 — on the
+commitment date. The facility is not drawn until **1 March**.
+
+Two months in which the lender holds the borrower's money and has made no loan.
+That gap is the entire reason this deal exists.
+
+## The idea to state first
+
+> A fee like this is not a sale. The lender has not delivered a service for
+> 2,000,000 — it has reduced the price of the loan it is about to make. IFRS 9
+> says so by folding the fee into the effective interest rate: the lender
+> advances 100,000,000 but is economically out only 98,000,000, and the
+> difference is earned as interest over five years, not as revenue in one day.
+
+Then the awkward question: **what is the fee on 15 January, when the money has
+arrived and the loan has not?** Not income — the yield has not been earned. Not a
+contra against the loan — there is no loan. It is a liability. That is the one
+point this deal exists to demonstrate, and most systems get it wrong by netting
+it against a nil asset and showing a negative loan balance.
+
+## Screen 1 · Loan Builder — the timeline
+
+**Open:** Stage 0 · Loan Builder, Deal Setup and the Tranche A drawdown card.
+
+**Point at three dates:**
+
+| | |
+|---|---|
+| Commitment / signing | 1 January 2026 |
+| Arrangement fee received | **1 January 2026** |
+| First drawdown | **1 March 2026** |
+| Maturity | 28 February 2031 |
+
+**Say:** note that drawn-at-inception is zero and there is a single drawdown
+event two months later. The module treats this as a delayed-draw facility — the
+loan asset does not exist until 1 March, and everything that happens before then
+has to be accounted for without one.
+
+## Screen 2 · The fee, and the one field that changes everything
+
+**Open:** the Fees card.
+
+| Field | Value |
+|---|---|
+| Label | Arrangement fee (2% of commitment) |
+| Kind | arrangement |
+| Amount | 2,000,000 one-off |
+| Payment date | 1 January 2026 |
+| **IFRS treatment** | **IFRS9-EIR** |
+
+**Say:** that last field is the whole decision. Set it to `IFRS9-EIR` and the fee
+is integral to the yield — it reduces the carrying amount and accretes back over
+the life. Set it to `IFRS15-overTime` and it is payment for a service, recognised
+as revenue, and it never touches the effective rate.
+
+**Make the contrast concrete:** the same 2,000,000 is either 2,000,000 of income
+in January 2026, or 48 basis points of extra yield spread across five years.
+Same cash, same contract, completely different income statement. Origination,
+arrangement and underwriting fees are normally the first; a genuine advisory or
+agency fee is the second.
+
+## Screen 3 · The undrawn period — the journals most systems get wrong
+
+**Open:** Run & JEs. Press **Run Accounting**, then filter the journal table to
+1 January 2026.
+
+| | DR | CR |
+|---|---|---|
+| Fee received | **111000** Cash 2,000,000 | **211000** Deferred Fee Liability 2,000,000 |
+
+**Say three things:**
+
+**Not income.** The lender has not yet earned anything. Recognising revenue here
+would book a return on a loan that has not been made.
+
+**Not a contra-asset either.** There is no loan asset on 1 January. Netting the
+fee against it would produce a carrying amount of *minus* 2,000,000 — a negative
+loan on the balance sheet, which is not conservative, it is impossible.
+
+**So it is a liability.** Cash the lender holds against a commitment it has not
+yet funded. Account 211000. Open the Cashflow tab and point at the carrying
+amount through January and February: it is **zero**, not negative.
+
+**Worth saying out loud:** this was a real gap in the module until this release.
+The chart of accounts had no deferred fee liability at all, and the fee netted
+against a nil asset from day one. It was found by building this very deal.
+
+## Screen 4 · Drawdown — the release
+
+**Open:** the same journal table, filtered to 1 March 2026.
+
+| | DR | CR |
+|---|---|---|
+| Release on drawdown | **211000** Deferred Fee Liability 2,000,000 | **141000** Loan Asset 2,000,000 |
+
+Alongside it, the drawdown itself: DR 141000 Loan Asset 100,000,000 / CR 111000
+Cash 100,000,000.
+
+**Say:** the liability is extinguished against the asset it was always going to
+attach to. Net effect on the balance sheet:
+
+```
+Loan principal advanced                 100,000,000
+Less deferred arrangement fee           (2,000,000)
+Amortised cost at 1 March 2026           98,000,877
+```
+
+That is your Example 1, to the dollar. The 877 is two months of day-count
+rounding on the ACT/360 basis, not an error — point at it before someone else
+does.
+
+## Screen 5 · The EIR build-up
+
+**Open:** the Evidence Pack, EIR panel.
+
+```
+Amount advanced                              100,000,000
+Yield-integral fees                          (2,000,000)
+Opening carrying amount at drawdown           98,000,877
+
+Contractual coupon                                8.0000%
+EFFECTIVE INTEREST RATE                           8.4855%
+```
+
+**Say:** 48 basis points, and those 48 basis points *are* the fee. The lender
+quotes 8% and earns 8.4855%, because it put out 98 and gets back 100 while
+collecting 8% on the full 100 throughout.
+
+**If anyone asks why the rate is not simply 8% plus 2% divided by 5:** because the
+fee is earned on a compounding basis over a declining investment horizon, not
+spread straight-line. The difference is small here and large on a longer or
+amortising deal — which is the reason to solve it rather than approximate it.
+
+## Screen 6 · The accretion — where the fee actually goes
+
+**Open:** the Cashflow tab, carrying value column or chart.
+
+| Date | Carrying amount |
+|---|---|
+| 28 Feb 2026 (undrawn) | 0 |
+| 1 Mar 2026 (drawdown) | 98,000,877 |
+| 1 Mar 2027 | 98,335,253 |
+| 1 Mar 2029 | 99,097,951 |
+| 28 Feb 2031 (maturity) | **100,000,000** |
+
+**Say:** this curve is the fee being recognised. Interest income each period is
+the carrying amount times 8.4855%, while cash received is the principal times
+8.00%. The gap — a few hundred thousand a year — is accreted into the carrying
+amount, and by maturity it has climbed exactly to par. No residual, no plug.
+
+**The sanity check to offer unprompted:** total interest income over the life
+equals the cash coupons plus 2,000,000. The fee is not created or destroyed, only
+re-timed. That is the test to apply to any system claiming to do EIR.
+
+## Screen 7 · Example 2 — the commitment fee variant
+
+**Say, without changing the deal:** a commitment fee on an undrawn facility —
+1% a year on 200,000,000, say — runs through the same machinery, but the trigger
+is a judgement rather than a date.
+
+| If drawdown is… | Treatment |
+|---|---|
+| **probable** | the fee compensates for a loan about to be made — defer it, and fold it into the EIR when the facility is drawn, exactly as above |
+| **not probable** | the fee compensates for standing ready — recognise it over the commitment period under IFRS 15 |
+
+**Say:** the module does not make that judgement for you, and should not. You
+express it with the same IFRS treatment flag from Screen 2. Flag it `IFRS9-EIR`
+and the deferred fee liability path runs; flag it `IFRS15-overTime` and it is
+recognised as non-use fee income over the commitment period.
+
+**Flag the limitation honestly:** the deferred path currently handles **one-off**
+fees. A commitment fee that accrues periodically across an undrawn period is
+recognised as income rather than deferred. If you need that, model it as a
+one-off at the point the undrawn period ends, and say so.
+
+## Screen 8 · Close
+
+Three numbers, in this order:
+
+- **2,000,000** — what the borrower paid
+- **nil** — what hit the income statement in January
+- **48 basis points** — how it is actually earned, over five years
+
+**Close on this:** the fee never becomes revenue. It becomes yield. The only
+question a system has to answer correctly is *where it sits in the meantime* —
+and the answer is a liability, not income and not a negative asset.
+
+---
+
 # Appendix A — What to do when someone challenges a number
 
 **"Why is deal 1 a gain when the borrower is distressed?"**
@@ -725,6 +925,28 @@ From the fund's own underwriting, entered in Accounting Treatment. The module
 will not infer it from the purchase discount and refuses to produce a rate
 without it — a discount to par may be credit, liquidity or a bargain.
 
+**"On deal 5, why 98,000,877 rather than exactly 98,000,000?"**
+Day-count. The 877 is two months of ACT/360 rounding between the commitment date
+and the drawdown. Point at it before someone else does — an unexplained 877 looks
+like a defect, an explained one looks like precision.
+
+**"Could we just recognise the arrangement fee as revenue? It is cash in hand."**
+Only if it is payment for a separate service. An arrangement, origination or
+underwriting fee is compensation for making the loan, so IFRS 9 §B5.4.1 treats it
+as part of the yield. The test is whether the lender would still be owed the fee
+if no loan were ever made.
+
+**"Is the deferred fee liability a real account or a presentation device?"**
+A real liability for as long as the facility is undrawn. The lender holds cash
+against a loan it has not yet funded. Once drawn it is released against the asset
+and never appears again.
+
+**"What if the facility is never drawn?"**
+Then the fee was earned for standing ready, not for lending, and it is IFRS 15
+income over the commitment period. The deferred fee liability would be released
+to income rather than against an asset. The module does not currently automate
+that release — it is a manual judgement at the point the commitment lapses.
+
 # Appendix B — Known limitations, state them before you are asked
 
 Credibility is cheaper to keep than to recover. If any of these are likely to
@@ -768,6 +990,20 @@ project how expectations will evolve; it records the restatements the credit tea
 makes and books the change. That is the right division of labour, but it does
 mean a deal with no revisions entered will show no impairment movement at all.
 
+**The deferred fee path handles one-off fees only.** A commitment fee accruing
+periodically across an undrawn period is recognised as income rather than
+deferred into the EIR. Model it as a one-off at the end of the undrawn period if
+the deferral matters.
+
+**An undrawn facility that is never drawn does not release its deferred fee
+automatically.** The liability stays until someone decides whether the commitment
+lapsed, which is a judgement rather than a date.
+
+**Deal 5's effective rate is solved from the first drawdown, not from signing.**
+That is correct — nothing is invested before then — but it means a facility with
+several staggered draws anchors on the first one. On a genuinely laddered
+drawdown profile the rate is an approximation.
+
 # Appendix C — Reference
 
 | Deal | Code | UUID |
@@ -776,8 +1012,9 @@ mean a deal with no revisions entered will show no impairment movement at all.
 | Payment Deferral and PIK Split Example | `DEMO-DEFER-PIK` | `fed30745-39b8-421d-a658-11b051473b7d` |
 | Principal Forgiveness and Extension Example | `DEMO-FORGIVE-S3` | `d9db5e2d-ed68-472d-a056-f384d82e856e` |
 | POCI Distressed Purchase Example | `DEMO-POCI` | `f0ef9565-8fdc-49ad-9dc4-6fe681903f2b` |
+| Integral Fees and Deferred Fee Example | `DEMO-FEES-EIR` | `0a8f90f9-f7c4-4297-baeb-b1bbf0679a3e` |
 
-**Modification figures, as produced by the engine at V4.14**
+**Modification figures, as produced by the engine at V4.17**
 
 | Deal | Pre-mod carrying | Original EIR | PV revised | Gain / (loss) | PV change | Flows |
 |---|---|---|---|---|---|---|
@@ -799,6 +1036,23 @@ mean a deal with no revisions entered will show no impairment movement at all.
 | Scenario A — ECL 40M → 25M | impairment **gain 15,000,000** |
 | Scenario B — ECL 40M → 50M | impairment **loss 10,000,000** |
 
+**Integral fee figures — deal 5**
+
+| | |
+|---|---|
+| Facility / drawdown | 100,000,000 · 1 Mar 2026 (committed 1 Jan 2026) |
+| Arrangement fee | 2,000,000, `IFRS9-EIR` |
+| Carrying amount while undrawn | **0** — fee held as a liability, not netted |
+| Amortised cost at drawdown | **98,000,877** |
+| Contractual coupon | 8.0000% |
+| **Effective interest rate** | **8.4855%** |
+| Carrying amount at maturity | 100,000,000 — fee fully accreted |
+
+| Date | | DR | CR |
+|---|---|---|---|
+| 1 Jan 2026 | fee received | 111000 Cash | 211000 Deferred Fee Liability |
+| 1 Mar 2026 | release | 211000 Deferred Fee Liability | 141000 Loan Asset |
+
 **Standards cited**
 
 | Reference | Subject |
@@ -811,3 +1065,6 @@ mean a deal with no revisions entered will show no impairment movement at all.
 | IFRS 9 §5.5.13 | POCI — no day-one loss allowance |
 | IFRS 9 §5.5.14 | POCI — only cumulative changes in lifetime ECL go to P&L, including gains |
 | IFRS 9 §B5.4.7 | Credit-adjusted effective interest rate, fixed at initial recognition |
+| IFRS 9 §B5.4.1 | Fees integral to the effective rate — origination, arrangement, underwriting |
+| IFRS 9 §B5.4.2 | Fees that are NOT integral — recognised under IFRS 15 |
+| IFRS 15 | Commitment fees where drawdown is not probable — revenue over the commitment period |
