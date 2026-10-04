@@ -1,11 +1,11 @@
 {
-  "version": "V4.16",
-  "generatedAt": "2026-10-02T18:00:41Z",
-  "commit": "67493da",
+  "version": "V4.21",
+  "generatedAt": "2026-10-04T16:29:38Z",
+  "commit": "067194d",
   "files": {
-    "loan-module-v4-builder.html": "8527d9219223907b",
+    "loan-module-v4-builder.html": "a9be8757352bb3d2",
     "portf-excel-parser.js": "689e51d510c6c53c",
-    "loan-module-engine.js": "fd9fadef23d9d983",
+    "loan-module-engine.js": "63a2b9b18f9db48b",
     "loan-module-instruments.js": "cad9aae70f4ac00c",
     "loan-module-analytics.js": "215a290d2c3a7b19",
     "demo-assistant-kb.js": "f3ca6794c1628b35",

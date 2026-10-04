@@ -661,7 +661,12 @@ function deriveModificationGainLoss(instr, o){
      amendment fee received on the day of the restructuring is the ordinary
      case, not an edge case — dropping it understated the gain by the whole
      fee. It discounts at t=0, so it enters at face. */
-  let bal = Math.max(0, (+o.balance || 0) - openingWriteOff);
+  /* When the caller has already applied the concession to the balance it hands
+     in, subtracting it again here would halve the projected recovery and double
+     the reported loss. */
+  let bal = o.forgivenessApplied
+    ? Math.max(0, (+o.balance || 0))
+    : Math.max(0, (+o.balance || 0) - openingWriteOff);
   let accrued = 0;
   const flows = [];
   if(Math.abs(cashIn[modDate] || 0) > 0.005){
@@ -1216,12 +1221,30 @@ function buildSchedule(instr){
   // EIR solver can still project cashflows.
   const totalDays = Math.round((maturity-settle)/ONE_DAY);
   let couponRateNominal = instr.coupon?.fixedRate ?? 0;
-  if(!couponRateNominal && (instr.coupon?.type === 'SONIA' || instr.coupon?.type === 'CompoundedRFR')){
-    const rfrBase = instr.rfr?.baseRate ?? 0;
+  /* Any coupon that is not Fixed carries its rate in floatingRate + spread (or,
+     when no observed level was supplied, rfr.baseRate + spread) — fixedRate is
+     zero on all of them.
+
+     This used to name only SONIA and CompoundedRFR. builderToInstrument maps
+     SOFR, TermSOFR, EURIBOR, ESTR, BBSW and anything else that is not FIXED to
+     type 'Floating', so every one of those deals ran with a NOMINAL COUPON OF
+     ZERO: no EIR was solved, the schedule reported "coupon" with a contractual
+     rate of 0.00%, and anything downstream that discounts at the original EIR
+     — the §5.4.3 modification derivation above all — discounted at nil and
+     returned a present value several times the carrying amount. On the Stage 3
+     demo deal that produced a modification gain of 154,859,350 against a true
+     figure of 12,022,928. Silent, and plausible enough to ship. */
+  if(!couponRateNominal && instr.coupon && instr.coupon.type !== 'Fixed'){
+    const base = (instr.coupon.floatingRate != null && instr.coupon.floatingRate !== 0)
+      ? instr.coupon.floatingRate
+      : (instr.rfr?.baseRate ?? 0);
     const firstStep = (instr.marginSchedule || [])[0];
-    const marginBps = firstStep?.marginBps ?? ((instr.coupon?.spread ?? 0) * 10000);
+    const marginBps = firstStep?.marginBps ?? ((instr.coupon.spread ?? 0) * 10000);
     const esgBps    = instr.esgAdjustment?.deltaBps ?? 0;
-    couponRateNominal = rfrBase + (marginBps + esgBps)/10000;
+    let r = base + (marginBps + esgBps)/10000;
+    if(instr.coupon.floor != null) r = Math.max(r, instr.coupon.floor);
+    if(instr.coupon.cap   != null) r = Math.min(r, instr.coupon.cap);
+    couponRateNominal = r;
   }
 
   // Effective interest yield (y):
@@ -1856,6 +1879,12 @@ function lookupMarginBps(dateISO){
     let participation=0, participationCV=0, participationGain=0;  // Transtype #14 (partial sale)
     let debtEquitySwap=0, debtEquitySwapCV=0, debtEquitySwapLoss=0;  // Transtype #15 (D4E swap)
     const dateISO = toISO(d);
+    /* A forgiveness dated on a modification date is part of that restructuring,
+       not a separate write-off. Decided once, before the event loop, so the
+       write-off handler and the modification block below agree. */
+    const _forgivenessIsModification =
+      (instr.modificationEvents || []).some(m => m && m.date === dateISO);
+    let forgivenInModificationToday = 0;
     for(const e of evs){
       if(e.type==='initial'){ initial += e.amount; /* already counted into starting balance */ }
       else if(e.type==='draw'){
@@ -2115,18 +2144,37 @@ function lookupMarginBps(dateISO){
       // existing ECL allowance (uses it up first) and a residual P&L charge.
       else if(e.type==='writeOff'){
         const wAmt = (typeof e.amount === 'number' && e.amount > 0) ? e.amount : balance;
-        writeOff += wAmt;
-        // Snapshot the allowance balance available to absorb the write-off
-        const availableAllowance = Math.max(0, eclAllowance);
-        const used = Math.min(wAmt, availableAllowance);
-        writeOffAllowanceUsed   += used;
-        writeOffResidualExpense += (wAmt - used);
-        // Apply the write-off to balances + allowance
-        balance        -= wAmt;
-        drawnBalance   -= wAmt;
-        carryingValue  -= wAmt;
-        eclAllowance   -= used;            // allowance consumed
-        cumECLChange   -= used;            // allowance release recorded
+        /* Forgiveness granted as part of a restructuring is NOT a write-off.
+           IFRS 9 §5.4.4 writes off a gross amount the entity has no reasonable
+           expectation of recovering, against the allowance. A negotiated
+           concession is a change to the contractual cash flows — §5.4.3 — and
+           its whole effect belongs in the modification gain or loss.
+
+           Doing both double-counts: the carrying amount falls by the forgiven
+           principal, and then the modification measures only the residual. On
+           the forgiveness demo deal that reported a 3.3m loss on a 15m
+           concession. So when a write-off shares its date with a modification
+           event, the balance falls here and the CARRYING AMOUNT is left for the
+           modification to move. No allowance is consumed and no write-off
+           journal is raised — the loss is the modification's to report. */
+        if(_forgivenessIsModification){
+          balance      -= wAmt;
+          drawnBalance -= wAmt;
+          forgivenInModificationToday += wAmt;
+        } else {
+          writeOff += wAmt;
+          // Snapshot the allowance balance available to absorb the write-off
+          const availableAllowance = Math.max(0, eclAllowance);
+          const used = Math.min(wAmt, availableAllowance);
+          writeOffAllowanceUsed   += used;
+          writeOffResidualExpense += (wAmt - used);
+          // Apply the write-off to balances + allowance
+          balance        -= wAmt;
+          drawnBalance   -= wAmt;
+          carryingValue  -= wAmt;
+          eclAllowance   -= used;            // allowance consumed
+          cumECLChange   -= used;            // allowance release recorded
+        }
       }
     }
 
@@ -2164,9 +2212,35 @@ function lookupMarginBps(dateISO){
       try {
         derived = deriveModificationGainLoss(instr, {
           modDate:     dISO,
+          /* `balance` is already net of any forgiveness granted today — the
+             event loop above reduced it. Say so, or the derivation would
+             subtract the concession a second time and double the loss. The
+             carrying amount, by contrast, was deliberately left whole, so the
+             measurement is against the pre-concession gross figure. */
           balance:     balance,
           carrying:    carryingValue,
-          originalEIR: (effectiveYield != null ? effectiveYield : couponRateNominal),
+          forgivenessApplied: forgivenInModificationToday > 0,
+          /* The discount rate has to be on the same basis as the cash flows
+             being discounted, and the derivation projects PIK: interest settled
+             in kind capitalises and comes back as a larger repayment.
+
+             Neither rate to hand is on that basis. `couponRateNominal` is the
+             cash coupon only. The solved `effectiveYield` is cash-basis too —
+             the schedule's own solve walks a balance that moves with the
+             principal schedule, and capitalisation is not in it. Discounting a
+             stream that compounds at cash + PIK by either of them prices a 20%
+             instrument at 9%, and the gap surfaces as a modification gain that
+             is pure artefact: 66.3m on the Stage 3 demo deal against a true
+             figure near 12m.
+
+             So when interest settles in kind, the PIK element is added to
+             whichever rate we have. Approximate — the two do not compound
+             together — but it is on the right basis, and on the same basis as
+             the projection, which is what makes the difference meaningful. */
+          originalEIR: (function(){
+            const solved = (effectiveYield != null) ? effectiveYield : couponRateNominal;
+            return pikEnabled ? (solved + pikRateNominal) : solved;
+          })(),
           daysPerYear: daysPerYear
         });
       } catch(err){
@@ -2358,10 +2432,21 @@ function lookupMarginBps(dateISO){
         } else if(stage === 2){
           targetECL = balance * lifetimePD * lgd;
         } else {
-          // Stage 3 — credit-impaired: lifetime ECL on net carrying
-          const netCarrying = Math.max(0, balance - eclAllowance);
-          targetECL = netCarrying * lifetimePD * lgd + eclAllowance;
-          // Clamp so the net allowance stays sane
+          /* Stage 3 — credit-impaired. The MEASUREMENT is the same as Stage 2:
+             lifetime expected credit losses on the exposure. What changes at
+             Stage 3 is interest recognition — revenue is calculated on the net
+             carrying amount rather than the gross (§5.4.1(b)) — and that is
+             handled separately by stage3InterestBase, not here.
+
+             This used to compute lifetime ECL on the balance NET of the
+             existing allowance and then add that allowance back. Re-applied
+             every day, it ratchets: day one charges LGD on the full exposure,
+             day two charges LGD again on what is left, and so on until the
+             allowance reaches the whole balance. A loan with LGD 45% was fully
+             provided for inside a month, and the LGD input had no effect on the
+             answer at all — the clamp decided it. */
+          targetECL = balance * lifetimePD * lgd;
+          // Never provide for more than is outstanding.
           targetECL = Math.min(balance, targetECL);
         }
         dailyECLChange = targetECL - eclAllowance;

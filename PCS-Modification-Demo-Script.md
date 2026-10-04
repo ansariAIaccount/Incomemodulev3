@@ -156,17 +156,19 @@ the one number the whole restructuring turns on.*
 rather than accepting it:
 
 ```
-Pre-modification gross carrying amount        100,000,000
-Original EIR (SOFR 4% + 500bps)                     9.00%
+Pre-modification gross carrying amount         98,000,000
+Solved effective rate                              9.3859%
+PIK element added for the discount basis         + 11.00%
+Original effective rate used                      20.3860%
 
-Revised contractual cash flows, discounted at 9%:
+Revised contractual cash flows:
   Amendment fee, 1 Jul 2025, at t=0              2,000,000
-  Quarterly interest at 11% to 31 Dec 2030     (21 payments)
-  Principal repayment, 31 Dec 2030             100,000,000
-                                        PV =   112,022,928
+  Quarterly interest at 11% to 31 Dec 2030
+  PIK capitalising into the balance quarterly
+  Principal repayment, 31 Dec 2030
 
-Modification GAIN                                12,022,928
-PV change against carrying amount                  +12.02%
+Modification GAIN                                 8,033,913
+PV change against carrying amount                   +8.17%
 ```
 
 **Three things to say, in this order:**
@@ -179,12 +181,18 @@ credit deterioration is real — it just shows up in the ECL, not here. Two
 separate effects, two separate places in the accounts. Conflating them is one of
 the commonest errors in practice.
 
-**The 12.02% is over the threshold.** §B5.4.6 treats a PV change of 10% or more
-as substantial, which means derecognition of the old asset and recognition of a
-new one — not the re-measurement we have just performed. The deal is configured
-as non-substantial and the module has told us that is questionable. Use this
-deliberately: *the system did not quietly do what it was told; it showed us the
-test and left the judgement with us.*
+**The discount rate is not the coupon, and that catches people out.** The module
+solved an effective rate of 9.3859% on the cash coupon, then added the 11% PIK
+element because the cash flows being discounted include interest that
+capitalises. Rate and cash flows have to be on the same basis. Discounting a
+stream that compounds at cash plus PIK by the cash rate alone prices a 20%
+instrument at 9% — which, before this was corrected, reported a gain of 66.3m on
+this very deal.
+
+**At 8.17% this one sits under the threshold.** §B5.4.6 treats a PV change of 10%
+or more as substantial, requiring derecognition rather than re-measurement.
+Deal 1 is comfortably inside it; deal 3, at −13.21%, is not. Use the pair to show
+that the test is applied and reported, not assumed.
 
 **Every input is on the screen.** The rate used, the flows discounted, the dates.
 If an auditor asks how the figure was arrived at, this panel is the answer.
@@ -268,10 +276,10 @@ whole modification.
 
 ```
 Pre-modification carrying amount (balance at 1 Jan 2026)   80,000,000
-Original EIR                                                   10.00%
+Original effective rate (6% cash + 4% PIK)                     10.00%
 
-PV of revised cash flows at 10%                            80,392,742
-Modification GAIN                                             392,742
+PV of revised cash flows at 10%                            80,393,618
+Modification GAIN                                             393,618
 PV change                                                      +0.49%
 ```
 
@@ -348,13 +356,26 @@ land.
 
 **Open:** Stage 2 · Lifecycle Events.
 
-**Point at:** `writeOff`, 1 January 2026, 15,000,000.
+**Point at:** the forgiveness event, 1 January 2026, 15,000,000.
 
-**Say:** note what this is *not*. It is not a repayment. No cash arrives. The
+**Say:** note what this is *not*. It is not a repayment — no cash arrives. The
 balance falls from 100,000,000 to 85,000,000 because the lender has given up the
 right to collect it. If this were booked as a repayment the loss would vanish and
-the accounts would show a loan that paid down normally. The distinction between
-a receipt and a release is the whole of this screen.
+the accounts would show a loan that paid down normally.
+
+**It is also not a write-off, and that distinction is the point of the screen.**
+IFRS 9 §5.4.4 writes off a gross amount the entity has no reasonable expectation
+of recovering, taken against the loss allowance. This is nothing of the kind: the
+lender *chose* to forgive, as one term in a negotiated package. That makes it a
+change to the contractual cash flows — §5.4.3 — and its whole effect belongs in
+the modification gain or loss.
+
+**Worth saying plainly:** the module used to do both, and the result was wrong in
+a way that looked reasonable. The carrying amount fell by the forgiven principal,
+and the modification then measured only what was left — a 3.3m loss on a 15m
+concession. It was caught by running this deal end to end against the demo
+script. Now the balance falls here and the carrying amount is moved by the
+modification, once.
 
 ## Screen 3 · The fee
 
@@ -371,32 +392,46 @@ into the effective rate, not to income on receipt.
 **Open:** Run Accounting → Evidence Pack, modification panel.
 
 ```
-Pre-modification gross carrying amount                   100,000,000
-Original EIR                                                   8.50%
-Forgiven at the modification date                       (15,000,000)
+Pre-modification gross carrying amount                    99,342,380
+Original EIR (solved)                                        8.6603%
+Forgiven within the restructuring                       (15,000,000)
 
-PV of revised cash flows at 8.5%:
+PV of revised cash flows at 8.6603%:
   Amendment fee, 1 Jan 2026, at t=0                          850,000
   Quarterly interest at 8.5% on 85,000,000 to Dec 2030
   Principal repayment, 31 Dec 2030                        85,000,000
-                                                 PV =     86,747,847
+                                                 PV =     86,220,347
 
-Modification LOSS                                       (13,252,153)
-PV change                                                    −13.25%
+Modification LOSS                                       (13,122,033)
+PV change                                                    −13.21%
+
+Balance after the restructuring                           85,000,000
+Carrying amount after                                     86,221,691
 ```
 
-**Three things to say:**
+**Four things to say:**
 
 **The loss is not 15,000,000.** That is the number everyone in the room expects,
 and it is wrong. The forgiveness costs 15,000,000 of principal, but the lender
 gets 850,000 of fee and two extra years of 8.5% interest on the remaining
-85,000,000. Net, the loss is 13.25m. Anyone who booked the headline forgiveness
-figure would have overstated the charge by nearly 1.75m.
+85,000,000. Net, the loss is 13.1m. Anyone booking the headline forgiveness
+figure would have overstated the charge by nearly 1.9m.
 
-**This one also breaches the 10% test**, at −13.25%. Same conversation as deal 1,
+**The carrying amount is not 100,000,000 either.** It is 99,342,380, because the
+850,000 amendment fee was deferred and has been accreting since the deal was
+written. Small, but it is the sort of detail that decides whether a reviewer
+trusts the rest of the number — and it is why the figure is 13.12m rather than
+the round 13.25m you would get by assuming par.
+
+**This one also breaches the 10% test**, at −13.21%. Same conversation as deal 1,
 opposite direction — and here the case for derecognition is considerably
 stronger, because a partial forgiveness is close to the paradigm of an
 extinguished original asset.
+
+**The carrying amount after ties to the present value.** 86,221,691 against a PV
+of 86,220,347 — the 1,344 is a single day of accretion between the measurement
+and the next schedule row. If those two numbers did not tie, the modification
+would not have been applied correctly, so it is a check worth doing out loud.
 
 **Compare it with deal 2.** Same module, same method, same discount approach —
 +0.49% on a timing change, −13.25% on a forgiveness. The method does not care
@@ -411,13 +446,19 @@ out to be. That consistency is what makes it defensible.
 |---|---|---|
 | Modification loss | 44000 Modification Gain / Loss | 15000 Loan Asset Adjustment |
 
-Plus the write-off entries routing the forgiven principal against the allowance
-(145000) with any residual to impairment expense (470000).
+**One entry, and only one.** Point at what is *absent*: there are no write-off
+journals. No 145000 allowance consumption, no 470000 impairment residual. The
+forgiveness is not being written off against the allowance — it is a renegotiated
+cash flow, and the modification entry carries its entire effect.
 
-**Say:** the allowance is used before the expense line is touched. If the deal
-had been carrying a large enough Stage 3 allowance, part of this forgiveness
-would already have been provided for and the P&L hit would be correspondingly
-smaller. That is the reward for provisioning early.
+**Say:** this matters for anyone reconciling the impairment note. A reader who
+expects a 15,000,000 movement through the allowance will not find one, and should
+not. The allowance reflects expected credit losses on what is still owed; the
+concession reduced what is owed.
+
+**If someone asks why it is not against the allowance:** because the lender had
+not given up hope of recovery — it gave up the right. Those are different events
+with different standards behind them, and the one that applies here is §5.4.3.
 
 ## Screen 6 · ECL and the close
 
@@ -999,6 +1040,14 @@ the deferral matters.
 automatically.** The liability stays until someone decides whether the commitment
 lapsed, which is a judgement rather than a date.
 
+**Deal 1's PIK runs for the whole life in the measurement, not just the
+amendment year.** The two-component structure bounds the PIK year correctly for
+interest accrual, but the tranche-level PIK rate the engine measures against has
+no end date. So the modification derivation projects — and discounts at — PIK for
+the full remaining term. The figure is internally consistent, and it is the right
+order of magnitude, but a bounded PIK window would produce a smaller gain. Say so
+if anyone asks why the discount rate is 20%.
+
 **Deal 5's effective rate is solved from the first drawdown, not from signing.**
 That is correct — nothing is invested before then — but it means a facility with
 several staggered draws anchors on the first one. On a genuinely laddered
@@ -1018,9 +1067,25 @@ drawdown profile the rate is an approximation.
 
 | Deal | Pre-mod carrying | Original EIR | PV revised | Gain / (loss) | PV change | Flows |
 |---|---|---|---|---|---|---|
-| 1 | 100,000,000 | 9.00% | 112,022,928 | **12,022,928** | +12.02% | 23 |
-| 2 | 80,000,000 | 10.00% | 80,392,742 | **392,742** | +0.49% | 28 |
-| 3 | 100,000,000 | 8.50% | 86,747,847 | **(13,252,153)** | −13.25% | 21 |
+| 1 | 98,000,000 | 20.386%¹ | 106,033,913 | **8,033,913** | +8.17% | 23 |
+| 2 | 80,000,000 | 10.00%¹ | 80,393,618 | **393,618** | +0.49% | 28 |
+| 3 | 99,342,380 | 8.6603% | 86,220,347 | **(13,122,033)** | −13.21% | 21 |
+
+¹ On a deal where interest settles in kind, the discount rate is the solved
+effective rate plus the PIK element, because the cash flows being discounted
+include interest that capitalises. Rate and cash flows must be on the same basis.
+
+**ECL allowances at peak exposure — all five verified at V4.20**
+
+| Deal | Stage | LGD | Peak allowance | % of exposure |
+|---|---|---|---|---|
+| 1 | 3 | 40% | 40,000,000 | 40.0% |
+| 2 | 2 | 40% | 10,000,000 | 10.0% |
+| 3 | 3 | 45% | 45,000,000 | 45.0% |
+| 4 | POCI | — | 0 at acquisition | 0% |
+| 5 | 1 | 30% | 150,000 | 0.15% |
+
+Every batch balances and nothing is unmapped.
 
 **POCI figures — deal 4**
 
