@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 21; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 22; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.21"></script>
+<script src="portf-excel-parser.js?v=4.22"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -4175,6 +4175,15 @@
     text-align: left;
   }
   #glconfig .glc-sub-head.dr { border-left: 0.5px solid var(--n-200); }
+  /* ── Sortable headers ────────────────────────────────────────────── */
+  #glconfig .glc-sortable { cursor: pointer; user-select: none; }
+  #glconfig .glc-sortable:hover { background: var(--n-100, #F4F4F5); color: var(--n-800); }
+  #glconfig .glc-sortable:focus-visible { outline: 2px solid var(--indigo-600,#4F46E5); outline-offset: -2px; }
+  #glconfig .glc-sort-mark {
+    margin-left: 5px; font-size: 9px; opacity: 0.28; letter-spacing: 0;
+  }
+  #glconfig .glc-sortable:hover .glc-sort-mark { opacity: 0.6; }
+  #glconfig .glc-sort-mark.on { opacity: 1; color: var(--indigo-600,#4F46E5); }
   /* Sticky first column so the event name stays visible while scrolling right */
   #glconfig .glc-event-cell,
   #glconfig .glc-event-head {
@@ -5901,6 +5910,9 @@
       </label>
       <button onclick="window.__inlineJECopyTsv && window.__inlineJECopyTsv()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Copy visible JE rows as TSV">
         <i class="ti ti-copy" style="font-size:12px;"></i>Copy
+      </button>
+      <button onclick="window.__inlineJEExportXlsx && window.__inlineJEExportXlsx()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;" title="Download the journal entries currently shown as an Excel workbook">
+        <i class="ti ti-file-spreadsheet" style="font-size:12px;"></i>Export to Excel
       </button>
     </div>
     <div id="acct-inline-je-host" style="max-height:640px; overflow:auto;"></div>
@@ -9080,14 +9092,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.21"></script>
-<script src="loan-module-instruments.js?v=4.21"></script>
-<script src="loan-module-analytics.js?v=4.21"></script>
+<script src="loan-module-engine.js?v=4.22"></script>
+<script src="loan-module-instruments.js?v=4.22"></script>
+<script src="loan-module-analytics.js?v=4.22"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.21"></script>
-<script src="demo-assistant-system-prompt.js?v=4.21"></script>
+<script src="demo-assistant-kb.js?v=4.22"></script>
+<script src="demo-assistant-system-prompt.js?v=4.22"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -22778,6 +22790,125 @@ window.__inlineJECopyTsv = function(){
   }, () => {
     if(typeof toast === 'function') toast('Copy failed — see console', 3000, { kind:'error' });
   });
+};
+
+/* ─── Export the journal entries to Excel ────────────────────────────────────
+   Exports what is ON SCREEN: the same filter the table is showing, in the same
+   column order an accountant reads. Exporting the unfiltered set instead would
+   quietly hand someone a different population from the one they were looking
+   at, which is the sort of difference nobody notices until a reconciliation
+   fails.
+
+   Two sheets. "Journal Entries" is the register — one row per leg, debits and
+   credits in separate columns so it drops into a journal template. "Summary"
+   carries the deal, the run, the row count and the DR/CR totals, so the file
+   can be read on its own six months later without the app open.
+
+   Numbers are written as numbers, not strings: a debit column that arrives in
+   Excel as text cannot be summed, and the first thing anyone does with a
+   journal export is sum it. */
+window.__inlineJEExportXlsx = function(){
+  const rowsAll = (typeof M !== 'undefined' && Array.isArray(M.acctJournals)) ? M.acctJournals : [];
+  if(!rowsAll.length){
+    if(typeof toast === 'function') toast('No journal entries to export — run accounting first', 3000, { kind:'info' });
+    return;
+  }
+  if(typeof XLSX === 'undefined'){
+    if(typeof toast === 'function') toast('Excel library did not load — reload the page and try again', 4000, { kind:'error' });
+    return;
+  }
+  try {
+    const q = ((document.getElementById('inline-je-filter') || {}).value || '').toLowerCase();
+    const rows = q ? rowsAll.filter(r =>
+      ((r.transactionType || '') + ' ' + (r.account || '') + ' ' + (r.glAccountName || '') + ' ' +
+       (r.transactionComments || '')).toLowerCase().indexOf(q) !== -1
+    ) : rowsAll;
+    if(!rows.length){
+      if(typeof toast === 'function') toast('The current filter matches no rows', 3000, { kind:'info' });
+      return;
+    }
+
+    const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+    const dealName = (window.B && window.B.deal && window.B.deal.name) || (inst && inst.deal) || 'deal';
+    const ccy = (inst && inst.currency) ||
+                (window.B && window.B.deal && window.B.deal.currency) || 'USD';
+    const fundOf = r => r.fund || r.entity || r.legalEntity ||
+      (inst && (inst.legalEntity || inst.entity)) ||
+      (window.B && window.B.deal && (window.B.deal.le || window.B.deal.name)) || '';
+
+    let totDr = 0, totCr = 0;
+    const data = rows.map(r => {
+      const amt = +r.amountLE || 0;
+      if(r.isDebit) totDr += amt; else totCr += amt;
+      return {
+        'JE #':            r.jeIndex != null ? +r.jeIndex : '',
+        'Tx #':            r.txIndex != null ? +r.txIndex : '',
+        'Effective date':  r.effectiveDate || '',
+        'GL date':         r.glDate || '',
+        'Account code':    r.account || '',
+        'Account name':    r.glAccountName || r.accountName || '',
+        'Transaction type':r.transactionType || '',
+        'GL trans type':   r.glTransType || '',
+        'Debit':           r.isDebit  ? +amt.toFixed(2) : '',
+        'Credit':          !r.isDebit ? +amt.toFixed(2) : '',
+        'Currency':        ccy,
+        'Fund / entity':   fundOf(r),
+        'Deal':            r.deal || dealName,
+        'Position':        r.position || '',
+        'Batch':           r.batchId != null ? r.batchId : '',
+        'Description':     r.transactionComments || '',
+        'GL gap':          r.glGap ? 'YES' : '',
+        'GL gap note':     r.glGapNote || ''
+      };
+    });
+
+    const wb = XLSX.utils.book_new();
+    const wsJe = XLSX.utils.json_to_sheet(data);
+    // Column widths — an export nobody can read without dragging every column
+    // is only half an export.
+    wsJe['!cols'] = [
+      {wch:7},{wch:6},{wch:13},{wch:13},{wch:12},{wch:34},{wch:30},{wch:30},
+      {wch:16},{wch:16},{wch:9},{wch:20},{wch:26},{wch:26},{wch:7},{wch:60},
+      {wch:8},{wch:50}
+    ];
+    wsJe['!freeze'] = { xSplit:0, ySplit:1 };
+    XLSX.utils.book_append_sheet(wb, wsJe, 'Journal Entries');
+
+    const diff = totDr - totCr;
+    const summary = [
+      { Field:'Deal',                 Value: dealName },
+      { Field:'Deal code',            Value: (window.B && window.B.deal && window.B.deal.dealId) || '' },
+      { Field:'Currency',             Value: ccy },
+      { Field:'Framework',            Value: (inst && inst.accountingFramework) ||
+                                             (window.B && window.B.deal && window.B.deal.framework) || '' },
+      { Field:'Exported',             Value: new Date().toISOString().slice(0,19).replace('T',' ') },
+      { Field:'Module version',       Value: window.PCS_VERSION || '' },
+      { Field:'Filter applied',       Value: q ? q : '(none — all rows)' },
+      { Field:'Rows exported',        Value: rows.length },
+      { Field:'Rows in full run',     Value: rowsAll.length },
+      { Field:'Total debits',         Value: +totDr.toFixed(2) },
+      { Field:'Total credits',        Value: +totCr.toFixed(2) },
+      { Field:'Difference',           Value: +diff.toFixed(2) },
+      { Field:'Balanced',             Value: Math.abs(diff) < 0.005 ? 'YES' : 'NO — DO NOT POST' },
+      { Field:'Unmapped GL rows',     Value: rows.filter(r => r.glGap).length }
+    ];
+    const wsSum = XLSX.utils.json_to_sheet(summary);
+    wsSum['!cols'] = [{wch:22},{wch:52}];
+    XLSX.utils.book_append_sheet(wb, wsSum, 'Summary');
+
+    const safe = String(dealName).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'deal';
+    const fname = 'journal-entries-' + safe + '-' + new Date().toISOString().slice(0,10) + '.xlsx';
+    XLSX.writeFile(wb, fname);
+    if(typeof toast === 'function'){
+      toast('Exported ' + rows.length.toLocaleString() + ' JE rows' +
+            (Math.abs(diff) < 0.005 ? '' : ' — WARNING: batch does not balance'),
+            Math.abs(diff) < 0.005 ? 3000 : 6000,
+            { kind: Math.abs(diff) < 0.005 ? 'success' : 'error' });
+    }
+  } catch(err){
+    console.error('[acct] JE Excel export failed:', err);
+    if(typeof toast === 'function') toast('Export failed: ' + (err.message || err), 5000, { kind:'error' });
+  }
 };
 
 // Belt-and-braces — a document-level click delegate that ALWAYS catches
@@ -49191,7 +49322,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // GL Configuration — business event × framework DR/CR matrix
   // ═══════════════════════════════════════════════════════════════════
   // State cache so the table can re-render on filter without re-fetching.
-  const _glcState = { events: [], frameworks: [], mappings: [], loaded: false, teamId: null };
+  // `sort` is null in the default (configured sort_order) state. Held here
+  // rather than in the DOM so it survives a re-render from a filter change.
+  const _glcState = { events: [], frameworks: [], mappings: [], loaded: false, teamId: null, sort: null };
 
   function _glcEsc(s){ return String(s == null ? '' : s).replace(/[<>&"']/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[ch])); }
 
@@ -49282,6 +49415,38 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       .filter(rowMatches)
       .filter(ev => !onlyCustom || isRowCustom(ev));
 
+    /* ── Sorting ──────────────────────────────────────────────────────────
+       Click a header to sort; click again to reverse; a third click returns
+       to the configured order. That third state matters here more than on an
+       ordinary table: sort_order is how the business events are grouped into
+       a sequence an accountant recognises — drawdown, accrual, settlement,
+       impairment — and once you have sorted alphabetically there is otherwise
+       no way back to it without reloading the page.
+
+       Sorting by a framework's DR or CR account answers the question this
+       screen is usually opened for: "which events post to 421000?" */
+    const sort = _glcState.sort;
+    if(sort && sort.key){
+      const valOf = (ev) => {
+        if(sort.key === 'event') return (ev.event_label || '').toLowerCase();
+        if(sort.key === 'category') return (ev.category || '').toLowerCase();
+        const m = _glcResolve(ev.event_key, sort.fw) || {};
+        const code = sort.side === 'dr' ? (m.dr_account_code || '') : (m.cr_account_code || '');
+        const name = sort.side === 'dr' ? (m.dr_account_name || '') : (m.cr_account_name || '');
+        /* Account codes are numeric strings of equal length in the Investran
+           chart, so a plain string compare orders them correctly — and keeps
+           blanks last rather than first, which is what you want when hunting
+           for unmapped events. */
+        return (code || '~~~~') + ' ' + name.toLowerCase();
+      };
+      events.sort((a, b) => {
+        const va = valOf(a), vb = valOf(b);
+        if(va < vb) return sort.dir === 'desc' ? 1 : -1;
+        if(va > vb) return sort.dir === 'desc' ? -1 : 1;
+        return 0;
+      });
+    }
+
     const customCount = _glcState.mappings.filter(m => m.is_custom).length;
     if(kFw)   kFw.textContent = fws.length;
     if(kCust) kCust.textContent = customCount;
@@ -49303,9 +49468,35 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
 
     // ── Header: two rows. Row 1 = framework name spanning 2 cols.
     //            Row 2 = Debit (DR) / Credit (CR) sub-headers.
+    // Sort indicator for a header: ▲ / ▼ when active, a faint ⇅ otherwise so
+    // it is discoverable without shouting.
+    const sortMark = (key, fw, side) => {
+      const s = _glcState.sort;
+      const active = s && s.key === key && (s.fw || null) === (fw || null) && (s.side || null) === (side || null);
+      if(!active) return '<span class="glc-sort-mark">⇅</span>';
+      return '<span class="glc-sort-mark on">' + (s.dir === 'desc' ? '▼' : '▲') + '</span>';
+    };
+    /* Returns the sort attributes WITHOUT a class — the caller folds
+       `glc-sortable` into the th's existing class list. Emitting a second
+       class attribute produced `<th class="glc-sub-head" ... class="glc-sortable">`,
+       and an HTML parser keeps the first and silently discards the second: the
+       headers rendered their sort arrows and were not clickable. */
+    const sortAttr = (key, fw, side) => {
+      const call = 'window.__glcSortBy && window.__glcSortBy(\'' + key + '\',' +
+        (fw ? ('\'' + _glcEsc(fw) + '\'') : 'null') + ',' +
+        (side ? ('\'' + side + '\'') : 'null') + ')';
+      return ' role="button" tabindex="0"' +
+        ' title="Sort by this column — click again to reverse, a third time to restore the default order"' +
+        ' onclick="' + call + '"' +
+        // A th is not natively activatable, so Enter and Space have to be
+        // wired by hand or the column is unreachable from the keyboard.
+        ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + call + ';}"';
+    };
+
     thead.innerHTML =
       '<tr>' +
-        '<th class="glc-event-head glc-sub-head" rowspan="2" style="vertical-align:bottom;">Business event</th>' +
+        '<th class="glc-event-head glc-sub-head glc-sortable" rowspan="2" style="vertical-align:bottom;"' +
+          sortAttr('event', null, null) + '>Business event' + sortMark('event', null, null) + '</th>' +
         fws.map(f => (
           '<th class="glc-fw-head" colspan="2">' + _glcEsc(f.label) +
             (f.is_builtin ? '' :
@@ -49317,9 +49508,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         '<th class="glc-sub-head" rowspan="2" style="vertical-align:bottom; text-align:center; border-left:0.5px solid var(--n-200);">Reset</th>' +
       '</tr>' +
       '<tr>' +
-        fws.map(() =>
-          '<th class="glc-sub-head dr">Debit (DR)</th>' +
-          '<th class="glc-sub-head">Credit (CR)</th>'
+        fws.map(f =>
+          '<th class="glc-sub-head dr glc-sortable"' + sortAttr('acct', f.code, 'dr') + '>Debit (DR)' + sortMark('acct', f.code, 'dr') + '</th>' +
+          '<th class="glc-sub-head glc-sortable"'    + sortAttr('acct', f.code, 'cr') + '>Credit (CR)' + sortMark('acct', f.code, 'cr') + '</th>'
         ).join('') +
       '</tr>';
 
@@ -49416,6 +49607,19 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       console.error('[GLC] save failed:', err);
       if(typeof toast === 'function') toast('Save failed: ' + (err.message || err), 5000, { kind:'error' });
     }
+  };
+
+  /* Three-state header sort: ascending → descending → back to the configured
+     sort_order. The third state is deliberate — sort_order groups the events
+     into the sequence an accountant reads them in, and without a way back to
+     it the only reset is a page reload. */
+  window.__glcSortBy = function(key, fw, side){
+    const s = _glcState.sort;
+    const same = s && s.key === key && (s.fw || null) === (fw || null) && (s.side || null) === (side || null);
+    if(!same)                       _glcState.sort = { key, fw: fw || null, side: side || null, dir:'asc' };
+    else if(s.dir === 'asc')        _glcState.sort = { key, fw: fw || null, side: side || null, dir:'desc' };
+    else                            _glcState.sort = null;      // third click — default order
+    window.__glcRender();
   };
 
   window.__glcResetEvent = async function(eventKey, label){

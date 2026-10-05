@@ -1,9 +1,9 @@
 {
-  "version": "V4.21",
-  "generatedAt": "2026-10-04T16:29:38Z",
-  "commit": "067194d",
+  "version": "V4.22",
+  "generatedAt": "2026-10-05T15:31:34Z",
+  "commit": "88337c7",
   "files": {
-    "loan-module-v4-builder.html": "a9be8757352bb3d2",
+    "loan-module-v4-builder.html": "e60c7f25c3dd948b",
     "portf-excel-parser.js": "689e51d510c6c53c",
     "loan-module-engine.js": "63a2b9b18f9db48b",
     "loan-module-instruments.js": "cad9aae70f4ac00c",
