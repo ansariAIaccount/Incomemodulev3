@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 22; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 23; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.22"></script>
+<script src="portf-excel-parser.js?v=4.23"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -5955,6 +5955,19 @@
       white-space: nowrap;
     }
     #acct-inline-je-host table.je-table th.num { text-align: right; }
+    /* ── Sortable register headers ───────────────────────────────────
+       Only present in the flat register view; the grouped journal-entry
+       view keeps plain headers because its row order is the double entry. */
+    #acct-inline-je-host table.je-table th.je-sortable { cursor: pointer; user-select: none; }
+    #acct-inline-je-host table.je-table th.je-sortable:hover {
+      background: var(--n-100, #F4F4F5); color: var(--n-900);
+    }
+    #acct-inline-je-host table.je-table th.je-sortable:focus-visible {
+      outline: 2px solid var(--indigo-600,#4F46E5); outline-offset: -2px;
+    }
+    #acct-inline-je-host .je-sort-mark { margin-left: 5px; font-size: 9px; opacity: 0.28; }
+    #acct-inline-je-host th.je-sortable:hover .je-sort-mark { opacity: 0.6; }
+    #acct-inline-je-host .je-sort-mark.on { opacity: 1; color: var(--indigo-600,#4F46E5); }
     #acct-inline-je-host table.je-table td {
       padding: 9px 14px;
       border-bottom: 0.5px solid var(--n-100);
@@ -9092,14 +9105,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.22"></script>
-<script src="loan-module-instruments.js?v=4.22"></script>
-<script src="loan-module-analytics.js?v=4.22"></script>
+<script src="loan-module-engine.js?v=4.23"></script>
+<script src="loan-module-instruments.js?v=4.23"></script>
+<script src="loan-module-analytics.js?v=4.23"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.22"></script>
-<script src="demo-assistant-system-prompt.js?v=4.22"></script>
+<script src="demo-assistant-kb.js?v=4.23"></script>
+<script src="demo-assistant-system-prompt.js?v=4.23"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -22664,22 +22677,81 @@ window.__renderInlineJETable = function(){
       : ('UNBALANCED · Δ ' + fmtAmt(totDr - totCr));
   }
 
+  /* ── Sortable headers, register view only ─────────────────────────────────
+     Sorting is offered on the flat register and NOT on the grouped
+     journal-entry view, because the grouped view's order is meaningful: each
+     card is one balanced entry, debits above credits. Re-ordering rows inside
+     that would break the double entry on screen. The register has no such
+     structure — it is a list — so it sorts freely.
+
+     Three states per column, as elsewhere: ascending, descending, then back to
+     the natural order the engine emitted. */
+  const jeSort = window.__inlineJESort || null;
+  const jeSortMark = (key) => {
+    if(!jeSort || jeSort.key !== key) return '<span class="je-sort-mark">⇅</span>';
+    return '<span class="je-sort-mark on">' + (jeSort.dir === 'desc' ? '▼' : '▲') + '</span>';
+  };
+  const jeTh = (key, label, extraClass, style) => {
+    if(groupBy !== 'register'){
+      return '<th' + (extraClass ? ' class="' + extraClass + '"' : '') +
+             (style ? ' style="' + style + '"' : '') + '>' + label + '</th>';
+    }
+    const call = 'window.__inlineJESortBy && window.__inlineJESortBy(\'' + key + '\')';
+    return '<th class="je-sortable' + (extraClass ? ' ' + extraClass : '') + '"' +
+           (style ? ' style="' + style + '"' : '') +
+           ' role="button" tabindex="0"' +
+           ' title="Sort by ' + label + ' — click again to reverse, a third time to restore the original order"' +
+           ' onclick="' + call + '"' +
+           ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + call + ';}">' +
+           label + jeSortMark(key) + '</th>';
+  };
+
   const TH = '<thead><tr>' +
-    '<th style="width:96px;">Date</th>' +
-    '<th style="width:92px;">Account</th>' +
-    '<th>Account name</th>' +
-    '<th class="num" style="width:130px;">Debit</th>' +
-    '<th class="num" style="width:130px;">Credit</th>' +
-    '<th style="width:130px;">Fund</th>' +
-    '<th style="width:30%;">Description</th>' +
+    jeTh('date',   'Date',         '',    'width:96px;') +
+    jeTh('acct',   'Account',      '',    'width:92px;') +
+    jeTh('name',   'Account name', '',    '') +
+    jeTh('debit',  'Debit',        'num', 'width:130px;') +
+    jeTh('credit', 'Credit',       'num', 'width:130px;') +
+    jeTh('fund',   'Fund',         '',    'width:130px;') +
+    jeTh('desc',   'Description',  '',    'width:30%;') +
   '</tr></thead>';
 
   // ── Register view — one continuous ruled table, all rows ──
   if(groupBy === 'register'){
+    /* Sort a COPY. `rows` is either M.acctJournals itself or a filtered view
+       of it; sorting it in place would reorder the journals the DIU push and
+       the Excel export read, so a sort chosen for reading would silently
+       change what gets posted. */
+    let regRows = rows;
+    if(jeSort && jeSort.key){
+      const amt = r => +r.amountLE || 0;
+      const keyOf = {
+        date:   r => r.effectiveDate || '',
+        acct:   r => r.account || '￿',         // blanks last, not first
+        name:   r => (r.glAccountName || r.accountName || '').toLowerCase(),
+        // Debit and credit sort on the signed value with the other side at
+        // zero, so one click gathers that side together, largest or smallest
+        // first — which is what someone hunting an outlier actually wants.
+        debit:  r => r.isDebit  ? amt(r) : -1,
+        credit: r => !r.isDebit ? amt(r) : -1,
+        fund:   r => String(fundLabel(r)).toLowerCase(),
+        desc:   r => (r.transactionComments || r.transactionType || '').toLowerCase()
+      }[jeSort.key];
+      if(keyOf){
+        regRows = rows.slice().sort((a, b) => {
+          const va = keyOf(a), vb = keyOf(b);
+          if(va < vb) return jeSort.dir === 'desc' ? 1 : -1;
+          if(va > vb) return jeSort.dir === 'desc' ? -1 : 1;
+          // Stable tie-break on the entry number so equal keys keep a
+          // predictable order instead of shuffling between renders.
+          return (+a.jeIndex || 0) - (+b.jeIndex || 0);
+        });
+      }
+    }
     host.innerHTML =
       '<div class="je-entry">' +
         '<table class="je-table">' + TH +
-        '<tbody>' + rows.map(r => (
+        '<tbody>' + regRows.map(r => (
           '<tr>' +
             '<td>' + fmtJeDate(r.effectiveDate) + '</td>' +
             '<td class="acct-code">' + (acctCode(r) || '—') + '</td>' +
@@ -22757,6 +22829,19 @@ window.__renderInlineJETable = function(){
     );
   });
   host.innerHTML = parts.join('');
+};
+
+/* Three-state column sort for the flat register view. Held on window rather
+   than in the DOM so it survives the re-render that a filter keystroke or a
+   fresh accounting run triggers. Switching back to the grouped journal-entry
+   view leaves the choice intact — it simply does not apply there. */
+window.__inlineJESort = null;
+window.__inlineJESortBy = function(key){
+  const s = window.__inlineJESort;
+  if(!s || s.key !== key)      window.__inlineJESort = { key, dir:'asc' };
+  else if(s.dir === 'asc')     window.__inlineJESort = { key, dir:'desc' };
+  else                         window.__inlineJESort = null;   // third click — engine order
+  if(typeof window.__renderInlineJETable === 'function') window.__renderInlineJETable();
 };
 
 window.__inlineJECopyTsv = function(){
