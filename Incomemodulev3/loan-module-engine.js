@@ -1654,6 +1654,10 @@ function buildSchedule(instr){
   // (prevents float-rounding overshoot) and crystallise the residual when the
   // loan is derecognised (balance → 0 via paydown / sale / write-off).
   let cumulativeEIRAccreted = 0;
+  /* Set once the asset leaves the balance sheet through a sale or a
+     debt-for-equity swap (IFRS 9 §3.2.3 — substantially all risks and rewards
+     transferred). Never un-set: derecognition is not reversible. */
+  let assetDerecognised = false;
 
   // ---- SONIA / margin ratchet helpers ---------------------------------
   // instr.marginSchedule: [{ from: ISO, to: ISO|null, marginBps: number }]
@@ -2075,6 +2079,9 @@ function lookupMarginBps(dateISO){
         balance        = 0;
         drawnBalance   = 0;
         carryingValue  = 0;
+        /* Latched for the rest of the schedule. A sold position must stay off
+           the balance sheet — nothing downstream may put value back on it. */
+        assetDerecognised = true;
       }
       // Transtype #14 — Loan Participation / Partial Sell-Down. NWF sells a
       // fraction (`fraction` 0–1, or `notionalSold` in currency) of the loan
@@ -2136,6 +2143,7 @@ function lookupMarginBps(dateISO){
         balance        = 0;
         drawnBalance   = 0;
         carryingValue  = 0;
+        assetDerecognised = true;      // same latch as a sale — see loanSale
       }
       // Transtype #8 — Write-off. Stage 3 credit-impaired loan whose recovery
       // efforts have failed. Zero out balance + carryingValue; subsequent days
@@ -2198,6 +2206,14 @@ function lookupMarginBps(dateISO){
         instr.coupon = Object.assign({}, instr.coupon || {}, mev.newCoupon);
       }
       if(mev.newMaturity){
+        /* Record what it was before overwriting it. An extension is a
+           concession in its own right — often the most valuable one in the
+           package — and without the before picture the ledger shows a 2030
+           loan with no trace that it was contracted to 2028. Only set once, so
+           a second modification does not erase the original. */
+        if(!instr.originalMaturityDate) instr.originalMaturityDate = instr.maturityDate;
+        mev._maturityBefore = instr.maturityDate;
+        mev._maturityAfter  = mev.newMaturity;
         // Note: maturity change mid-life only takes effect for accrual purposes
         // beyond this date. The day grid was fixed at loop start so we won't
         // extend rows — set a flag for the user.
@@ -2257,6 +2273,10 @@ function lookupMarginBps(dateISO){
         date: dISO,
         modType: mev.modType || 'non_substantial',
         reason: mev.reason || null,
+        // The extension, when there was one — surfaced beside the gain or loss
+        // so the panel can show what changed, not only what it cost.
+        maturityBefore: mev._maturityBefore || null,
+        maturityAfter:  mev._maturityAfter  || null,
         supplied,
         derived: derived ? derived.gainLoss : null,
         source: (supplied != null) ? 'supplied' : (derived ? 'derived' : 'none'),
@@ -2691,7 +2711,15 @@ function lookupMarginBps(dateISO){
     //      correct accounting treatment: the loan is derecognised so any
     //      unamortised deferred fee must be recognised at that moment.
     let dailyEIRAccretion = 0;
-    if(eirFlatFallback > 0){
+    if(eirFlatFallback > 0 && !assetDerecognised){
+      /* Crystallisation is right when the loan is EXTINGUISHED — repaid, or
+         written off — because the unamortised fee has nowhere left to go but
+         income. It is wrong when the asset is SOLD. On a disposal the
+         unamortised fee is already inside the carrying amount the proceeds are
+         compared against, so recognising it again afterwards resurrects an
+         asset that has been derecognised: the sold position carried 546,714
+         the day after it left the balance sheet. Once derecognised, the pool
+         goes with the asset and this stops entirely. */
       const remainingPool = Math.max(0, deferredEIRPool - cumulativeEIRAccreted);
       if(balance > 0.005){
         // Standard daily accretion — but never exceed the residual pool
@@ -3756,17 +3784,35 @@ function generateDIU(instr, summary, opts){
     }
     jeIndex++;
   }
-  // Modification gain/loss — framework-aware label (IFRS 9 §5.4.3 / ASC 470-50 / AASB 9 §5.4.3)
-  if(Math.abs(summary.totalModGain || 0) > 0.005){
-    const v = summary.totalModGain;
-    const fwm = (instr.accountingFramework || 'IFRS').toUpperCase();
-    const modTag = fwm === 'USGAAP' ? 'ASC 470-50' : fwm === 'AASB' ? 'AASB 9' : fwm === 'ASPE' ? 'ASPE 3856' : 'IFRS 9';
+  /* Modification gain/loss — framework-aware label
+     (IFRS 9 §5.4.3 / ASC 470-50 / AASB 9 §5.4.3).
+
+     Posted ON THE MODIFICATION DATE, one entry per event. This used to book
+     the period total at summary.periodEnd — the end of the modelling horizon —
+     so a restructuring agreed on 1 January 2026 appeared in the ledger dated
+     31 December 2030, four years after the event and in the wrong reporting
+     period entirely. §5.4.3 recognises the adjustment when the terms change,
+     not when the model runs out. Falls back to periodEnd only when no dated
+     events were carried out of the schedule. */
+  const fwm = (instr.accountingFramework || 'IFRS').toUpperCase();
+  const modTag = fwm === 'USGAAP' ? 'ASC 470-50' : fwm === 'AASB' ? 'AASB 9'
+               : fwm === 'ASPE' ? 'ASPE 3856' : 'IFRS 9';
+  const modEvts = (Array.isArray(summary.modEvents) && summary.modEvents.length)
+    ? summary.modEvents.filter(m => m && Math.abs(+m.gainLoss || 0) > 0.005)
+    : (Math.abs(summary.totalModGain || 0) > 0.005
+        ? [{ date: summary.periodEnd, gainLoss: summary.totalModGain, description: null }]
+        : []);
+  for(const mev of modEvts){
+    const v = +mev.gainLoss || 0;
+    const when = mev.date || summary.periodEnd;
+    const memo = (v > 0 ? 'Modification gain' : 'Modification loss') + ' on ' + when +
+                 (mev.description ? ' — ' + mev.description : '');
     if(v > 0){
-      add('Modification Gain (' + modTag + ')',          v, false, '44000', summary.periodEnd, `Modification gain for ${summary.periodEnd}`);
-      add('Modification — Loan Asset Adjustment',         v, true,  '15000', summary.periodEnd, `Modification gain for ${summary.periodEnd}`);
+      add('Modification Gain (' + modTag + ')',   v, false, '44000', when, memo);
+      add('Modification — Loan Asset Adjustment', v, true,  '15000', when, memo);
     } else {
-      add('Modification Loss (' + modTag + ')',         -v, true,  '44000', summary.periodEnd, `Modification loss for ${summary.periodEnd}`);
-      add('Modification — Loan Asset Adjustment',       -v, false, '15000', summary.periodEnd, `Modification loss for ${summary.periodEnd}`);
+      add('Modification Loss (' + modTag + ')',  -v, true,  '44000', when, memo);
+      add('Modification — Loan Asset Adjustment',-v, false, '15000', when, memo);
     }
     jeIndex++;
   }

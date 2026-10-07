@@ -31,6 +31,11 @@ finance audience that cares about revenue recognition rather than credit.
 | **3** | `DEMO-FORGIVE-S3` | Principal forgiveness, extension, covenant reset, fee into EIR |
 | **4** | `DEMO-POCI` | Distressed secondary purchase; credit-adjusted EIR; no day-one allowance |
 | **5** | `DEMO-FEES-EIR` | Integral fees; a fee received before drawdown; deferred fee liability |
+| **6** | `DEMO-HAIRCUT-SALE` | Haircut, extension and repricing, then the position is sold and derecognised |
+
+Deals 3 and 6 pair well: the same haircut, but deal 6 carries on to the disposal
+six months later, so the audience sees a measurement loss and a derecognition
+loss side by side on one position.
 
 **Before you start.** Open the module, confirm the version banner reads V4.17 or
 later, and check the Active Deal dropdown lists all five deal names. If a deal
@@ -914,6 +919,187 @@ and the answer is a liability, not income and not a negative asset.
 
 ---
 
+# Deal 6 — Haircut, then sell the position
+
+**`DEMO-HAIRCUT-SALE` · ABC Manufacturing · Private Credit Fund A · USD 100,000,000**
+
+## The story
+
+A 100,000,000 senior term loan drawn 1 January 2024 at SOFR + 600bps, maturing
+2028. By late 2025 the borrower has liquidity problems and is breaching
+covenants — leverage 6.8x against a 4.0x limit, interest cover 1.1x against a
+2.0x minimum. The position is Stage 3.
+
+**1 January 2026 — the lender restructures.** Forgive 15,000,000 of principal,
+extend maturity two years to 2030, raise the margin to SOFR + 850bps, and take a
+0.85m amendment fee.
+
+**1 July 2026 — the lender gives up.** Six months later Fund A sells the whole
+position to Distressed Debt Fund B for 80,000,000 and walks away.
+
+## Why this deal exists
+
+Deal 3 showed a restructuring. This one shows what happens *afterwards*, and the
+point is that these are **two separate accounting events with two separate
+losses**, six months apart, measured on completely different bases.
+
+> The restructuring is a **measurement** question: the asset stays on the balance
+> sheet and is re-measured at the present value of the revised cash flows.
+>
+> The sale is a **derecognition** question: the asset leaves the balance sheet
+> entirely and the loss is simply proceeds less carrying amount.
+>
+> Nobody should be able to sit through this deal and still think a forgiveness
+> and a disposal are the same kind of event.
+
+## Screen 1 · The covenants that forced it
+
+**Open:** Stage 0 · Loan Builder, Covenants card.
+
+| | Threshold | Last reported | Status |
+|---|---|---|---|
+| Leverage ratio | max 4.00x | **6.80x** | breached |
+| Interest cover ratio | min 2.00x | **1.10x** | breached |
+
+**Say:** both breached at the December 2025 test, both carrying a SICR trigger.
+This is the documentary record of why the lender came to the table — and under
+§B5.5.17(k) it is also what moves the deal out of Stage 1 before anyone exercises
+judgement.
+
+## Screen 2 · The restructuring — four changes at once
+
+**Open:** the Tranche card, the spread schedule, and the Fees card.
+
+| | Before | After |
+|---|---|---|
+| Principal | 100,000,000 | **85,000,000** |
+| Margin | SOFR + 600bps | **SOFR + 850bps** |
+| Maturity | 31 Dec 2028 | **31 Dec 2030** |
+| Amendment fee | — | **850,000** |
+
+**Say:** note the direction of travel. The lender gives up 15m of principal but
+takes a higher margin for longer plus a fee. Those pull in opposite directions,
+which is exactly why the loss is not simply the forgiveness.
+
+## Screen 3 · The haircut — the number everyone gets wrong
+
+**Open:** Run & JEs → Run Accounting → Evidence Pack, modification panel.
+
+```
+Pre-restructuring carrying amount          99,393,095
+Original effective rate                       10.0000%
+Forgiven in the restructuring             (15,000,000)
+
+PV of revised cash flows at the original rate:
+  Amendment fee, 1 Jan 2026, at t=0             850,000
+  Quarterly interest at SOFR+850bps on 85,000,000
+  Principal repayment, 31 Dec 2030           85,000,000
+                                   PV =      87,041,465
+
+MODIFICATION LOSS                          (12,351,629)
+PV change                                      −12.43%
+```
+
+| | DR | CR |
+|---|---|---|
+| **1 Jan 2026** | 442000 Modification Loss (IFRS 9) | 141000 Loan Asset |
+| | 12,351,629 | 12,351,629 |
+
+**Three things to say:**
+
+**The loss is 12.35m, not 15m.** The principal forgiven is 15,000,000. The loss
+recognised is 12,351,629, because the lender also gained two extra years at a
+250bp higher margin and an 850,000 fee. Anyone booking the headline haircut
+overstates the charge by 2.6m.
+
+**Nothing goes through the allowance.** Look at what is absent — no write-off
+entry, no 145000 movement. A negotiated concession is a §5.4.3 modification, not
+a §5.4.4 write-off. The lender gave up the *right* to collect, not *hope* of
+collecting.
+
+**The entry is dated 1 January 2026.** Until this release the module posted it at
+the end of the modelling horizon — a restructuring agreed in January 2026
+appeared in the ledger dated December 2030, four years out and in the wrong
+reporting period. Worth saying plainly: it was found by building this deal.
+
+## Screen 4 · Six months of carrying the restructured loan
+
+**Open:** the Cashflow tab, carrying value column.
+
+| Date | Balance | Carrying amount | ECL allowance |
+|---|---|---|---|
+| 31 Dec 2025 | 100,000,000 | 99,393,095 | 45,000,000 |
+| 2 Jan 2026 | 85,000,000 | 87,042,131 | 38,250,000 |
+| 30 Jun 2026 | 85,000,000 | 87,101,657 | 38,250,000 |
+
+**Say two things.**
+
+**The carrying amount ties to the PV.** 87,042,131 against a measured PV of
+87,041,465 — a day of accretion apart. If those did not tie, the modification
+would not have been applied correctly, so it is worth checking out loud.
+
+**The allowance is 45% of exposure, not 100%.** Stage 3, LGD 45%: 45,000,000 on
+100m before, 38,250,000 on 85m after. The allowance follows the exposure down
+because the forgiveness reduced what is owed.
+
+## Screen 5 · The sale — derecognition
+
+**Open:** Stage 2 · Lifecycle Events, then the journal table filtered to
+1 July 2026.
+
+```
+Carrying amount at the sale date            87,101,657
+Proceeds from Distressed Debt Fund B        80,000,000
+LOSS ON DISPOSAL                            (7,101,657)
+```
+
+| | DR | CR |
+|---|---|---|
+| Cash received | **111000** Cash 80,000,000 | |
+| Loss on disposal | **442000** Realized Loss on Loan Sale 7,101,657 | |
+| Asset derecognition | | **141000** Loan Asset 87,101,657 |
+| Allowance released | **145000** Loan Loss Allowance 38,250,000 | **470000** Impairment 38,250,000 |
+
+**Four things to say:**
+
+**This is the entry your note sketched**, and it balances: cash in, loss to P&L,
+asset out. The asset leg appears as two rows — 80,000,000 against the proceeds
+and 7,101,657 residual — which together derecognise the whole 87,101,657.
+
+**The allowance comes back.** 38,250,000 of accumulated impairment is released on
+the same date, because the credit exposure left with the asset. A reviewer who
+expects the allowance to simply vanish should see it reversed through P&L, not
+written off.
+
+**The balance sheet is clean afterwards.** Balance nil, carrying amount nil,
+allowance nil, and it stays that way to the end of the schedule. Until this
+release the sold position carried 546,714 the day after it was sold — the
+unamortised amendment fee was being crystallised into a loan that no longer
+existed. Also found by building this deal.
+
+**Substantially all risks and rewards transferred**, so §3.2.3 gives full
+derecognition. If the fund had retained a first-loss piece or a repurchase
+obligation the answer would be different and the asset would stay on balance
+sheet — worth saying, because it is the question an auditor will ask next.
+
+## Screen 6 · Close — two losses, two bases
+
+Put the whole life on one line:
+
+| Date | Event | Loss | Measured as |
+|---|---|---|---|
+| 1 Jan 2026 | Restructuring | **12,351,629** | carrying amount less PV of revised cash flows at the original EIR |
+| 1 Jul 2026 | Sale | **7,101,657** | carrying amount less proceeds |
+| | **Total** | **19,453,286** | |
+
+**Close on this:** the lender forgave 15,000,000 and ultimately lost 19,453,286.
+Neither number is the other, and neither is reachable by arithmetic on the
+headline. One is a present-value measurement at a rate fixed years earlier; the
+other is a cash comparison on the day of sale. A system that cannot tell those
+two apart will get both wrong.
+
+---
+
 # Appendix A — What to do when someone challenges a number
 
 **"Why is deal 1 a gain when the borrower is distressed?"**
@@ -1062,6 +1248,7 @@ drawdown profile the rate is an approximation.
 | Principal Forgiveness and Extension Example | `DEMO-FORGIVE-S3` | `d9db5e2d-ed68-472d-a056-f384d82e856e` |
 | POCI Distressed Purchase Example | `DEMO-POCI` | `f0ef9565-8fdc-49ad-9dc4-6fe681903f2b` |
 | Integral Fees and Deferred Fee Example | `DEMO-FEES-EIR` | `0a8f90f9-f7c4-4297-baeb-b1bbf0679a3e` |
+| Restructuring, Haircut and Transfer Example | `DEMO-HAIRCUT-SALE` | `db489322-ef29-4fe2-9fdf-5f9163f385a8` |
 
 **Modification figures, as produced by the engine at V4.17**
 
@@ -1070,6 +1257,18 @@ drawdown profile the rate is an approximation.
 | 1 | 98,000,000 | 20.386%¹ | 106,033,913 | **8,033,913** | +8.17% | 23 |
 | 2 | 80,000,000 | 10.00%¹ | 80,393,618 | **393,618** | +0.49% | 28 |
 | 3 | 99,342,380 | 8.6603% | 86,220,347 | **(13,122,033)** | −13.21% | 21 |
+| 6 | 99,393,095 | 10.0000%¹ | 87,041,465 | **(12,351,629)** | −12.43% | 23 |
+
+**Deal 6 — the disposal, six months after the restructuring**
+
+| | |
+|---|---|
+| Carrying amount at 1 Jul 2026 | 87,101,657 |
+| Proceeds | 80,000,000 |
+| **Loss on disposal** | **(7,101,657)** |
+| ECL allowance released | 38,250,000 |
+| Carrying amount after derecognition | **0** |
+| Total loss across both events | **(19,453,286)** |
 
 ¹ On a deal where interest settles in kind, the discount rate is the solved
 effective rate plus the PIK element, because the cash flows being discounted
@@ -1133,3 +1332,5 @@ Every batch balances and nothing is unmapped.
 | IFRS 9 §B5.4.1 | Fees integral to the effective rate — origination, arrangement, underwriting |
 | IFRS 9 §B5.4.2 | Fees that are NOT integral — recognised under IFRS 15 |
 | IFRS 15 | Commitment fees where drawdown is not probable — revenue over the commitment period |
+| IFRS 9 §3.2.3 | Derecognition on transfer of substantially all risks and rewards |
+| IFRS 9 §5.4.4 | Write-off — no reasonable expectation of recovery (contrast with §5.4.3) |

@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 23; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 24; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.23"></script>
+<script src="portf-excel-parser.js?v=4.24"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -3251,7 +3251,21 @@
             <div id="b-signing-hint" class="text-[10px] text-gray-500 mt-1">Execution date. Interest accrues from Settlement.</div>
           </div>
           <div><label class="b-label required">Settlement Date</label><input id="b-settle" type="date" class="b-input"/></div>
-          <div><label class="b-label required">Maturity Date</label><input id="b-maturity" type="date" class="b-input"/></div>
+          <div><label class="b-label required">Maturity Date</label><input id="b-maturity" type="date" class="b-input"/>
+            <div id="b-maturity-hint" class="text-[10px] text-gray-500 mt-1 hidden"></div>
+          </div>
+          <!-- Original Maturity Date — what the loan was contracted to mature on
+               before any extension. Maturity Date always holds the CURRENT
+               position, because that is what every downstream calculation needs:
+               the schedule, the EIR horizon, the ECL life. But once a
+               restructuring extends a loan, "2030" on its own hides the fact
+               that it was a 2028 deal — and an extension is exactly the kind of
+               concession a reviewer wants to see, not read about in a note.
+               Blank means never extended. -->
+          <div><label class="b-label">Original Maturity Date</label>
+            <input id="b-original-maturity" type="date" class="b-input"/>
+            <div id="b-original-maturity-hint" class="text-[10px] text-gray-500 mt-1">Maturity before any extension. Leave blank if never extended.</div>
+          </div>
           <!-- Agent Name — the facility agent / administrative agent. Populated
                on most NWF deals, so it sits in the core Deal Setup grid rather
                than in the syndication panel further down. Column already exists
@@ -9105,14 +9119,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.23"></script>
-<script src="loan-module-instruments.js?v=4.23"></script>
-<script src="loan-module-analytics.js?v=4.23"></script>
+<script src="loan-module-engine.js?v=4.24"></script>
+<script src="loan-module-instruments.js?v=4.24"></script>
+<script src="loan-module-analytics.js?v=4.24"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.23"></script>
-<script src="demo-assistant-system-prompt.js?v=4.23"></script>
+<script src="demo-assistant-kb.js?v=4.24"></script>
+<script src="demo-assistant-system-prompt.js?v=4.24"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -12955,6 +12969,11 @@ window.SB = (function(){
         framework:         framework,
         settlement_date:   B.deal.settle || stamp.slice(0,10),
         maturity_date:     B.deal.maturity || stamp.slice(0,10),
+        /* Contractual maturity before any extension. Null when the loan has
+           never been extended — defaulting it to the current maturity would
+           assert "never extended" on every deal and make the field useless as
+           a signal. */
+        original_maturity_date: B.deal.originalMaturity || null,
         // Signing date is optional and has no fallback: an unstated execution
         // date must stay null, not silently become today, or it would read as
         // a fact nobody asserted.
@@ -13443,6 +13462,10 @@ window.SB = (function(){
           post_mod_cv:      (m.postModCv != null ? +m.postModCv : null),
           gain_loss:        (m.gainLoss != null ? +m.gainLoss : null),
           eir_reset:        (m.modType === 'substantial' || m.type === 'substantial' || !!m.eirReset),
+          // Extension audit trail, per event. Null on a modification that did
+          // not move the maturity — most of them.
+          maturity_before:  m.maturityBefore || m.maturity_before || null,
+          maturity_after:   m.maturityAfter  || m.maturity_after  || m.newMaturity || null,
           notes:            m.notes || null,
           created_by:       _uid
         }));
@@ -13774,6 +13797,7 @@ window.SB = (function(){
             framework:    row.framework,
             settle:       row.settlement_date,
             maturity:     row.maturity_date,
+            originalMaturity: row.original_maturity_date || '',
             signingDate:  row.signing_date || '',
             agentName:    row.agent_name || '',
             participationPct: row.participation_pct,
@@ -40847,7 +40871,31 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.deal.signingDate = $b('b-signing')?.value || '';
     B.deal.settle      = $b('b-settle')?.value || '';
     B.deal.maturity    = $b('b-maturity')?.value || '';
+    B.deal.originalMaturity = $b('b-original-maturity')?.value || '';
     B.deal.agentName   = ($b('b-agent-name')?.value || '').trim();
+
+    /* Show the extension on the Maturity field itself rather than making
+       someone compare two date boxes. Only when the two actually differ —
+       a hint that is always on screen is one nobody reads. */
+    (function(){
+      const hint = $b('b-maturity-hint');
+      if(!hint) return;
+      const om = B.deal.originalMaturity, m = B.deal.maturity;
+      if(om && m && om !== m){
+        const days = Math.round((new Date(m) - new Date(om)) / 86400000);
+        const yrs  = Math.round((Math.abs(days) / 365) * 10) / 10;
+        const dir  = days > 0 ? 'Extended' : 'Shortened';
+        const span = yrs >= 1
+          ? yrs + (yrs === 1 ? ' year' : ' years')
+          : Math.abs(days) + (Math.abs(days) === 1 ? ' day' : ' days');
+        hint.textContent = dir + ' from ' + om + ' — ' + span;
+        hint.className = 'text-[10px] mt-1 ' + (days > 0 ? 'text-amber-700' : 'text-red-700');
+        hint.classList.remove('hidden');
+      } else {
+        hint.textContent = '';
+        hint.classList.add('hidden');
+      }
+    })();
 
     // Signing after settlement is almost always a mistyped year, and it would
     // pass silently — nothing computes on signing date, so nothing else would
@@ -41662,6 +41710,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       })(),
       commitment: B.facility.commitment || totalFace,
       settlementDate: B.deal.settle, maturityDate: B.deal.maturity,
+      /* Carried for display and disclosure. maturityDate stays the CURRENT
+         maturity — every calculation that depends on a horizon reads that one
+         and must keep reading it. This is the before picture. */
+      originalMaturityDate: B.deal.originalMaturity || null,
       availabilityEnd: B.facility.availEnd || B.deal.maturity,
       dayBasis: B.facility.dayBasis, holidayCalendar: B.facility.holiday,
       coupon: firstIC ? {
@@ -43976,6 +44028,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     $b('b-framework').value     = B.deal.framework;
     $b('b-settle').value        = B.deal.settle;
     $b('b-maturity').value      = B.deal.maturity;
+    var _om = $b('b-original-maturity');
+    if(_om) _om.value = B.deal.originalMaturity || '';
     var _sg = $b('b-signing');
     if(_sg) _sg.value = B.deal.signingDate || '';
     var _ag = $b('b-agent-name');
@@ -45253,7 +45307,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(!$b('builder')){ return; }   // safety — v1 doesn't have this section
     // Wire top-level deal/facility inputs
     ['b-deal-name','b-deal-id','b-counterparty','b-le','b-currency','b-framework',
-     'b-signing','b-settle','b-maturity','b-agent-name',
+     'b-signing','b-settle','b-maturity','b-original-maturity','b-agent-name',
      'b-facility-name','b-commitment','b-avail-end','b-day-basis','b-holiday',
      'b-repayment','b-facility-type',
      // Mezz support — new construction/arranger inputs
@@ -50438,10 +50492,63 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       if(editRef){
         const target = _leResolveRef(editRef);
         if(!target) throw new Error('That event is no longer available — reload the deal and try again');
-        if(typeof form.update !== 'function'){
+        if(typeof form.update === 'function'){
+          form.update(values, target);
+        } else if(target.kind === 'ps' && target.rec){
+          /* Generic in-place edit for Tier 1 / Tier 2 events.
+
+             None of these forms carried an `update`, so every one of them —
+             write-off, loan sale, recovery, cure, forbearance, participation,
+             debt-for-equity, capitalised costs — either refused to save or,
+             before the ref existed, silently appended a SECOND event. Editing a
+             write-off and pressing Save gave you two write-offs.
+
+             They all live on the same array and are all flat records, so one
+             rule serves them: write back the fields this form actually
+             declares, leave everything else on the record alone, and never
+             touch `type` — changing a write-off into a sale is not an edit. */
+          const rec = target.rec;
+          (form.fields || []).forEach(f => {
+            const name = f.name;
+            if(!name || name === 'type') return;
+            let v = values[name];
+            if(v === undefined) return;
+            if(f.type === 'money'){
+              // Blank money is meaningful on several of these — a write-off
+              // with no amount means the whole balance — so keep null, do not
+              // coerce to zero.
+              v = (v === '' || v === null) ? null : +v;
+            }
+            if(name === 'fraction' && v != null && v !== '') v = +v / 100;
+            /* Write the money back to whatever the record calls it. A Cure form
+               field named `amount` belongs in `releaseAmount`; setting `amount`
+               instead would leave the original release untouched and add a
+               property the engine never reads — an edit that reports success
+               and changes nothing. */
+            if(name === 'amount' && target.amountField && target.amountField !== 'amount'){
+              rec[target.amountField] = v;
+              return;
+            }
+            rec[name] = v;
+          });
+          // Keep the Builder-side copy in step so a save-to-DB round trip does
+          // not resurrect the pre-edit values from B.lifecycleEvents.
+          if(window.B && Array.isArray(window.B.lifecycleEvents)){
+            const twin = window.B.lifecycleEvents.find(x =>
+              x && x.type === rec.type && x.date === target.values.date);
+            if(twin){
+              twin.date = rec.date;
+              if(rec.amount != null) twin.amount = rec.amount;
+              if(rec.salePrice != null) twin.saleProceeds = rec.salePrice;
+              if(rec.reason != null) twin.reason = rec.reason;
+            }
+          }
+          if(window.M && window.M.treatmentDirty && target.inst){
+            window.M.treatmentDirty[target.inst.id] = true;
+          }
+        } else {
           throw new Error('This event type cannot be edited inline yet');
         }
-        form.update(values, target);
       } else {
         form.submit(values);
       }
@@ -50527,7 +50634,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     // Tier 1/2 events from inst.principalSchedule
     const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
     if(inst && Array.isArray(inst.principalSchedule)){
-      inst.principalSchedule.forEach(ev => {
+      inst.principalSchedule.forEach((ev, psi) => {
         const meta = LE_EVENT_CATALOG.find(x => (
           (ev.type === 'prepayment' && x.key === 't4') ||
           (ev.type === 'mandatoryPrepayment' && x.key === 't16') ||
@@ -50544,6 +50651,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         if(!meta) return;
         out.push({
           key: meta.key, name: meta.name, type: meta.type, category: meta.category,
+          /* The address back to the record. Every other row type has carried
+             one since Edit was built; the Tier 1 and Tier 2 rows did not, so
+             the pencil on a write-off, a loan sale, a recovery or a cure called
+             the form with an empty ref and got a blank ADD form — it looked
+             like Edit did nothing, and anyone who filled it in created a
+             duplicate event rather than changing the one they clicked. */
+          ref: 'ps|' + psi,
           tranche: (tranches[0] && (tranches[0].name || tranches[0].id)) || 'Deal-level',
           amount: +ev.amount || +ev.salePrice || +ev.equityFairValue || 0,
           date: ev.date || '',
@@ -50734,6 +50848,51 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         pct: f.pct || '', flatAmount: f.flatAmount || '', bps: f.bps || '',
         base: f.base || 'commitment', frequency: f.frequency || 'oneOff',
         trancheRef: f.trancheRef || '', paymentDate: f.paymentDate || ''
+      }};
+    }
+    /* Tier 1 / Tier 2 events — write-off, loan sale, recovery, cure,
+       forbearance, participation, debt-for-equity, capitalised costs. These
+       live on inst.principalSchedule rather than on the Builder object, so the
+       ref carries an index into that array.
+
+       The value map is deliberately generous: these event types do not share a
+       field vocabulary (a write-off has `amount`, a sale has `salePrice`, a
+       cure has `releaseAmount`, a swap has `equityFairValue`), and each form
+       picks the names it knows. Supplying all of them is what lets one
+       resolver serve every Tier 1/2 form without a per-type branch. */
+    if(kind === 'ps'){
+      const inst = (typeof currentInstrument === 'function') ? currentInstrument() : null;
+      const ps = inst && Array.isArray(inst.principalSchedule) ? inst.principalSchedule : null;
+      if(!ps) return null;
+      const ev = ps[+parts[1]];
+      if(!ev) return null;
+      /* These records do not agree on what to call the money. A write-off and a
+         recovery use `amount`; a cure uses `releaseAmount`; forbearance uses
+         `deferredAmount`; a sale uses `salePrice`; a swap uses
+         `equityFairValue`. Most of the forms call their money field `amount`
+         regardless, so without this the Cure form opened with a blank amount
+         and saving it would have written a nil release.
+
+         Resolve the record's own name once, prefill from it, and carry the name
+         so the save path writes back to the same place rather than inventing an
+         `amount` property the engine never reads. */
+      const amtField = ['amount','releaseAmount','deferredAmount','salePrice','equityFairValue']
+        .find(k => ev[k] != null) || 'amount';
+      return { kind, rec: ev, inst, index: +parts[1], amountField: amtField, values: {
+        date:             ev.date || '',
+        amount:           (ev[amtField] != null ? ev[amtField] : ''),
+        salePrice:        (ev.salePrice != null ? ev.salePrice : ''),
+        releaseAmount:    (ev.releaseAmount != null ? ev.releaseAmount : ''),
+        deferredAmount:   (ev.deferredAmount != null ? ev.deferredAmount : ''),
+        equityFairValue:  (ev.equityFairValue != null ? ev.equityFairValue : ''),
+        equityShares:     (ev.equityShares != null ? ev.equityShares : ''),
+        fraction:         (ev.fraction != null ? ev.fraction * 100 : ''),
+        participant:      ev.participant || '',
+        trigger:          ev.trigger || '',
+        category:         ev.category || '',
+        kind:             ev.kind || '',
+        reason:           ev.reason || '',
+        label:            ev.reason || ''
       }};
     }
     return null;
