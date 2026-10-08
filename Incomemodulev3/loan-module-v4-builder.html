@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 52; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 54; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.52"></script>
+<script src="portf-excel-parser.js?v=4.54"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -7682,7 +7682,7 @@
         <div id="fc-warning" style="display:none; font-size:11.5px; line-height:1.5; padding:10px 12px; background:#FFFBEB; border:0.5px solid #FDE68A; border-radius:8px; margin-bottom:10px; color:#92400E;"></div>
 
         <div style="background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:8px; padding:12px 14px;">
-          <div style="display:grid; grid-template-columns:150px 150px 1fr auto auto; gap:8px; align-items:end; margin-bottom:8px;">
+          <div style="display:grid; grid-template-columns:140px 120px 190px 1fr auto auto; gap:8px; align-items:end; margin-bottom:8px;">
             <div>
               <label class="b-label" style="font-size:10.5px;">As-of date</label>
               <input id="fc-asof" type="date" class="b-input"/>
@@ -7690,6 +7690,13 @@
             <div>
               <label class="b-label" style="font-size:10.5px;">Scenario</label>
               <input id="fc-scenario" type="text" class="b-input" value="base" placeholder="base"/>
+            </div>
+            <div>
+              <label class="b-label" style="font-size:10.5px;" title="Whether these rates are the bare index or the finished coupon.">Rate basis</label>
+              <select id="fc-basis" class="b-input">
+                <option value="benchmark">Benchmark — margin added</option>
+                <option value="all_in">All-in — margin included</option>
+              </select>
             </div>
             <div>
               <label class="b-label" style="font-size:10.5px;">Source / note</label>
@@ -9322,14 +9329,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.52"></script>
-<script src="loan-module-instruments.js?v=4.52"></script>
-<script src="loan-module-analytics.js?v=4.52"></script>
+<script src="loan-module-engine.js?v=4.54"></script>
+<script src="loan-module-instruments.js?v=4.54"></script>
+<script src="loan-module-analytics.js?v=4.54"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.52"></script>
-<script src="demo-assistant-system-prompt.js?v=4.52"></script>
+<script src="demo-assistant-kb.js?v=4.54"></script>
+<script src="demo-assistant-system-prompt.js?v=4.54"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -11075,7 +11082,7 @@ window.SB = (function(){
     if(!_client || !_connected) return [];
     try {
       let q = _client.from('rfr_forecast_curves')
-        .select('id, rfr_index, scenario, as_of_date, name, source, notes, is_active, created_at')
+        .select('id, rfr_index, scenario, as_of_date, rate_basis, name, source, notes, is_active, created_at')
         .eq('is_active', true)
         .order('as_of_date', { ascending: false });
       if(rfrIndex) q = q.eq('rfr_index', rfrIndex);
@@ -11143,6 +11150,9 @@ window.SB = (function(){
       rfr_index:  String(meta.rfr_index).trim().toUpperCase(),
       scenario:   (meta.scenario || 'base').trim(),
       as_of_date: meta.as_of_date,
+      // 'all_in' only when asked for explicitly — defaulting to it would strip
+      // margins from a curve nobody said was all-in.
+      rate_basis: (meta.rate_basis === 'all_in') ? 'all_in' : 'benchmark',
       name:       meta.name   || null,
       source:     meta.source || null,
       notes:      meta.notes  || null,
@@ -11187,6 +11197,8 @@ window.SB = (function(){
     }
     _rfrForecastCache[key] = {
       curve: res.curve,
+      // 'benchmark' (engine adds the deal margin) or 'all_in' (it must not).
+      basis: res.curve.rate_basis || 'benchmark',
       points: res.points.map(p => ({ date: p.fix_date, rate: +p.rate }))
     };
     console.log('[rfr] forecast warmed: ' + index + '/' + (scenario||'base') +
@@ -42756,13 +42768,25 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             ? window.SB.getCachedForecast(firstIC.baseIndex, 'base') : null;
           return (hit && hit.points) ? hit.points : [];
         })(),
+        /* 'benchmark' or 'all_in'. Carried onto the instrument because the
+           engine has to treat the two differently: an all-in curve already
+           contains a margin, so adding the deal's own on top double-counts it.
+           Defaults to 'benchmark', which is what every curve meant before the
+           distinction existed. */
+        forecastBasis: (function(){
+          if(firstIC.forecastBasis) return firstIC.forecastBasis;
+          const hit = (window.SB && typeof window.SB.getCachedForecast === 'function')
+            ? window.SB.getCachedForecast(firstIC.baseIndex, 'base') : null;
+          return (hit && hit.basis) ? hit.basis : 'benchmark';
+        })(),
         forecastMeta: (function(){
           if(firstIC.forecastMeta) return firstIC.forecastMeta;
           const hit = (window.SB && typeof window.SB.getCachedForecast === 'function')
             ? window.SB.getCachedForecast(firstIC.baseIndex, 'base') : null;
           return (hit && hit.curve)
             ? { asOf: hit.curve.as_of_date, scenario: hit.curve.scenario,
-                source: hit.curve.source, name: hit.curve.name }
+                source: hit.curve.source, name: hit.curve.name,
+                basis: hit.basis || 'benchmark' }
             : null;
         })()
       } : undefined,
@@ -52819,10 +52843,35 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     const pts = res.points;
     const first = pts[0], last = pts[pts.length-1];
+    const basis = res.curve.rate_basis || 'benchmark';
+    const isAllIn = basis === 'all_in';
+    // Reflect the stored basis in the picker so a re-save does not silently
+    // flip it back to the default.
+    const basisEl = $('fc-basis'); if(basisEl) basisEl.value = basis;
     sum.innerHTML = '<b>' + pts.length + '</b> points · ' + first.fix_date + ' → ' + last.fix_date +
       ' · as at <b>' + res.curve.as_of_date + '</b> · scenario <b>' + res.curve.scenario + '</b>' +
-      (res.curve.source ? ' · <span style="color:var(--n-500);">' + String(res.curve.source).slice(0,70) + '</span>' : '');
-    if(badge){ badge.className = 'chip purple text-[10px]'; badge.textContent = pts.length + ' points'; }
+      ' · basis <b style="color:' + (isAllIn ? '#B45309' : '#047857') + ';">' +
+        (isAllIn ? 'ALL-IN — margin already included' : 'benchmark — margin added by the deal') + '</b>' +
+      (res.curve.source ? '<br><span style="color:var(--n-500);">' + String(res.curve.source).slice(0,90) + '</span>' : '');
+    if(badge){
+      badge.className = 'chip ' + (isAllIn ? 'amber' : 'purple') + ' text-[10px]';
+      badge.textContent = pts.length + ' points · ' + (isAllIn ? 'all-in' : 'benchmark');
+    }
+    /* An all-in curve carries ONE margin. Applying it to a deal on a different
+       margin is wrong in exactly the way the basis flag exists to prevent, so
+       it is said plainly rather than left for someone to infer. */
+    if(isAllIn && warn){
+      warn.style.display = 'block';
+      warn.innerHTML =
+        '<b>All-in curve — the engine will not add a margin on these days.</b><br>' +
+        'These rates are the finished coupon, so for every day the curve covers the deal margin and any ESG ' +
+        'adjustment are skipped. Two consequences worth holding in mind: the curve embeds <b>one</b> margin, so it is ' +
+        'only valid for deals carrying that same margin; and the observation window that straddles the changeover ' +
+        'mixes benchmark days with all-in days, so rates within about one tenor of ' +
+        (pts[0] ? pts[0].fix_date : 'the cutover') + ' are a blend of the two.';
+      return;   // the step-at-cutover check below is meaningless for an all-in curve
+    }
+    if(badge && !isAllIn){ /* benchmark curve — fall through to the step check */ }
 
     /* Cutover sanity. The forecast is supposed to continue the actual series,
        so a large step where one ends and the other begins is worth saying out
@@ -52885,8 +52934,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const dropped = _fcParsed.rows.length - clean.length;
     if(!clean.length){ if(typeof toast === 'function') toast('Every row had a zero rate — nothing to save.', 5000, { kind:'warning' }); return; }
 
+    const basis = ($('fc-basis')?.value === 'all_in') ? 'all_in' : 'benchmark';
     const cur = await window.SB.upsertForecastCurve({
-      rfr_index: idx, scenario, as_of_date: asOf, source,
+      rfr_index: idx, scenario, as_of_date: asOf, source, rate_basis: basis,
       name: idx + ' forecast as at ' + asOf,
       notes: dropped ? (dropped + ' zero-rate row(s) in the source were skipped.') : null
     });

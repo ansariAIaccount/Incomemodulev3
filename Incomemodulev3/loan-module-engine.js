@@ -745,6 +745,27 @@ if(typeof window !== 'undefined') window.rfrRateOn = rfrRateOn;
 /* The last day with an ACTUAL fixing — the cutover. Exposed so the UI can say
    "observed to 17 Sep 2026, forecast thereafter" instead of leaving the reader
    to work out which part of a 35-year schedule was ever observed. */
+/* True when the forecast in force on this day is an ALL-IN rate — the coupon
+   itself, margin already included — rather than a bare benchmark.
+
+   Only meaningful on days the forecast actually covers. Inside the actual
+   fixings, and beyond the curve's last point, the rate is a benchmark and the
+   margin applies as normal; treating those days as all-in would strip a margin
+   that was never in the number.
+
+   The distinction is worth this much care because it is invisible in the data:
+   a 6% all-in rate and a 6% benchmark are the same number, and the only thing
+   that says which is which is the curve it came from. Read one as the other
+   and every deal on the index is wrong by its margin, every day, with nothing
+   on screen to show it. */
+function rfrForecastIsAllIn(instr, dateISO){
+  const rfr = instr && instr.rfr;
+  if(!rfr) return false;
+  if((rfr.forecastBasis || 'benchmark') !== 'all_in') return false;
+  return rfrRateSourceOn(instr, dateISO) === 'forecast';
+}
+if(typeof window !== 'undefined') window.rfrForecastIsAllIn = rfrForecastIsAllIn;
+
 function rfrLastActualDate(instr){
   const fxs = instr && instr.rfr && instr.rfr.fixings;
   if(!Array.isArray(fxs) || !fxs.length) return null;
@@ -2609,7 +2630,12 @@ function lookupMarginBps(dateISO){
          with nothing observed behaves exactly as before. */
       const observed = rfrRateOn(instr, todayISO);
       const base = (observed != null) ? observed : floatingRate;
-      let r = base + (todayBandBps != null ? todayBandBps / 10000 : (instr.coupon.spread ?? 0));
+      /* An all-in forecast IS the coupon. Adding the margin band on top would
+         charge it twice — the curve already contains one. */
+      const _allIn = rfrForecastIsAllIn(instr, todayISO);
+      let r = _allIn
+        ? base
+        : base + (todayBandBps != null ? todayBandBps / 10000 : (instr.coupon.spread ?? 0));
       if(instr.coupon.floor != null) r = Math.max(r, instr.coupon.floor);
       if(instr.coupon.cap   != null) r = Math.min(r, instr.coupon.cap);
       couponRate = r;
@@ -2623,7 +2649,25 @@ function lookupMarginBps(dateISO){
       const baseMarginBps = lookupMarginBps(todayISO);
       const marginBps = (baseMarginBps != null ? baseMarginBps : (instr.coupon.spread ?? 0)*10000)
                        + esgDeltaBps(todayISO);
-      let r = rfrBase + marginBps/10000;
+      /* Same rule as the term branch: on a day covered by an ALL-IN forecast
+         the rate already includes a margin, so none is added. ESG is dropped
+         with it — an all-in quote is a finished number, and layering a
+         sustainability adjustment onto it would be inventing a second
+         adjustment nobody quoted. */
+      const _allInRfr = rfrForecastIsAllIn(instr, todayISO);
+      /* KNOWN EDGE, not handled: computeCompoundedRFR averages over an
+         observation window, and the window that straddles the cutover contains
+         benchmark days on one side and all-in days on the other. Compounding
+         those together gives a rate that is neither — too high to be the
+         benchmark, too low to be the all-in coupon.
+
+         It affects one window (one tenor's worth of days, so about three
+         months on a 3M deal) and self-corrects once the whole window sits in
+         the forecast. Left alone deliberately rather than papered over,
+         because the alternatives — extending the actuals, or back-filling the
+         margin into them — would both invent data. Worth knowing when reading
+         rates either side of the changeover date. */
+      let r = _allInRfr ? rfrBase : rfrBase + marginBps/10000;
       if(instr.coupon.floor != null) r = Math.max(r, instr.coupon.floor);
       if(instr.coupon.cap   != null) r = Math.min(r, instr.coupon.cap);
       couponRate = r;
