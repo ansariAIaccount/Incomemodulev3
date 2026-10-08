@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 26; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 37; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.26"></script>
+<script src="portf-excel-parser.js?v=4.37"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9119,14 +9119,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.26"></script>
-<script src="loan-module-instruments.js?v=4.26"></script>
-<script src="loan-module-analytics.js?v=4.26"></script>
+<script src="loan-module-engine.js?v=4.37"></script>
+<script src="loan-module-instruments.js?v=4.37"></script>
+<script src="loan-module-analytics.js?v=4.37"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.26"></script>
-<script src="demo-assistant-system-prompt.js?v=4.26"></script>
+<script src="demo-assistant-kb.js?v=4.37"></script>
+<script src="demo-assistant-system-prompt.js?v=4.37"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -13341,8 +13341,36 @@ window.SB = (function(){
       // ═══════════════════════════════════════════════════════════════════
 
       // 7. treatment_overrides (1:1 with deal)
-      // Always upsert (one row per deal). Delete any existing row first
-      // to ensure clean state, then insert if there's at least one override.
+      /* Read the stored row BEFORE writing, so a save can merge rather than
+         replace.
+
+         This used to delete the row outright and reinsert whatever happened to
+         be in memory. That makes every save a full overwrite of a 60-column
+         row from a single in-memory object — and whenever that object was
+         partial, the columns it had no opinion about were destroyed. Loading a
+         deal and running accounting was enough to do it: the credit parameters
+         on all seven demo deals were reduced to NULL that way, and because the
+         engine simply computes no ECL when PD and LGD are absent, every
+         affected run came out with no impairment at all and no error anywhere.
+
+         Deliberately clearing a value is still possible, but only from the
+         Stage 2 form, which is the only thing entitled to say "this field is
+         now empty" — see __treatmentFormLoadedFor. Anything else merges. */
+      let _ovExisting = null;
+      try {
+        const { data: _ovPrev } = await _client
+          .from('treatment_overrides').select('*').eq('deal_id', dealId).maybeSingle();
+        _ovExisting = _ovPrev || null;
+      } catch(e){
+        console.warn('[SB] saveDeal: could not read existing treatment_overrides — ' +
+                     'merging is not possible, so the write is skipped to avoid ' +
+                     'overwriting stored values blind:', e && e.message);
+        _ovExisting = undefined;   // undefined = "unknown", distinct from "no row"
+      }
+      if(_ovExisting === undefined){
+        // Fail closed: leave the stored row alone rather than risk replacing it.
+        counts.treatmentOverrides = 0;
+      } else {
       await _client.from('treatment_overrides').delete().eq('deal_id', dealId);
       const ov = B.treatmentOverrides || {};
       const hasOverrides = ov && Object.keys(ov).some(k => ov[k] !== null && ov[k] !== undefined && ov[k] !== '');
@@ -13439,9 +13467,66 @@ window.SB = (function(){
           pik_frequency:                ov.pikCapitalizationFrequency || null,
           created_by:                   _uid
         };
-        const { error: ovErr } = await _client.from('treatment_overrides').insert(overrideRow);
+        /* Merge over the stored row instead of replacing it.
+
+           Every column above resolves to `null` when the in-memory override
+           object has no value for it, and null is indistinguishable from a
+           deliberate clear. So a null is only allowed to land when the Stage 2
+           form was loaded for THIS deal — the form is the one caller entitled
+           to say a field is now empty. Every other path (a load, an accounting
+           run, an autosave) keeps whatever was stored.
+
+           Without this, `pd_annual` and `lgd` on all seven demo deals were set
+           to NULL simply by loading each deal and running accounting, and the
+           runs that followed silently computed no impairment. */
+        /* A null from this path is NEVER treated as a deliberate clear.
+
+           The obvious test — "was the Stage 2 form loaded for this deal?" —
+           does not work, and trying it cost another round of data loss:
+           loadTreatmentForm stamps the deal whenever the form is populated,
+           including on a programmatic load, so a form that had just been
+           filled from an instrument carrying no credit parameters looked
+           exactly like a user who had deliberately emptied every field. Deal 1
+           was nulled a second time that way, minutes after being restored.
+
+           So the rule is simply: a value present in memory is written, a value
+           absent from memory leaves the stored one alone. The cost is that a
+           field cannot be blanked by saving — clearing one means writing the
+           new value explicitly — and that is the right side to err on for a
+           column that feeds impairment. */
+        const _merged = Object.assign({}, _ovExisting || {}, { deal_id: dealId });
+        const _preserved = [];
+        Object.keys(overrideRow).forEach(k => {
+          const v = overrideRow[k];
+          if(v !== null && v !== undefined){ _merged[k] = v; return; }
+          if(_ovExisting && _ovExisting[k] !== null && _ovExisting[k] !== undefined){
+            _preserved.push(k);                       // keep the stored value
+          } else {
+            _merged[k] = v;                           // nothing stored either
+          }
+        });
+        delete _merged.id;                            // let the table own its key
+        delete _merged.created_at;
+        _merged.updated_at = new Date().toISOString();
+        if(_preserved.length){
+          console.warn('[SB] saveDeal: kept stored treatment_overrides values the ' +
+            'in-memory state had no opinion about (' + _preserved.join(', ') + ').');
+        }
+        const { error: ovErr } = await _client.from('treatment_overrides').insert(_merged);
         if(ovErr){ console.error('[SB] saveDeal: treatment_overrides:', ovErr); return { ok:false, reason: ovErr.message }; }
         counts.treatmentOverrides = 1;
+      } else if(_ovExisting){
+        /* Nothing in memory at all, but a stored row exists — put it back.
+           The delete above has already run, so returning here without
+           reinserting is how a deal's entire treatment record disappeared. */
+        const _restore = Object.assign({}, _ovExisting, { deal_id: dealId });
+        delete _restore.id; delete _restore.created_at;
+        const { error: reErr } = await _client.from('treatment_overrides').insert(_restore);
+        if(reErr){ console.error('[SB] saveDeal: treatment_overrides restore:', reErr); return { ok:false, reason: reErr.message }; }
+        console.warn('[SB] saveDeal: no treatment overrides in memory — restored the ' +
+                     'stored row rather than leaving the deal with none.');
+        counts.treatmentOverrides = 1;
+      }
       }
 
       // 8. modification_events (1:N) — uses LEGACY column names from the
@@ -13965,8 +14050,27 @@ window.SB = (function(){
             apraStandard:       row.aasb_extras[0].apra_standard
           } : null,
           // V3 — Stage 2 settings (proper relational hydration)
-          treatmentOverrides: (Array.isArray(row.treatment_overrides) && row.treatment_overrides.length) ? (function(){
-            const o = row.treatment_overrides[0];
+          /* treatment_overrides is 1:1 — deal_id is the primary key and there
+             is no surrogate id — so PostgREST embeds it as an OBJECT, not an
+             array of one. This read tested `Array.isArray(...)` and nothing
+             else, so the test was false for every row ever returned and every
+             stored treatment override was discarded on load.
+
+             Nothing reported it. The builder simply carried no overrides, the
+             engine saw no PD or LGD and computed no impairment, and the save
+             path then wrote back the nothing it had — which is how the credit
+             parameters came to be deleted rather than merely ignored. ECL
+             appeared to work only in the session where a deal was first built,
+             while the values were still in memory and had never round-tripped.
+
+             Accepts either shape: array-of-one if the relationship is ever
+             redefined as 1:N, object for the 1:1 it is today. */
+          treatmentOverrides: (function(){
+            const _raw = row.treatment_overrides;
+            const o = Array.isArray(_raw) ? (_raw.length ? _raw[0] : null)
+                    : (_raw && typeof _raw === 'object' ? _raw : null);
+            if(!o) return null;
+            return (function(){
             return {
               // Map DB enum stage1/stage2/stage3/poci back to integer 1/2/3 for the UI.
               // poci → null (UI uses a separate flag for purchased credit-impaired).
@@ -14034,7 +14138,8 @@ window.SB = (function(){
               pikRate:                     (o.pik_rate != null ? +o.pik_rate : null),
               pikCapitalizationFrequency:  o.pik_frequency
             };
-          })() : null,
+            })();
+          })(),
           modificationEvents: (Array.isArray(row.modification_events) ? row.modification_events.slice().sort((a,b) => (a.modification_date||'').localeCompare(b.modification_date||'')) : []).map(m => ({
             // Use the Builder shape (date / modType / reason / gainLoss / pvDelta)
             date:       m.modification_date,
@@ -21735,7 +21840,32 @@ async function runAccounting(){
   const prior = btns.map(b => ({ el: b, html: b.innerHTML, dis: b.disabled }));
   btns.forEach(b => { b.disabled = true; b.style.opacity = '0.6'; b.style.cursor = 'wait'; });
   try {
-    return await runAccountingImpl();
+    /* Ceiling on the whole run, for the same reason the heavy-write gate has
+       one (HEAVY_WRITE_MAX_MS): the `finally` below releases the gate on
+       success and on throw, but neither happens if the promise never settles.
+       A persist that stalls — a dead session, a request that never answers —
+       leaves __acctRunInFlight set for the lifetime of the page, and every
+       later run is refused with "a run is still saving" while the status chip
+       cheerfully reads "Accounting complete". That is what stopped six of the
+       seven demo deals from re-running: the first stalled against an expired
+       session and silently locked out the rest.
+
+       The race does not cancel the underlying work — it cannot — it just stops
+       a stalled run from owning the gate forever, and says so out loud rather
+       than leaving the UI lying about its state. */
+    const ACCT_RUN_MAX_MS = 180000;
+    let _timer = null;
+    const timeout = new Promise((_, reject) => {
+      _timer = setTimeout(() => reject(new Error(
+        'Run Accounting exceeded ' + (ACCT_RUN_MAX_MS / 1000) + 's and was abandoned. ' +
+        'The run may not have been saved — check the run list before relying on it. ' +
+        'A stalled database session is the usual cause.')), ACCT_RUN_MAX_MS);
+    });
+    try {
+      return await Promise.race([runAccountingImpl(), timeout]);
+    } finally {
+      if(_timer) clearTimeout(_timer);
+    }
   } catch(err){
     console.error('Run Accounting failed:', err);
     if(typeof toast === 'function') toast('Run Accounting failed: ' + err.message);
@@ -22185,13 +22315,20 @@ async function runAccountingImpl(){
      && M.externalScheduleUse.capitalisedIntoBalance > 0.005){
     try {
       const cap = +M.externalScheduleUse.capitalisedIntoBalance.toFixed(2);
-      const pikRows = M.acctJournals.filter(j => /^PIK Investment$/i.test(j.transactionType || ''));
+      /* Matches the old reclass name AND the corrected pair the engine now
+         emits. The engine used to post 'PIK Investment' as a negative reclass;
+         it posts 'PIK Interest Capitalised' / 'PIK Interest Income' as a
+         positive DR-asset / CR-income pair. Without the second name this
+         filter silently found nothing on a re-run and the overlay's
+         capitalisation stopped being replaced. */
+      const _pikRowRe = /^(PIK Investment|PIK Interest Capitalised|PIK Interest Income)$/i;
+      const pikRows = M.acctJournals.filter(j => _pikRowRe.test(j.transactionType || ''));
       if(pikRows.length){
         const tpl = pikRows[0];
         const incomeRow = M.acctJournals.find(j => /Income - Daily Accrued Interest/i.test(j.transactionType || ''));
         const assetAcct  = tpl.account || '141000';
         const incomeAcct = (incomeRow && incomeRow.account) || '23000';
-        M.acctJournals = M.acctJournals.filter(j => !/^PIK Investment$/i.test(j.transactionType || ''));
+        M.acctJournals = M.acctJournals.filter(j => !_pikRowRe.test(j.transactionType || ''));
         const mk = (type, acct, isDebit) => Object.assign({}, tpl, {
           transactionType: type, account: acct, isDebit: isDebit,
           glAccountName: (isDebit ? (tpl.glAccountName || 'Loan Investment')
@@ -41699,21 +41836,124 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   }
   window.__resolveSettlement = _resolveSettlement;
 
-  /* Split the deal's interest rate into the part settled in cash and the part
-     settled in kind, so the engine can accrue each correctly. Rates are summed
-     across every tranche's components — the instrument is the facility. */
-  function _splitCashPikRates(){
-    let cash = 0, pik = 0, anyPik = false, freq = null;
+  /* ─── Date-banded spreads ────────────────────────────────────────────────
+     An interest component is a base rate plus a list of dated spread bands,
+     and `computeAllInRate` (Stage 1) reads both: allIn = base + band.bps.
+     Everything downstream of the builder used to read the base alone, so a
+     component priced "6% base, +400bps for 2025, +0bps after" reached the
+     engine as a flat 6% and one written "0% base, +1100bps for the amendment
+     year" reached it as 0% — i.e. switched off. The bands were being collected,
+     stored, round-tripped through the database and then discarded.
+
+     These two helpers turn the component list into the shape the engine reads:
+     a base rate plus a marginSchedule of [{from,to,marginBps}].
+
+     Rates are summed across every tranche's components, because the instrument
+     IS the facility. Summing composes correctly with the band model: each
+     component contributes base + band, so the facility is Σbase + Σband, which
+     is why the base and the schedule can be emitted separately. */
+
+  /* Sum the band bps in force on `dateISO` across the given components.
+
+     Where two bands both cover the date, the one that STARTS later wins. Bands
+     are stored with inclusive ends, so a schedule written as
+     "…to 2025-07-01" followed by "from 2025-07-01…" has both bands live on the
+     changeover day — which is how every one of these deals is actually stored.
+     Taking the first match in array order gave the expiring band the day, so a
+     margin that drops to nothing on 1 July kept its old rate, and on a
+     one-day-boundary band it would have kept it for the whole period. */
+  function _bandBpsOnFor(comps, dateISO){
+    let bps = 0;
+    comps.forEach(ic => {
+      const bands = Array.isArray(ic.spreads) ? ic.spreads : [];
+      let best = null;
+      bands.forEach(s => {
+        if(!s) return;
+        const from = s.from || '0000-01-01';
+        const to   = s.to   || '9999-12-31';
+        if(dateISO < from || dateISO > to) return;
+        if(!best || from >= (best.from || '0000-01-01')) best = s;
+      });
+      if(best) bps += (+best.bps || 0);
+    });
+    return bps;
+  }
+
+  /* Merge every component's bands into one schedule for the facility.
+
+     Components need not share boundaries — a senior margin stepping annually
+     alongside a PIK leg that runs for one year produces boundaries from both —
+     so the merge walks the union of all start dates and emits one band per
+     interval, carrying the summed bps in force at that interval's start.
+     Taking any single component's bands and calling them the facility's would
+     silently drop the others. */
+  function _mergeBandSchedule(comps){
+    const withBands = comps.filter(ic => Array.isArray(ic.spreads) && ic.spreads.length);
+    if(!withBands.length) return [];
+    const starts = new Set();
+    withBands.forEach(ic => ic.spreads.forEach(s => { if(s && s.from) starts.add(s.from); }));
+    if(!starts.size) return [];
+    const sorted = Array.from(starts).sort();
+    const out = [];
+    sorted.forEach((from, i) => {
+      // This band runs until the day before the next boundary; the last one is
+      // left open-ended so it covers the rest of the deal's life, however far
+      // the maturity is later extended.
+      /* Day-before arithmetic done entirely in UTC and formatted by hand.
+         Going through a local-midnight Date and the shared toISO lost a day
+         (a band ending 2025-07-01 came back as 2025-06-29), which left every
+         boundary with a one-day hole in it. An uncovered day is not a cosmetic
+         gap: the lookup returns null for it, and null means "no band given",
+         so the rate silently falls back to the base or to the constant spread
+         for that day. */
+      let to = null;
+      if(i + 1 < sorted.length){
+        const [yy, mm, dd] = sorted[i + 1].split('-').map(Number);
+        const prev = new Date(Date.UTC(yy, mm - 1, dd - 1));
+        to = prev.getUTCFullYear() + '-' +
+             String(prev.getUTCMonth() + 1).padStart(2, '0') + '-' +
+             String(prev.getUTCDate()).padStart(2, '0');
+      }
+      out.push({ from, to, marginBps: _bandBpsOnFor(withBands, from) });
+    });
+    return out;
+  }
+
+  /* Cash and PIK rates as at a date, plus the band schedules for each leg.
+     `asOfDate` defaults to settlement — the rate at initial recognition, which
+     is what the original EIR must be struck on. */
+  function _splitCashPikRates(asOfDate){
+    const when = asOfDate || B.deal.settle || '';
+    let cashBase = 0, pikBase = 0, anyPik = false, freq = null;
+    const cashComps = [], pikComps = [];
     (B.tranches || []).forEach(t => {
       (t.interestComponents || []).forEach(ic => {
         const rate = +ic.baseValue || 0;
         const how  = _resolveSettlement(ic, t);
-        if(how === 'cash') cash += rate;
-        else { pik += rate; anyPik = true; if(!freq) freq = t.pikCapitalisationFreq || null; }
+        if(how === 'cash'){ cashBase += rate; cashComps.push(ic); }
+        else {
+          pikBase += rate; pikComps.push(ic); anyPik = true;
+          if(!freq) freq = t.pikCapitalisationFreq || null;
+        }
       });
     });
-    return { cash, pik, anyPik, freq };
+    const cashBands = _mergeBandSchedule(cashComps);
+    const pikBands  = _mergeBandSchedule(pikComps);
+    const cashAt = cashBase + _bandBpsOnFor(cashComps, when) / 10000;
+    const pikAt  = pikBase  + _bandBpsOnFor(pikComps,  when) / 10000;
+    /* A PIK leg counts as present when it is non-zero at ANY point, not merely
+       today. On a deferral amendment the inception rate is nil by definition,
+       and reporting `enabled:false` on that basis is what stopped the engine
+       from ever capitalising it. */
+    const pikEverNonZero = (pikBase > 0) ||
+      pikBands.some(b => Math.abs(+b.marginBps || 0) > 0);
+    return {
+      cash: cashAt, pik: pikAt,
+      cashBase, pikBase, cashBands, pikBands,
+      anyPik, pikEverNonZero, freq
+    };
   }
+  window.__splitCashPikRates = _splitCashPikRates;
 
   function builderToInstrument(){
     if(!B.deal.settle || !B.deal.maturity || !B.tranches.length) return null;
@@ -41801,10 +42041,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
            here as the cash coupon and again as instr.pik.rate. With no PIK
            anywhere this is byte-for-byte the previous behaviour, so no existing
            deal moves. */
-        fixedRate: firstIC.baseIndex === 'FIXED'
-                     ? (_pikSplit.anyPik ? _pikSplit.cash : firstIC.baseValue) : 0,
-        floatingRate: firstIC.baseIndex !== 'FIXED'
-                     ? (_pikSplit.anyPik ? _pikSplit.cash : firstIC.baseValue) : 0,
+        /* The BASE rate only. Date-banded spreads travel separately in
+           marginSchedule below, and the engine adds whichever band is in force
+           to this base each day. Folding the settlement-date band in here
+           instead would freeze the opening rate across the whole life — which
+           is exactly the bug being fixed. */
+        /* Summed across cash components, always. It used to be the FIRST
+           component's base whenever the deal had no PIK leg, while the bands
+           emitted below are summed across all of them — a base scoped to one
+           component with margins scoped to every component is a rate that
+           belongs to no deal. The two have to agree, and summing is the model
+           the facility already used wherever a PIK component was present. */
+        fixedRate:    firstIC.baseIndex === 'FIXED' ? _pikSplit.cashBase : 0,
+        floatingRate: firstIC.baseIndex !== 'FIXED' ? _pikSplit.cashBase : 0,
+        /* Fallback for deals with no bands at all. Where bands exist the engine
+           prefers them, so this is not consulted — it used to be the ONLY
+           spread the engine ever saw, fixed at whichever band sat first in the
+           array, which on an unsorted list could be the amendment-year
+           concession applied to all five years. */
         spread: (firstIC.spreads?.[0]?.bps || 0) / 10000,
         // Floor / Cap on the all-in rate. Engine reads coupon.floor and
         // coupon.cap and clamps `raw` between them. Both stored as decimals
@@ -41812,6 +42066,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         floor: (+firstIC.floorBps || 0) > 0 ? (+firstIC.floorBps / 10000) : null,
         cap:   (+firstIC.capBps   || 0) > 0 ? (+firstIC.capBps   / 10000) : null
       } : { type:'Fixed', fixedRate: 0.05, floatingRate:0, spread:0, floor:null, cap:null },
+      /* Date-banded margin for the CASH leg. The engine already had a dated
+         lookup over this field (lookupMarginBps) but only ever consulted it on
+         the compounded-RFR branch, and only external PortF deals populated it
+         — so for every internally built deal it was empty and every band was
+         lost. Emitted for all coupon types now; absent when the deal has no
+         bands, which leaves the previous constant-spread behaviour intact. */
+      marginSchedule: _pikSplit.cashBands.length ? _pikSplit.cashBands : undefined,
       // V3 — Project RFR convention from the first interest term so the engine's
       // compounded-RFR helper has lookback / observation_shift / lockout /
       // daily_compounding / weighted available. Without this, those persisted
@@ -41845,11 +42106,22 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
          never capitalise. It is mapped to Quarterly and flagged rather than
          passed through to be ignored — see pikFrequencyUnsupported below. */
       pik: (function(){
-        if(!_pikSplit.anyPik || _pikSplit.pik <= 0) return { enabled:false, rate:0 };
+        /* Gate on whether PIK runs at ANY point, not on the rate today.
+           `_pikSplit.pik <= 0` was the old test, and on a payment-deferral
+           amendment it is always true at inception: the PIK leg is written as
+           a 0% base with a band that starts at the amendment date. So the
+           instrument reached the engine with PIK switched off, nothing ever
+           capitalised, the balance never grew, and exposure at default stayed
+           flat through the deferral — the opposite of what a deferral does. */
+        if(!_pikSplit.anyPik || !_pikSplit.pikEverNonZero) return { enabled:false, rate:0 };
         const MAP = { monthly:'Monthly', quarterly:'Quarterly', annual:'Yearly' };
         return {
           enabled: true,
+          // Rate at settlement — the inception rate, used for the original EIR.
           rate: _pikSplit.pik,
+          // Base and bands, so the engine can price any day of the deal's life.
+          baseRate: _pikSplit.pikBase,
+          schedule: _pikSplit.pikBands.length ? _pikSplit.pikBands : undefined,
           capitalizationFrequency: MAP[_pikSplit.freq] || 'Quarterly'
         };
       })(),

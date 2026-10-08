@@ -590,6 +590,87 @@ function computeEIR(instr){
    Returns null when it cannot be computed (no original EIR, no horizon), so
    the caller can fall back rather than publish a zero that looks deliberate.
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══ Date-banded margins ═══════════════════════════════════════════════════
+   An interest component carries a base rate plus a list of dated spread bands
+   — [{from, to, marginBps}] — and the all-in rate on any day is the base plus
+   whichever band covers that day. This is how a step-up, a ratchet, a pricing
+   holiday and a PIK leg that only runs for one amendment year are all
+   expressed.
+
+   The engine previously read the base rate alone on every coupon type except
+   compounded-RFR, and the builder only ever handed over `spreads[0].bps` as a
+   single lifetime constant. So every band after the first was discarded, and
+   on a FIXED coupon all of them were: a deal priced at "6% base, +400bps for
+   2025, +0bps thereafter" ran at a flat 6%, and a PIK leg written as "0% base,
+   +1100bps during the amendment year" never capitalised a cent. Both are
+   silent — the schedule looks orderly, the journals balance, and the rate is
+   simply wrong.
+
+   Returns null, not 0, when no band covers the date. The two are different
+   answers: 0 bps is a band that deliberately adds nothing, while null means
+   nobody said — and only the caller knows whether its fallback is the
+   contractual spread or no spread at all. */
+function bandBpsOn(schedule, dateISO){
+  if(!Array.isArray(schedule) || !schedule.length || !dateISO) return null;
+  /* Where two bands both cover the date, the one that STARTS later wins.
+     Band ends are inclusive, so a schedule written "…to 2025-07-01" followed
+     by "from 2025-07-01…" has both live on the changeover day. Returning the
+     first match let the expiring band own that day — and since these schedules
+     arrive from a database with no ORDER BY, "first" is not even reliably the
+     earliest, so a margin could be read from the wrong period entirely. */
+  let best = null, bestFrom = null;
+  for(const b of schedule){
+    if(!b) continue;
+    const f = b.from || b.effectiveFrom || '0000-01-01';
+    const t = b.to   || b.effectiveTo   || '9999-12-31';
+    if(dateISO < f || dateISO > t) continue;
+    if(best === null || f >= bestFrom){ best = b; bestFrom = f; }
+  }
+  if(best === null) return null;
+  const bps = (best.marginBps != null) ? +best.marginBps : +best.bps;
+  return isFinite(bps) ? bps : 0;
+}
+if(typeof window !== 'undefined') window.bandBpsOn = bandBpsOn;
+
+/* The PIK rate in force on a given day.
+
+   `instr.pik.rate` is the rate at inception and stays the fallback, so a deal
+   with a flat PIK coupon behaves exactly as before. When a band schedule is
+   present it wins, because a PIK leg that switches on mid-life — the ordinary
+   shape of a payment-deferral amendment — cannot be expressed as one number.
+
+   Note the `enabled` check is deliberately NOT applied here: whether PIK runs
+   at all is the caller's question (see pikEverEnabled), and a zero rate today
+   with a non-zero band next year is still an enabled PIK leg. */
+function pikRateOn(instr, dateISO){
+  const p = instr && instr.pik;
+  if(!p) return 0;
+  const sched = p.schedule;
+  if(Array.isArray(sched) && sched.length){
+    const bps = bandBpsOn(sched, dateISO);
+    return (+p.baseRate || 0) + (bps == null ? 0 : bps / 10000);
+  }
+  return +p.rate || 0;
+}
+if(typeof window !== 'undefined') window.pikRateOn = pikRateOn;
+
+/* True when PIK runs at any point in the deal's life. A schedule whose bands
+   are all zero is not a PIK deal; one with a single non-zero band is, even if
+   the rate today is nil. Getting this wrong in either direction is costly: too
+   eager and every deal grows a PIK apparatus it never uses, too strict and the
+   amendment year never capitalises. */
+function pikEverEnabled(instr){
+  const p = instr && instr.pik;
+  if(!p || p.enabled === false) return false;
+  if((+p.rate || 0) > 0) return true;
+  if((+p.baseRate || 0) > 0) return true;
+  const sched = p.schedule;
+  if(Array.isArray(sched) && sched.some(b => b && Math.abs(+(b.marginBps != null ? b.marginBps : b.bps) || 0) > 0)) return true;
+  return !!p.enabled && (+p.rate || 0) > 0;
+}
+if(typeof window !== 'undefined') window.pikEverEnabled = pikEverEnabled;
+
 function deriveModificationGainLoss(instr, o){
   const modDate = o && o.modDate;
   const originalEIR = o && o.originalEIR;
@@ -605,6 +686,19 @@ function deriveModificationGainLoss(instr, o){
   let rate = 0;
   if(c.type === 'Fixed') rate = +c.fixedRate || 0;
   else rate = ((+c.floatingRate || 0) || ((instr.rfr && +instr.rfr.baseRate) || 0)) + (+c.spread || 0);
+  /* A banded margin is the revised rate when one covers the modification date.
+     Without this the derivation discounted the revised cash flows at the rate
+     in force BEFORE the amendment — so the one change the calculation exists
+     to measure was the one input it could not see. The band replaces the
+     constant spread rather than adding to it: on a non-Fixed coupon `spread`
+     is the fallback for "no band was given", so counting both would apply the
+     margin twice. */
+  const _modBandBps = bandBpsOn(instr.marginSchedule, modDate);
+  if(_modBandBps != null){
+    rate = (c.type === 'Fixed')
+      ? (+c.fixedRate || 0) + _modBandBps / 10000
+      : ((+c.floatingRate || 0) || ((instr.rfr && +instr.rfr.baseRate) || 0)) + _modBandBps / 10000;
+  }
   if(c.floor != null) rate = Math.max(rate, +c.floor);
   if(c.cap   != null) rate = Math.min(rate, +c.cap);
 
@@ -679,7 +773,12 @@ function deriveModificationGainLoss(instr, o){
      rises. Discounting it as though it were received quarterly in cash would
      erase the deferral the modification was granted to achieve, and report no
      loss on the very change that caused one. */
-  const pikRate = (instr.pik && instr.pik.enabled) ? (+instr.pik.rate || 0) : 0;
+  /* The PIK rate as at the modification date, not at inception. On a deferral
+     amendment these are the two numbers least likely to agree: PIK is commonly
+     nil before the concession and the whole point of it afterwards. Reading the
+     inception scalar projected a cash-only loan and reported no loss on the
+     very change that caused one. */
+  const pikRate = pikEverEnabled(instr) ? Math.max(0, pikRateOn(instr, modDate)) : 0;
   let pikAccrued = 0;
   const pikDates = pikRate > 0
     ? new Set((generatePaymentSchedule(
@@ -1234,12 +1333,29 @@ function buildSchedule(instr){
      returned a present value several times the carrying amount. On the Stage 3
      demo deal that produced a modification gain of 154,859,350 against a true
      figure of 12,022,928. Silent, and plausible enough to ship. */
+  /* The rate AT SETTLEMENT, because this is the rate the ORIGINAL effective
+     interest rate is solved on, and the original EIR is fixed at initial
+     recognition (IFRS 9 §B5.4.1). A later band is either a contractual step —
+     which belongs in a multi-step projection, not in this scalar — or a
+     concession, which must NOT contaminate the original EIR, or §5.4.3 would
+     discount the revised cash flows at a rate that already contains the
+     revision and report no gain or loss by construction. */
+  const _settleISO = toISO(settle);
+  if(instr.coupon && (instr.coupon.type === 'Fixed' || !instr.coupon.type)){
+    const bps = bandBpsOn(instr.marginSchedule, _settleISO);
+    if(bps != null) couponRateNominal = (instr.coupon.fixedRate ?? 0) + bps / 10000;
+  }
   if(!couponRateNominal && instr.coupon && instr.coupon.type !== 'Fixed'){
     const base = (instr.coupon.floatingRate != null && instr.coupon.floatingRate !== 0)
       ? instr.coupon.floatingRate
       : (instr.rfr?.baseRate ?? 0);
-    const firstStep = (instr.marginSchedule || [])[0];
-    const marginBps = firstStep?.marginBps ?? ((instr.coupon.spread ?? 0) * 10000);
+    /* Was `marginSchedule[0]` — the first band in array order, which is only
+       the band in force at settlement if the list happens to be sorted. It
+       often is not: these arrive from a UI list and from a database with no
+       ORDER BY on the band table, so a deal whose amendment-year concession
+       was stored first priced its entire life off the concession. */
+    const bandBps   = bandBpsOn(instr.marginSchedule, _settleISO);
+    const marginBps = (bandBps != null) ? bandBps : ((instr.coupon.spread ?? 0) * 10000);
     const esgBps    = instr.esgAdjustment?.deltaBps ?? 0;
     let r = base + (marginBps + esgBps)/10000;
     if(instr.coupon.floor != null) r = Math.max(r, instr.coupon.floor);
@@ -1493,8 +1609,18 @@ function buildSchedule(instr){
     : 0;
 
   // PIK tracking (capitalize at anchor dates)
-  const pikEnabled = !!instr.pik?.enabled;
-  const pikRateNominal = instr.pik?.rate ?? 0;
+  /* `pikEnabled` asks whether this deal has a PIK leg AT ALL, over its whole
+     life — so a leg that switches on at an amendment counts, even though the
+     rate today is nil. It gates the apparatus; the rate per day is looked up
+     separately below. Reading `instr.pik.enabled` alone was the reason a
+     deferral amendment never capitalised: builderToInstrument reports
+     `enabled:false` whenever the PIK rate AT INCEPTION is zero, which on a
+     deferral deal it always is. */
+  const pikEnabled = pikEverEnabled(instr);
+  /* The rate at inception. Still used for the ORIGINAL EIR (which must be
+     struck on inception terms) — the daily accrual uses pikRateOn(d) instead,
+     so a banded leg steps when it is contracted to. */
+  const pikRateNominal = pikRateOn(instr, toISO(settle));
   const capAnchor = settle;
   const capFreq = instr.pik?.capitalizationFrequency || 'Monthly';
 
@@ -2255,6 +2381,12 @@ function lookupMarginBps(dateISO){
              the projection, which is what makes the difference meaningful. */
           originalEIR: (function(){
             const solved = (effectiveYield != null) ? effectiveYield : couponRateNominal;
+            /* pikRateNominal is the rate AT INCEPTION, which is the right one
+               here and the wrong one three lines into the daily loop. The
+               original EIR is struck once, on the terms that existed at initial
+               recognition; a PIK leg introduced by this very amendment must not
+               appear in the rate the amendment is measured against, or the
+               concession would be discounted at a rate that already assumes it. */
             return pikEnabled ? (solved + pikRateNominal) : solved;
           })(),
           daysPerYear: daysPerYear
@@ -2297,9 +2429,27 @@ function lookupMarginBps(dateISO){
     let couponRate = instr.coupon?.fixedRate ?? 0;
     let floatingRate = instr.coupon?.floatingRate ?? 0;
     const todayISO = toISO(d);
-    if(instr.coupon?.type === 'Floating'){
-      // Apply spread + cap/floor
-      let r = floatingRate + (instr.coupon.spread ?? 0);
+    /* Date-banded margin for today. The compounded-RFR branch below already
+       does its own band lookup (and layers ESG on top), so it is left alone;
+       this covers Fixed and Floating, where the band was previously ignored
+       altogether and the whole life ran on the base rate plus — on Floating —
+       a single constant spread taken from whichever band happened to be first
+       in the array. */
+    const todayBandBps = bandBpsOn(instr.marginSchedule, todayISO);
+    if(instr.coupon?.type === 'Fixed' || !instr.coupon?.type){
+      /* A fixed coupon is base + band, the same arithmetic Stage 1 shows in the
+         interest-component card. Omitting this was the whole defect for deal
+         2: the band was computed one line up and then dropped, so a loan
+         contracted at "6% plus 400bps for year one" accrued 6% in year one.
+         Floor and cap are deliberately not applied — the Fixed branch has
+         never clamped, and a 10% coupon is not a breach of a cap that was
+         written for a floating rate. */
+      if(todayBandBps != null) couponRate = (instr.coupon?.fixedRate ?? 0) + todayBandBps / 10000;
+    } else if(instr.coupon?.type === 'Floating'){
+      // Apply spread + cap/floor. A band in force today replaces the constant
+      // spread rather than adding to it — `spread` is the fallback for "no
+      // band given", so using both would charge the margin twice.
+      let r = floatingRate + (todayBandBps != null ? todayBandBps / 10000 : (instr.coupon.spread ?? 0));
       if(instr.coupon.floor != null) r = Math.max(r, instr.coupon.floor);
       if(instr.coupon.cap   != null) r = Math.min(r, instr.coupon.cap);
       couponRate = r;
@@ -2379,9 +2529,15 @@ function lookupMarginBps(dateISO){
     }
 
     // ----- Daily PIK accrual -----
+    /* Today's rate, not inception's. A PIK leg written as "0% base, +1100bps
+       for the amendment year" accrues nothing outside that year and 11% inside
+       it — which is the point of writing it that way. Held in a per-day
+       variable so the row below can report the rate actually applied rather
+       than a lifetime constant that was true on day one and nowhere else. */
+    const pikRateToday = pikEnabled ? Math.max(0, pikRateOn(instr, todayISO)) : 0;
     let dailyPik = 0;
-    if(pikEnabled){
-      dailyPik = balance * pikRateNominal * dcf;
+    if(pikEnabled && pikRateToday > 0){
+      dailyPik = balance * pikRateToday * dcf;
       cumPikAccrued += dailyPik;
       cumPikEarned  += dailyPik;
     }
@@ -2816,7 +2972,7 @@ function lookupMarginBps(dateISO){
       capitalized,
       interestAdjustments: 0,
       cashInterestPayment: 0,
-      pikRate: pikEnabled ? pikRateNominal : 0,
+      pikRate: pikRateToday,
       dailyPik,
       cumPikAccrued,
       cumPikEarned,
@@ -3703,10 +3859,31 @@ function generateDIU(instr, summary, opts){
     add('Income - Daily Accrued Interest', summary.totalCashAccrual, false, '23000', summary.periodEnd, `Interest Adjustment for ${summary.periodEnd}${stepUpSuffix}`);
     jeIndex++;
   }
-  // PIK pair (capitalization)
-  if(summary.totalCapitalized){
-    add('PIK Investment', -summary.totalCapitalized, true,  '40100', summary.periodEnd, `PIK Capitalization for ${summary.periodEnd}`);
-    add('Interest Receivable', -summary.totalCapitalized, false, '23000', summary.periodEnd, `PIK Capitalization for ${summary.periodEnd}`);
+  /* PIK capitalisation pair.
+
+     This was written as a RECLASS with negative amounts — DR 'PIK Investment'
+     −cap, CR 'Interest Receivable' −cap — on the premise that PIK had already
+     been raised as a receivable and was now being moved into the loan asset.
+     That premise is false: PIK accrues in its own tracker (cumPikAccrued) and
+     never touches totalCashAccrual, so no receivable exists to reverse. The
+     pair therefore reversed a receivable that was never raised, and because
+     the balance check sums absolute values a negative DR/CR pair cannot tie at
+     all — the batch came out short by exactly the PIK total. The same fault
+     was found and fixed on the external feed path (see the 'PIK Interest
+     Capitalised' block in the builder, which records Ardersier failing by
+     £94,266,381.62, exactly its PIK); the internal path kept the broken
+     version because no internally built deal ever capitalised anything until
+     date-banded PIK started working.
+
+     What is economically true is simpler, and is what both paths now post: the
+     borrower owes more and the lender has earned income. DR the loan asset,
+     CR PIK interest income, both positive. The transaction-type names are the
+     ones applyInvestranGLMapping already routes to loanPikCapitalisation and
+     interestIncomePIK, so the accounts follow without a second mapping rule. */
+  if(Math.abs(summary.totalCapitalized || 0) > 0.005){
+    const cap = Math.abs(summary.totalCapitalized);
+    add('PIK Interest Capitalised', cap, true,  '141000', summary.periodEnd, `PIK Capitalization for ${summary.periodEnd}`);
+    add('PIK Interest Income',      cap, false, '421000', summary.periodEnd, `PIK Capitalization for ${summary.periodEnd}`);
     jeIndex++;
   }
   // Amortization — Transtype #1 (Discount Accretion) / #2 (Premium Amortization)
@@ -4835,8 +5012,25 @@ function splitECLByReportingPeriod(journals, inst, schedule, opts){
     });
 
   const out = [];
-  let prev = allowanceAt(firstDate);
-  if(prev == null) prev = 0;
+  /* The allowance starts at NIL, not at whatever it already is on day one.
+
+     This seeded `prev` from the first schedule date, which silently treated a
+     day-one allowance as an opening balance that had been journalised
+     somewhere else. Nothing ever journalises it. On a Stage 3 deal the target
+     is reached immediately — balance × lifetime PD × LGD, which on the Stage 3
+     demo deal is 100,000,000 × 100% × 40% = 40,000,000 — so the whole
+     establishment vanished: the ledger showed 4,651,540 of impairment expense
+     against 44,651,540 of releases, a net credit of exactly the 40,000,000
+     that was never charged. An allowance cannot appear on the balance sheet
+     without a charge to profit or loss, and the first reporting period is
+     where that charge belongs.
+
+     opts.openingAllowance exists for the one case where an opening balance is
+     real: an external feed that carries an allowance recognised before PCS saw
+     the deal. Posting that as a current-period charge would be just as wrong
+     in the other direction, so the caller can say so explicitly. */
+  let prev = (opts.openingAllowance != null) ? +opts.openingAllowance : 0;
+  if(!isFinite(prev)) prev = 0;
   for(const e of ends){
     const now = allowanceAt(e);
     if(now == null) continue;
