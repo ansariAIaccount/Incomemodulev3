@@ -34,6 +34,7 @@ loan-module-engine.js
 loan-module-instruments.js
 loan-module-analytics.js
 demo-assistant-kb.js
+demo-assistant-kb-ifrs.js
 demo-assistant-system-prompt.js"
 
 # Same 16-char truncated sha256 the hook and the runtime check use. Keep these

@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 63; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 64; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.63"></script>
+<script src="portf-excel-parser.js?v=4.64"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9331,14 +9331,21 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.63"></script>
-<script src="loan-module-instruments.js?v=4.63"></script>
-<script src="loan-module-analytics.js?v=4.63"></script>
+<script src="loan-module-engine.js?v=4.64"></script>
+<script src="loan-module-instruments.js?v=4.64"></script>
+<script src="loan-module-analytics.js?v=4.64"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.63"></script>
-<script src="demo-assistant-system-prompt.js?v=4.63"></script>
+<script src="demo-assistant-kb.js?v=4.64"></script>
+<!-- IFRS answer book, generated from PCS-IFRS-Demo-Answers.md. Loaded AFTER the
+     curated KB above because it APPENDS to window.FAQ_KB; loading it first would
+     have nothing to append to and the 256 IFRS entries would be dropped on the
+     floor without an error. Regenerate with tools/build-ifrs-kb.py — never edit
+     by hand, or the PDF the presenter reads and the answers the assistant gives
+     will drift apart. -->
+<script src="demo-assistant-kb-ifrs.js?v=4.64"></script>
+<script src="demo-assistant-system-prompt.js?v=4.64"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -35547,11 +35554,34 @@ function openLoadSessionModal(){
 
 const DA_STOPWORDS = new Set(['the','a','an','is','are','was','were','do','does','did','how','what','why','when','where','which','who','whom','whose','if','of','to','for','from','in','on','at','by','with','and','or','but','so','this','that','these','those','it','its','our','us','we','i','you','your','my','me','can','should','will','would','about','as','into','out','up','down','over','under','more','most','any','all','some','such','same','just','than']);
 
+/* Standard references are single tokens, not punctuation to be stripped.
+   The generic cleaner below replaces every non-alphanumeric character with a
+   space, which shatters exactly the thing an accountant is most likely to type:
+
+       "B5.4.7"    -> ["b5"]        every entry tagged b5, none of them right
+       "§5.4.3"    -> ["§5"]        same
+       "5.4.1(b)"  -> []            NO tokens at all, so daSearch returned
+                                    nothing whatever the knowledge base held
+
+   So reference-shaped substrings are pulled out whole first, and a § or a
+   leading letter is also emitted bare so that "§5.4.3", "5.4.3" and "IFRS 9
+   §5.4.3" all reach the same tag. */
+const DA_REF_RE = /§?[a-z]?\d+(?:[.\-]\d+)+(?:\([a-z]\))?/g;
+
 function daTokenize(s){
-  return (s || '').toLowerCase()
-    .replace(/[^a-z0-9§]+/g, ' ')   // keep IFRS section symbol
-    .split(/\s+/)
-    .filter(t => t && !DA_STOPWORDS.has(t) && t.length >= 2);
+  const raw = (s || '').toLowerCase();
+  const refs = [];
+  for(const m of (raw.match(DA_REF_RE) || [])){
+    refs.push(m);
+    if(m.charAt(0) === '§') refs.push(m.slice(1));   // §5.4.3 also matches 5.4.3
+  }
+  const words = raw.replace(/[^a-z0-9§]+/g, ' ').split(/\s+/);
+  const seen = new Set(), out = [];
+  for(const t of refs.concat(words)){
+    if(!t || DA_STOPWORDS.has(t) || t.length < 2 || seen.has(t)) continue;
+    seen.add(t); out.push(t);
+  }
+  return out;
 }
 
 function daScore(entry, queryTokens){
