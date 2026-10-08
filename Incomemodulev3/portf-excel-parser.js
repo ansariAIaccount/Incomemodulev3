@@ -725,7 +725,18 @@
           rate: rt,
           amount: amt === null ? 0 : amt,
           impliedDays: (bal && rt && amt) ? (amt * den) / (bal * rt) : null,
-          cashSettled: g.settlementType === 'cash' ? (amt || 0) : 0
+          /* NOT `settlementType === 'cash' ? amount : 0`. Settlement TYPE says
+             how a component settles when it settles — cash rather than PIK or
+             capitalised. It says nothing about WHEN. No template version has
+             ever carried a cash or settlement-date column (see the Cashflows
+             reader's column list), so reading the type as a date marked every
+             daily accrual row fully paid on the day it accrued: the receivable
+             was raised and cleared the same day for the life of the deal and
+             never showed a balance, and each row posted four JE lines instead
+             of two. Cash is a separate event, generated from First Settlement
+             Date + the stated frequency. Zero here means "this row is an
+             accrual", not "nothing was ever paid". */
+          cashSettled: 0
         });
       });
 
@@ -748,7 +759,7 @@
           amount: amt,
           impliedDays: null,
           isFlat: true,
-          cashSettled: f.settlementType === 'cash' ? amt : 0
+          cashSettled: 0            // accrual row — see the note above
         });
       });
     }
@@ -1035,7 +1046,7 @@
           amount: amt, impliedDays: null,
           isFlat: false,
           verificationStatus: 'unverified',
-          cashSettled: settle === 'cash' ? amt : 0
+          cashSettled: 0            // accrual row — see the note in the v0.3 reader
         });
       });
     }
@@ -1394,7 +1405,7 @@
         amount: amt === null ? 0 : amt,
         impliedDays: null,
         isFlat: !!(comp && comp.isFlatFee),
-        cashSettled: settle === 'cash' ? (amt || 0) : 0
+        cashSettled: 0              // accrual row — see the note in the v0.3 reader
       };
       row.verificationStatus = classifyRow(row, comp);
       out.push(row);

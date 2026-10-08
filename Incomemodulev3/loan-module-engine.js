@@ -4927,7 +4927,127 @@ function generateDIUFromExternalFeed(instr, rows, opts){
     return bits.join(' · ');
   };
 
-  const sorted = rows.slice().sort((a, b) =>
+  /* ── Accrual periods ──────────────────────────────────────────────────────
+     A feed row is accrual DETAIL, not a separate economic event. PortF sends
+     one row per component per day; the Components sheet separately states how
+     often each component accrues ("Quarterly", "Semi-annual") and when it
+     first settles. Until now the generator read neither, posting one JE pair
+     per received row — so SP013 Hamilton's 3,651 daily rows became 14,628
+     journal lines, and the sheet's "Quarterly" changed nothing at all.
+
+     Rows are therefore grouped into the period each component's own sheet
+     nominates, and one accrual is recognised per period. No amount moves: a
+     period's accrual is the exact sum of its daily rows, so the totals are
+     penny-identical to posting them individually. Only the granularity of
+     recognition changes, and it changes to the one the file asked for.
+
+     Periods are anchored on First Settlement Date, not on the first row, so
+     the boundaries land on the real payment dates — including for rows dated
+     before the first settlement, which fall in earlier (negative) periods.
+
+     A component whose frequency is one-off, at-maturity or simply unstated is
+     passed through untouched: with nothing stated there is no period to group
+     into, and inventing one would be the same mistake in the other direction.
+     Drawdowns, repayments and PIK capitalisations are always passed through —
+     those are dated events, not accrual detail, and aggregating them would
+     move real cash to a date it did not happen on. */
+  const _EXT_FREQ_MONTHS = { monthly: 1, quarterly: 3, semiannual: 6, semi: 6,
+                             annual: 12, yearly: 12 };
+  const _extFreqMonths = f =>
+    _EXT_FREQ_MONTHS[String(f || '').toLowerCase().replace(/[^a-z]/g, '')] || null;
+
+  /* Month arithmetic clamped to the month's length, so a 31st anchor gives
+     Feb 28/29 rather than rolling into March. */
+  const _addMonthsISO = (iso, n) => {
+    const d = new Date(iso + 'T00:00:00Z');
+    const day = d.getUTCDate();
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1));
+    const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+    t.setUTCDate(Math.min(day, last));
+    return t.toISOString().slice(0, 10);
+  };
+
+  // The smallest boundary (anchor + k·months, k any integer) that is >= date.
+  const _extPeriodEnd = (dateISO, anchorISO, months) => {
+    const a = new Date(anchorISO + 'T00:00:00Z'), d = new Date(dateISO + 'T00:00:00Z');
+    let k = Math.round((((d.getUTCFullYear() - a.getUTCFullYear()) * 12) +
+                        (d.getUTCMonth() - a.getUTCMonth())) / months);
+    let guard = 0;
+    while(_addMonthsISO(anchorISO, k * months) < dateISO && guard++ < 2000) k++;
+    while(_addMonthsISO(anchorISO, (k - 1) * months) >= dateISO && guard++ < 4000) k--;
+    return _addMonthsISO(anchorISO, k * months);
+  };
+
+  const terms = opts.componentTerms || null;
+  let feedRows = rows;
+  if(terms){
+    /* How many rows each component contributes, needed before the loop. A
+       component with no stated frequency and ONE row is a genuine one-off —
+       the row is the charge and its date is the payment date, so it settles.
+       A component with no stated frequency and MANY rows is accrual detail we
+       have no schedule for: settling those on their accrual dates is exactly
+       the fiction this change removes, so they accrue and the unsettled total
+       is reported rather than quietly paid or quietly dropped. */
+    const rowsPerComponent = new Map();
+    for(const r of rows){
+      const k = r.external_component_id;
+      if(k) rowsPerComponent.set(k, (rowsPerComponent.get(k) || 0) + 1);
+    }
+
+    const passthrough = [], buckets = new Map();
+    for(const r of rows){
+      const ptype = String(r.posting_type || '').toLowerCase();
+      const cid   = r.external_component_id;
+      const t     = cid ? terms[cid] : null;
+      const months = (ptype === 'interest' || ptype === 'fee') && t
+                       ? _extFreqMonths(t.accrualFreq) : null;
+      if(!months || !r.flow_date){
+        const settlesCash = t && String(t.settlementType || 'cash').toLowerCase() === 'cash';
+        const single = cid && rowsPerComponent.get(cid) === 1;
+        if((ptype === 'interest' || ptype === 'fee') && settlesCash){
+          if(single){
+            // One row, one charge, one payment — the £600,000 arrangement fee.
+            passthrough.push(Object.assign({}, r, { cash_settled: +r.amount || 0 }));
+          } else {
+            passthrough.push(r);                       // accrues; cash unknown
+            out.unsettled = (out.unsettled || 0) + (+r.amount || 0);
+            if(cid && (out.unsettledComponents = out.unsettledComponents || [])
+                 .indexOf(cid) === -1) out.unsettledComponents.push(cid);
+          }
+        } else {
+          passthrough.push(r);
+        }
+        continue;
+      }
+
+      const anchor = /^\d{4}-\d{2}-\d{2}$/.test(t.firstSettlement || '')
+                       ? t.firstSettlement : r.flow_date;
+      const pend = _extPeriodEnd(r.flow_date, anchor, months);
+      const key  = cid + '|' + pend;
+      let b = buckets.get(key);
+      if(!b){
+        b = Object.assign({}, r, {
+          flow_date: pend, period_start: r.period_start || r.flow_date,
+          period_end: pend, amount: 0, cash_settled: 0, days_covered: null
+        });
+        buckets.set(key, b);
+      }
+      b.amount += (+r.amount || 0);
+      const ps = r.period_start || r.flow_date;
+      if(ps < b.period_start) b.period_start = ps;
+      /* Settlement TYPE says cash rather than PIK; the period end is the date
+         the sheet's own schedule makes it due. The parser no longer claims a
+         row settles on the day it accrues — that fiction cleared the
+         receivable every day and kept its balance permanently nil. */
+      if(String(t.settlementType || 'cash').toLowerCase() === 'cash'){
+        b.cash_settled = b.amount;
+      }
+    }
+    feedRows = passthrough.concat(Array.from(buckets.values()));
+    out.rowsAggregated = rows.length - feedRows.length;
+  }
+
+  const sorted = feedRows.slice().sort((a, b) =>
     String(a.flow_date || '').localeCompare(String(b.flow_date || '')));
 
   for(const r of sorted){

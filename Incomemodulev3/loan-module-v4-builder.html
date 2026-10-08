@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 59; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 61; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.59"></script>
+<script src="portf-excel-parser.js?v=4.61"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9329,14 +9329,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.59"></script>
-<script src="loan-module-instruments.js?v=4.59"></script>
-<script src="loan-module-analytics.js?v=4.59"></script>
+<script src="loan-module-engine.js?v=4.61"></script>
+<script src="loan-module-instruments.js?v=4.61"></script>
+<script src="loan-module-analytics.js?v=4.61"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.59"></script>
-<script src="demo-assistant-system-prompt.js?v=4.59"></script>
+<script src="demo-assistant-kb.js?v=4.61"></script>
+<script src="demo-assistant-system-prompt.js?v=4.61"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -23012,7 +23012,11 @@ async function runAccountingImpl(){
       system: (B.deal.externalSystem || 'PortF'),
       snapshotId: _extCtx.snapshotId,
       trancheNames: _extCtx.trancheNames,
-      componentNames: _extCtx.componentNames
+      componentNames: _extCtx.componentNames,
+      // Per-component accrual frequency and first settlement date, so each
+      // component is recognised in the period its own sheet nominates rather
+      // than once per received daily row.
+      componentTerms: _extCtx.componentTerms
     });
     M.acctJournals = fed.entries;
     window.__acctExternalPosting = fed;
@@ -25553,7 +25557,17 @@ window.externalSnapshotToBuilder = function(snap){
       flatAmount: haveFlat ? flat : 0,
       base: _extPick(_EXT_FEEBASE, c.calculationBasis, 'commitment'),
       linkedComponentId: '',
-      frequency: _extPick(_EXT_FEEFREQ, c.settlementFrequency, 'oneOff'),
+      /* Accrual Frequency is what the Components sheet actually states, and
+         until now nothing read it: this line asked for `settlementFrequency`,
+         which readComponentsV04 has never emitted for any template version. So
+         `_extPick` returned its fallback on EVERY external fee, and a sheet
+         saying "Quarterly" produced a one-off fee while the stored snapshot
+         held the right answer the whole time. A settlement frequency is still
+         preferred when a reader supplies one — they are different questions
+         (when it is earned vs when it is paid) — but the fallback is now the
+         stated accrual frequency rather than a guess. */
+      frequency: _extPick(_EXT_FEEFREQ, c.settlementFrequency,
+                   _extPick(_EXT_FEEFREQ, c.accrualFrequency, 'oneOff')),
       paymentDate: c.firstSettlementDate || '',
       accrueFrom: '', accrueTo: '',
       ifrs: integral ? 'IFRS9-EIR'
@@ -25690,6 +25704,24 @@ window.loadExternalDeal = async function(dealId){
     // rather than an opaque id.
     componentNames: (snap.components || []).reduce((m, c) => { m[c.externalComponentId] = c.name; return m; }, {}),
     trancheNames:   (snap.tranches   || []).reduce((m, t) => { m[t.externalTrancheId]   = t.name; return m; }, {}),
+    /* The Components sheet states, per component, how often it accrues and when
+       it first settles. Both were parsed and stored from the first version of
+       the reader and neither has ever reached the journal generator, which
+       posted one JE pair per received row instead — so a feed carrying daily
+       accrual detail produced daily journals (3,651 rows → 14,628 lines on
+       SP013 Hamilton) no matter what the sheet said. Handing the terms over
+       lets the generator recognise each component in the period its own sheet
+       nominates. */
+    componentTerms: (snap.components || []).reduce((m, c) => {
+      m[c.externalComponentId] = {
+        name:           c.name,
+        postingType:    c.postingType,
+        accrualFreq:    c.accrualFrequency  || null,
+        settlementType: c.settlementType    || null,
+        firstSettlement: c.firstSettlementDate || null
+      };
+      return m;
+    }, {}),
     /* Kept as-is, including the null: a snapshot imported before checkpoints
        were captured must not be presented as one whose workbook stated none. */
     checkpoints: snapRow.checkpoints_jsonb,
