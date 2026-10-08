@@ -2599,10 +2599,24 @@ function lookupMarginBps(dateISO){
       if(covenantSICRActive && stage < 2) stage = 2;
       const pdAnn = instr.ifrs.pdAnnual || 0;
       const lgd   = instr.ifrs.lgd || 0;
+      /* The target is nil when there is no exposure, and the allowance is moved
+         toward the target either way.
+
+         This condition used to gate the WHOLE calculation on `balance > 0`,
+         which meant the allowance could be established but never released: on
+         the day the loan was repaid the block was skipped, so the allowance
+         simply kept its last value to the end of the schedule. It was invisible
+         while the grid showed only a gross carrying amount, and became a
+         negative net carrying amount the moment Gross and Net were shown side
+         by side — a repaid loan reporting an allowance against nothing.
+
+         Releasing to nil is also the right answer for a revolver that is fully
+         repaid mid-life and redrawn later: no exposure, no allowance, and the
+         allowance re-establishes when it is drawn again. */
+      let targetECL = 0;
       if(pdAnn > 0 && lgd > 0 && balance > 0){
         const yrsRemaining = Math.max(0, (maturity - d) / (365 * ONE_DAY));
         let lifetimePD = Math.min(1, pdAnn * yrsRemaining);
-        let targetECL;
         if(stage === 1){
           targetECL = balance * pdAnn * lgd;
         } else if(stage === 2){
@@ -2625,6 +2639,11 @@ function lookupMarginBps(dateISO){
           // Never provide for more than is outstanding.
           targetECL = Math.min(balance, targetECL);
         }
+      }
+      /* Move toward the target, including when the target is nil. Guarded on
+         "is there anything to do" rather than on "is there exposure", so the
+         release at repayment actually posts. */
+      if(Math.abs(targetECL - eclAllowance) > 0.005){
         dailyECLChange = targetECL - eclAllowance;
         eclAllowance += dailyECLChange;
         cumECLChange += dailyECLChange;
@@ -2937,7 +2956,17 @@ function lookupMarginBps(dateISO){
       dayOfWeek: d.getDay(),
       balance,
       drawnBalance,
+      /* GROSS carrying amount — amortised cost before impairment. Kept under
+         its original name so nothing downstream breaks, but it is the gross
+         figure and the grids now label it as such. */
       carryingValue,
+      /* NET carrying amount = gross less the ECL allowance.
+         Computed once, here, rather than in each reader. The allowance is
+         already on the row and the subtraction is trivial, which is exactly
+         why four different surfaces would each end up doing it slightly
+         differently — one of them on a restored run where the allowance was
+         never persisted, and therefore silently reporting gross as net. */
+      netCarryingValue: carryingValue - eclAllowance,
       initialPurchase: initial || 0,
       draw,
       paydown,

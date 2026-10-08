@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 37; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 42; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.37"></script>
+<script src="portf-excel-parser.js?v=4.42"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -2282,6 +2282,12 @@
   <button class="v4-sb-item" data-v4-tab="glconfig" onclick="v4NavClick(this)">
     <i class="ti ti-table-options" aria-hidden="true"></i>General ledger mapping
   </button>
+  <!-- Cashflow Configuration — which business events compose each cashflow
+       column. Sits next to the GL mapping because it is the same kind of
+       thing: the operator's own definition of what the engine is reporting. -->
+  <button class="v4-sb-item" data-v4-tab="cfconfig" onclick="v4NavClick(this)">
+    <i class="ti ti-list-details" aria-hidden="true"></i>Cashflow configuration
+  </button>
   <!-- GL account setup — HIDDEN. Superseded by "General ledger mapping"
        above, which configures accounts per business event × framework
        (the axis clients actually think in). The modal + its SB adapters
@@ -2889,6 +2895,11 @@
       <button class="tab-btn" data-tab="glconfig" role="tab" aria-selected="false" style="display:none;">
         <span class="tab-icon"><span class="material-icons-outlined">account_tree</span></span>
         <span class="tab-text"><span class="tab-label">General Ledger Mapping</span></span>
+      </button>
+      <!-- Cashflow Configuration — sidebar-only nav, same hidden-router pattern. -->
+      <button class="tab-btn" data-tab="cfconfig" role="tab" aria-selected="false" style="display:none;">
+        <span class="tab-icon"><span class="material-icons-outlined">view_column</span></span>
+        <span class="tab-text"><span class="tab-label">Cashflow Configuration</span></span>
       </button>
       <!-- PCS Sync — Investran reference data cache. -->
       <button class="tab-btn" data-tab="pcssync" role="tab" aria-selected="false" style="display:none;">
@@ -4271,6 +4282,150 @@
     color: var(--n-400); font-size: 11px; padding: 0 2px; margin-left: 4px;
   }
   #glconfig .glc-fw-del:hover { color: #DC2626; }
+</style>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Cashflow Configuration — cashflow column × business events.
+     Rows = cashflow columns (Outstanding, Gross carrying amount, …).
+     Each row shows the formula and the business events that compose it.
+     Data comes from cashflow_column_config / gl_business_events.
+
+     Columns that are DERIVED from other columns (Net carrying amount =
+     gross − allowance) show their formula and carry no event list: an event
+     list beside a derivation would imply the events are applied as well,
+     and they are not.
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="cfconfig" class="stage-card stage-tab-content p-5">
+  <div class="builder-hero" style="display:flex; align-items:flex-start; gap:14px; padding:14px 16px; margin-bottom:14px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:12px;">
+    <div style="flex-shrink:0; width:36px; height:36px; border-radius:10px; background:var(--indigo-50,#EEF2FF); color:var(--indigo-600,#4F46E5); display:inline-flex; align-items:center; justify-content:center;">
+      <i class="ti ti-list-details" aria-hidden="true" style="font-size:20px;"></i>
+    </div>
+    <div style="flex:1; min-width:0;">
+      <div style="font-size:10.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">Cashflow configuration</div>
+      <h2 style="font-size:18px; font-weight:700; color:var(--n-900); letter-spacing:-0.3px; margin:2px 0 0;">Cashflow Columns &amp; Business Events</h2>
+      <p style="font-size:12px; color:var(--n-500); margin:4px 0 0; line-height:1.55;">Every column on the Cashflow tab, the formula behind it, and which business events it includes. Change the composition to match how your own reporting defines each figure.</p>
+    </div>
+    <div style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:92px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Columns</div>
+      <div id="cfc-kpi-cols" style="font-size:20px; font-weight:700; color:var(--n-900); font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+    <div style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:106px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Customised</div>
+      <div id="cfc-kpi-custom" style="font-size:20px; font-weight:700; color:var(--indigo-700,#4338CA); font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+  </div>
+
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+    <input id="cfc-filter" type="text" placeholder="Filter by column or business event..."
+           oninput="window.__cfcRender && window.__cfcRender()"
+           style="flex:1; min-width:220px; padding:7px 10px; font-size:12px; border:0.5px solid var(--n-300); border-radius:8px;"/>
+    <label style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--n-600);">
+      <input type="checkbox" id="cfc-only-custom" onchange="window.__cfcRender && window.__cfcRender()" style="accent-color:#4F46E5;"/>
+      Customised only
+    </label>
+    <button id="cfc-save" class="mat-btn primary" onclick="window.__cfcSaveAll && window.__cfcSaveAll()" disabled
+            style="font-size:12px;"><span class="material-icons-outlined text-[15px]">save</span>Save changes</button>
+    <button class="mat-btn outline" onclick="window.__cfcResetAll && window.__cfcResetAll()"
+            title="Discard this workspace's customisations and return every column to the shipped default composition."
+            style="font-size:12px;"><span class="material-icons-outlined text-[15px]">restart_alt</span>Reset to defaults</button>
+  </div>
+
+  <div id="cfc-status" style="font-size:11px; color:var(--n-500); margin-bottom:8px;">—</div>
+
+  <div id="cfc-body" style="overflow:auto; max-height:calc(100vh - 340px); min-height:280px;">
+    <div id="cfc-empty" class="v4-empty" style="padding:36px 20px; display:none;">
+      <div style="font-size:13px; color:var(--n-600);">No cashflow column configuration found.</div>
+      <div style="font-size:11.5px; color:var(--n-500); margin-top:6px;">The workspace defaults ship with the database. If this is empty, the table was never seeded.</div>
+    </div>
+    <table id="cfc-table" style="border-collapse:collapse; font-size:12px; width:100%; display:none;">
+      <thead style="position:sticky; top:0; z-index:2;">
+        <tr>
+          <th class="cfc-col-head">Cashflow column</th>
+          <th class="cfc-head">Formula / derivation</th>
+          <th class="cfc-head">Business events included</th>
+          <th class="cfc-head" style="width:38px;"></th>
+        </tr>
+      </thead>
+      <tbody id="cfc-tbody"></tbody>
+    </table>
+  </div>
+  <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center;">
+    <div id="cfc-footer-summary" style="font-size:10.5px; color:var(--n-500);">—</div>
+  </div>
+</section>
+<style>
+  /* ── Cashflow Configuration ─────────────────────────────────────── */
+  #cfconfig .cfc-head, #cfconfig .cfc-col-head {
+    padding: 7px 12px; font-size: 9.5px; font-weight: 600;
+    color: var(--n-500); text-transform: uppercase; letter-spacing: 0.4px;
+    background: var(--n-50, #FAFAFA); border-bottom: 1px solid var(--n-300);
+    text-align: left;
+  }
+  #cfconfig .cfc-col-head {
+    position: sticky; left: 0; z-index: 1;
+    min-width: 200px; border-right: 1px solid var(--n-200);
+  }
+  #cfconfig .cfc-col-cell {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--n-0); border-right: 1px solid var(--n-200);
+    padding: 10px 14px; font-weight: 600; color: var(--n-900);
+    vertical-align: top; min-width: 200px;
+  }
+  #cfconfig .cfc-col-key {
+    font-size: 10px; font-weight: 400; color: var(--n-500);
+    font-family: ui-monospace, monospace; margin-top: 2px;
+  }
+  #cfconfig tbody tr:nth-child(even) td,
+  #cfconfig tbody tr:nth-child(even) .cfc-col-cell { background: #FCFCFD; }
+  #cfconfig tbody tr:hover td { background: #F5F7FF; }
+  #cfconfig .cfc-cell {
+    padding: 9px 12px; border-bottom: 0.5px solid var(--n-100);
+    vertical-align: top; color: var(--n-700);
+  }
+  #cfconfig .cfc-derivation {
+    font-size: 11.5px; color: var(--n-600); line-height: 1.45;
+    font-style: italic; max-width: 260px;
+  }
+  #cfconfig .cfc-note {
+    font-size: 10px; color: var(--n-500); line-height: 1.4;
+    margin-top: 4px; max-width: 260px; font-style: normal;
+  }
+  /* Event chips — sign carried in the colour AND the symbol, never colour
+     alone: a plus and a minus that differ only in hue are indistinguishable
+     to a red-green colour-blind reader, and the sign is the whole meaning. */
+  #cfconfig .cfc-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 7px 2px 5px; margin: 2px 4px 2px 0;
+    border-radius: 20px; font-size: 10.5px; font-weight: 500;
+    border: 0.5px solid transparent; white-space: nowrap;
+  }
+  #cfconfig .cfc-chip.plus  { background:#ECFDF5; color:#047857; border-color:#A7F3D0; }
+  #cfconfig .cfc-chip.minus { background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
+  #cfconfig .cfc-chip-sign {
+    font-family: ui-monospace, monospace; font-weight: 700; font-size: 11px;
+  }
+  #cfconfig .cfc-chip-x {
+    background: none; border: none; cursor: pointer; padding: 0 0 0 2px;
+    color: currentColor; opacity: 0.45; font-size: 12px; line-height: 1;
+  }
+  #cfconfig .cfc-chip-x:hover { opacity: 1; }
+  #cfconfig .cfc-add {
+    font-size: 10.5px; padding: 3px 6px; border-radius: 6px;
+    border: 0.5px dashed var(--n-300); background: var(--n-0);
+    color: var(--n-600); cursor: pointer; margin-top: 4px;
+  }
+  #cfconfig .cfc-add:hover { border-color: var(--indigo-500,#6366F1); color: var(--indigo-700,#4338CA); }
+  #cfconfig .cfc-custom-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--indigo-600, #4F46E5);
+    display: inline-block; margin-right: 7px; flex-shrink: 0;
+  }
+  #cfconfig .cfc-reset-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--n-400); padding: 2px 4px; font-size: 13px; border-radius: 4px;
+  }
+  #cfconfig .cfc-reset-btn:hover { color: #B45309; background: #FEF3C7; }
+  #cfconfig tr.cfc-dirty .cfc-col-cell { box-shadow: inset 3px 0 0 #F59E0B; }
 </style>
 
 <!-- ===== STAGE 1: Cashflow Generation (v2 — replaces PortF Inbound) ===== -->
@@ -9119,14 +9274,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.37"></script>
-<script src="loan-module-instruments.js?v=4.37"></script>
-<script src="loan-module-analytics.js?v=4.37"></script>
+<script src="loan-module-engine.js?v=4.42"></script>
+<script src="loan-module-instruments.js?v=4.42"></script>
+<script src="loan-module-analytics.js?v=4.42"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.37"></script>
-<script src="demo-assistant-system-prompt.js?v=4.37"></script>
+<script src="demo-assistant-kb.js?v=4.42"></script>
+<script src="demo-assistant-system-prompt.js?v=4.42"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -11392,6 +11547,124 @@ window.SB = (function(){
       .single();
     if(error) return { ok:false, reason: error.message };
     return { ok:true, row: data };
+  }
+
+  /* ── Cashflow Configuration ──────────────────────────────────────────────
+     Which business events compose each cashflow column. Reads the same
+     gl_business_events catalogue the GL mapping screen uses, so the two
+     screens can never disagree about what a business event is. */
+  /* The signed-in user's team, cached after the first read.
+
+     Workspace-level configuration belongs to a team, not to whichever deal is
+     open, so this reads user_profiles.primary_team_id rather than
+     deals.team_id. Returns null when the user has no team, and the caller is
+     expected to treat that as read-only rather than inventing one — writing a
+     customisation into the workspace defaults would overwrite the very rows
+     "Reset to defaults" restores from. */
+  let _cachedTeamId = undefined;         // undefined = not looked up yet
+  async function loadCurrentTeamId(){
+    if(_cachedTeamId !== undefined) return _cachedTeamId;
+    _cachedTeamId = null;
+    if(!_client || !_connected || !_currentUser) return null;
+    try {
+      const { data, error } = await _withDbTimeout('loadCurrentTeamId',
+        _client.from('user_profiles').select('primary_team_id').eq('id', _currentUser.id).maybeSingle(), 6000);
+      if(error) throw error;
+      _cachedTeamId = (data && data.primary_team_id) || null;
+      /* Fall back to membership. primary_team_id is unset for every user in
+         this database while user_teams rows do exist, so relying on the
+         profile column alone left everyone team-less and every workspace
+         configuration screen silently read-only. A user who belongs to exactly
+         one team has an unambiguous team; with several, the first by join date
+         is a guess, so it is used but not treated as a preference — setting
+         primary_team_id remains the way to be explicit. */
+      if(!_cachedTeamId){
+        const { data: ut, error: utErr } = await _withDbTimeout('loadCurrentTeamId.memberships',
+          _client.from('user_teams').select('team_id').eq('user_id', _currentUser.id)
+            .order('joined_at', { ascending: true }).limit(1), 6000);
+        if(utErr) throw utErr;
+        _cachedTeamId = (ut && ut.length && ut[0].team_id) || null;
+      }
+    } catch(err){
+      console.warn('[SB] loadCurrentTeamId:', err && err.message ? err.message : err);
+      _cachedTeamId = null;
+    }
+    return _cachedTeamId;
+  }
+  function currentTeamId(){ return _cachedTeamId === undefined ? null : _cachedTeamId; }
+
+  async function fetchCashflowColumnConfig(){
+    if(!_client || !_connected || _authKicked){
+      return { events: [], columns: [] };
+    }
+    // Resolve the team alongside the data so the caller never has to sequence
+    // two awaits to find out whether the screen is editable.
+    await loadCurrentTeamId();
+    try {
+      // Sequential for the same reason as fetchGLConfiguration — two small
+      // reads are not worth two of the browser's six connection slots.
+      const evRes = await _withDbTimeout('fetchCashflowColumnConfig.events',
+        _client.from('gl_business_events').select('*').eq('is_active', true).order('sort_order'), 8000);
+      if(evRes.error) throw evRes.error;
+      const colRes = await _withDbTimeout('fetchCashflowColumnConfig.columns',
+        _client.from('cashflow_column_config').select('*').eq('is_active', true).order('sort_order'), 10000);
+      if(colRes.error) throw colRes.error;
+      return { events: evRes.data || [], columns: colRes.data || [] };
+    } catch(err){
+      console.error('[SB] fetchCashflowColumnConfig:', err && err.message ? err.message : err);
+      return { events: [], columns: [], error: err && err.message };
+    }
+  }
+
+  /* Always writes a TEAM-SCOPED row, leaving the workspace defaults pristine,
+     so "Reset to defaults" is a delete rather than an attempt to reconstruct
+     the shipped values from memory. The same choice the GL mapping screen
+     makes, and for the same reason: a reset that rebuilds values is only ever
+     as good as the copy of the defaults it carries. */
+  async function upsertCashflowColumnConfig(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!row || !row.column_key) return { ok:false, reason:'column_key required' };
+    if(!row.team_id){
+      /* Refused rather than silently redirected. Writing a customisation into
+         the workspace default row would overwrite the thing Reset restores,
+         and the caller would have no way of knowing the safety net was gone. */
+      return { ok:false, reason:'a team is required to customise a column — the workspace defaults are read-only' };
+    }
+    const uid = (_currentUser && _currentUser.id) || null;
+    const payload = {
+      team_id:      row.team_id,
+      column_key:   row.column_key,
+      column_label: row.column_label || row.column_key,
+      sort_order:   row.sort_order != null ? +row.sort_order : 0,
+      is_derived:   !!row.is_derived,
+      derivation:   row.derivation || null,
+      events:       Array.isArray(row.events) ? row.events : [],
+      notes:        row.notes || null,
+      is_active:    true,
+      is_custom:    true,
+      updated_by:   uid,
+      updated_at:   new Date().toISOString()
+    };
+    if(!row.id) payload.created_by = uid;
+    const { data, error } = await _client
+      .from('cashflow_column_config')
+      .upsert(payload, { onConflict: 'team_id,column_key' })
+      .select()
+      .single();
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, row: data };
+  }
+
+  // Drop this team's customisations and fall back to the workspace defaults.
+  async function resetCashflowColumnConfig(columnKey, teamId){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!teamId) return { ok:false, reason:'a team is required' };
+    let q = _client.from('cashflow_column_config').delete()
+      .eq('team_id', teamId).eq('is_custom', true);
+    if(columnKey) q = q.eq('column_key', columnKey);
+    const { error } = await q;
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
   }
 
   // Reset a cell back to the workspace default by removing the override.
@@ -14350,7 +14623,16 @@ window.SB = (function(){
           day:                    r.date,
           balance:                +r.balance        || 0,
           drawn_balance:          +r.drawnBalance   || 0,
+          /* Gross, allowance and net all persisted. The allowance used to live
+             only in the period-level journal entries, so a restored run could
+             not show a net carrying amount at all — and a grid that quietly
+             falls back to gross when the allowance is missing reports an
+             unimpaired loan with no indication that anything is absent. */
           carrying_value:         +r.carryingValue  || 0,
+          ecl_allowance:          +r.eclAllowance   || 0,
+          net_carrying_value:     (r.netCarryingValue != null)
+                                    ? +r.netCarryingValue
+                                    : ((+r.carryingValue || 0) - (+r.eclAllowance || 0)),
           coupon_rate:            r.couponRate   != null ? +r.couponRate   : null,
           floating_rate:          r.floatingRate != null ? +r.floatingRate : null,
           current_rate:           r.currentRate  != null ? +r.currentRate  : null,
@@ -14783,6 +15065,9 @@ window.SB = (function(){
     // GL Configuration — business event × framework DR/CR matrix
     fetchGLConfiguration, upsertGLEventMapping, resetGLEventMapping,
     addGLFramework, deleteGLFramework,
+    // Cashflow Configuration — column × business-event composition
+    fetchCashflowColumnConfig, upsertCashflowColumnConfig, resetCashflowColumnConfig,
+    loadCurrentTeamId, currentTeamId,
     // PCS Sync — cached Investran reference data
     fetchRefDatasets, fetchRefRows, replaceRefRows, updateRefDataset,
     // Commitment lifecycle events
@@ -33125,15 +33410,19 @@ const SCHEDULE_DISPLAY_COLS = [
   ['capitalized',    'PIK Capit.'],
   ['dailyFees',      'Daily Fees'],
   ['dailyEIRAccretion','EIR Accret.'],
-  ['carryingValue',  'Carrying'],
-  ['eclAllowance',   'ECL Alw.'],
+  /* Gross and Net side by side, with the allowance that separates them in
+     between, so the subtraction is readable straight off the row rather than
+     being something the reader has to take on trust. */
+  ['carryingValue',    'Gross Carrying'],
+  ['eclAllowance',     'ECL Alw.'],
+  ['netCarryingValue', 'Net Carrying'],
   ['dailyECLChange', 'ECL Δ'],
   ['dailyModGain',   'Mod G/L'],
   ['dailyFXGain',    'FX'],
   ['dailyHedgePL',   'Hedge P&L']
 ];
 const SCHEDULE_FULL_COLS = [
-  'date','balance','drawnBalance','carryingValue','draw','paydown',
+  'date','balance','drawnBalance','carryingValue','netCarryingValue','draw','paydown',
   'couponRate','floatingRate','currentRate',
   'dailyCash','cumInterestAccrued','cumInterestEarned',
   'capitalized','interestAdjustments','cashInterestPayment',
@@ -36295,7 +36584,7 @@ document.addEventListener('DOMContentLoaded', window._applyAdvancedStagesVisibil
 try { window._applyAdvancedStagesVisibility(); } catch(_){}
 
 (function(){
-  const TAB_IDS = ['builder','lifecycle','glconfig','pcssync','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
+  const TAB_IDS = ['builder','lifecycle','glconfig','cfconfig','pcssync','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
 
   function switchTab(tabId){
     if(!TAB_IDS.includes(tabId)) tabId = 'stage-1';
@@ -36323,6 +36612,10 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     // then re-renders from cache (pass true to __glcLoad to force refetch).
     if(tabId === 'glconfig' && typeof window.__glcLoad === 'function'){
       try { window.__glcLoad(); } catch(_){}
+    }
+    // Cashflow Configuration — same lazy-load-then-render-from-cache pattern.
+    if(tabId === 'cfconfig' && typeof window.__cfcLoad === 'function'){
+      try { window.__cfcLoad(); } catch(_){}
     }
     // PCS Sync — lazy-load the dataset registry, then re-render from cache.
     if(tabId === 'pcssync' && typeof window.__pcsLoad === 'function'){
@@ -44997,8 +45290,20 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
          because the money had not gone out yet, and the last showed −£5.0m
          because the loan had already been repaid. Carrying value and the
          balance it is compared against must be observed at the same instant. */
+      /* The allowance travels with them, so Gross and Net are observed at the
+         same instant as each other and as the balance. Deriving Net anywhere
+         else would mean pairing a carrying amount from one day with an
+         allowance from another, which is how an impaired loan comes to show a
+         net figure larger than its gross. */
       for(const s of sched){
-        if(s && s.date) m.set(s.date, { cv: +s.carryingValue || 0, bal: +s.balance || 0 });
+        if(s && s.date) m.set(s.date, {
+          cv:  +s.carryingValue || 0,
+          bal: +s.balance || 0,
+          ecl: +s.eclAllowance || 0,
+          net: (s.netCarryingValue != null)
+                 ? +s.netCarryingValue
+                 : ((+s.carryingValue || 0) - (+s.eclAllowance || 0))
+        });
       }
       return m;
     })();
@@ -45047,6 +45352,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         undrawnBalance:   Math.max(0, facilityCommitment - cumDraw),
         outstandingBalance: r.balance,
         carryingValue:      cvAt ? cvAt.cv : null,
+        // Gross, the allowance between them, and Net — all from the same row.
+        eclAllowance:       cvAt ? cvAt.ecl : null,
+        netCarryingValue:   cvAt ? cvAt.net : null,
         // The gap is the part of the balance sheet the coupon alone does not
         // explain — unaccreted discount, premium or deferred fee. Compared
         // against the balance observed on the SAME day, not the period row's.
@@ -45107,11 +45415,24 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         render:r => `<td style="padding:6px 10px; text-align:right; color:${r.undrawnBalance>0?'var(--fis-green-700,#15803D)':'var(--n-400)'}; font-weight:600;">${fmtCcy(r.undrawnBalance)}</td>` },
       { key:'outstanding', label:'Outstanding', align:'right', title:'Currently drawn (outstanding) principal balance. This is what the borrower owes — NOT the balance-sheet carrying amount, which differs whenever there is a discount, premium or deferred fee. See the Carrying value column.',
         render:r => `<td style="padding:6px 10px; text-align:right; color:var(--n-900); font-weight:500;">${fmtCcy(r.outstandingBalance)}</td>` },
-      { key:'carrying_value', label:'Carrying value', align:'right',
-        title:'Amortised cost at the period end — the balance-sheet figure. Equals the outstanding balance only when the loan was taken on at par with no fees. Otherwise it opens at consideration paid less yield-integral fees plus transaction costs, and accretes to par over the expected life at the effective interest rate.',
+      { key:'carrying_value', label:'Gross carrying amount', align:'right',
+        title:'Amortised cost at the period end BEFORE impairment — the gross balance-sheet figure. Equals the outstanding balance only when the loan was taken on at par with no fees. Otherwise it opens at consideration paid less yield-integral fees plus transaction costs, and accretes to par over the expected life at the effective interest rate. Interest accrues on this figure, not on the net amount, unless the deal is Stage 3 with interest on a net basis.',
         render:r => r.carryingValue == null
           ? `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`
           : `<td style="padding:6px 10px; text-align:right; color:#0F766E; font-weight:600;">${fmtCcy(r.carryingValue)}</td>` },
+      { key:'ecl_allowance', label:'ECL allowance', align:'right',
+        title:'Expected credit loss allowance outstanding at the period end — the contra-asset sitting between gross and net. Zero on a Stage 1 deal with no measurable loss, and zero on day one of a POCI asset, where the expected losses are already in the price paid.',
+        render:r => {
+          if(r.eclAllowance == null) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          const v = +r.eclAllowance || 0;
+          if(Math.abs(v) < 0.005) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          return `<td style="padding:6px 10px; text-align:right; color:#B91C1C; font-weight:500;">(${fmtCcy(Math.abs(v))})</td>`;
+        } },
+      { key:'net_carrying_value', label:'Net carrying amount', align:'right',
+        title:'Net carrying amount = gross carrying amount − ECL allowance. This is the figure that appears on the face of the balance sheet. Equal to gross whenever there is no allowance.',
+        render:r => r.netCarryingValue == null
+          ? `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`
+          : `<td style="padding:6px 10px; text-align:right; color:#0F766E; font-weight:700;">${fmtCcy(r.netCarryingValue)}</td>` },
       { key:'carrying_vs_balance', label:'Unaccreted', align:'right',
         title:'Carrying value minus outstanding balance — the part of the balance sheet the coupon alone does not explain. Negative while a discount or deferred fee is still unwinding, positive for a premium. Runs to zero at maturity.',
         render:r => {
@@ -45399,7 +45720,28 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           // Keep only known column keys — drop stale entries silently
           const validKeys = new Set(defs.map(c => c.key));
           const kept = arr.filter(k => validKeys.has(k));
-          if(kept.length) return kept;
+          if(kept.length){
+            /* Merge in columns added since the preference was saved.
+               The comment here has always claimed this merge; the code did not
+               do it — it returned the saved list verbatim, so every column
+               added after a user first touched the picker was invisible to
+               that user and to nobody else. Gross and Net carrying amount
+               would have shipped looking broken for exactly the people who had
+               customised their columns, and fine for everyone else, which is
+               the hardest kind of report to act on.
+
+               Appended in definition order so a new column lands next to the
+               ones it belongs with rather than at the end. */
+            const saved = new Set(kept);
+            const merged = kept.slice();
+            let addedAny = false;
+            defs.forEach(c => { if(!saved.has(c.key)){ merged.push(c.key); addedAny = true; } });
+            if(addedAny){
+              merged.sort((a, b) =>
+                defs.findIndex(c => c.key === a) - defs.findIndex(c => c.key === b));
+            }
+            return merged;
+          }
         }
       }
     } catch(_){}
@@ -45585,6 +45927,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       drawdown_to_date:         { label: 'Drawdown to date',            v: r => +r.drawdownToDate || 0 },
       undrawn_balance:          { label: 'Balance (undrawn)',           v: r => +r.undrawnBalance || 0 },
       outstanding:              { label: 'Outstanding balance',         v: r => +r.outstandingBalance || 0 },
+      /* Exported as the grid shows them. A reviewer reconciling a spreadsheet
+         against the balance sheet needs the allowance as well as the two
+         carrying amounts — given only gross and net they cannot tell an
+         impairment from an accretion difference. */
+      carrying_value:           { label: 'Gross carrying amount',       v: r => r.carryingValue    == null ? '' : +r.carryingValue },
+      ecl_allowance:            { label: 'ECL allowance',               v: r => r.eclAllowance     == null ? '' : +r.eclAllowance },
+      net_carrying_value:       { label: 'Net carrying amount',         v: r => r.netCarryingValue == null ? '' : +r.netCarryingValue },
+      carrying_vs_balance:      { label: 'Unaccreted',                  v: r => r.carryingVsBalance == null ? '' : +r.carryingVsBalance },
       drawdowns:                { label: 'Drawdown (this period)',     v: r => +r.drawdowns || 0 },
       interest_accrued:         { label: 'Interest accrued (this period)', v: r => +r.interest || 0 },
       interest_accrued_to_date: { label: 'Interest accrued to date',    v: r => +r.interestAccruedToDate || 0 },
@@ -45787,6 +46137,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     if(tab === 'glconfig'){
       setTimeout(() => { window.__glcLoad && window.__glcLoad(); }, 30);
+    }
+    if(tab === 'cfconfig'){
+      setTimeout(() => { window.__cfcLoad && window.__cfcLoad(); }, 30);
     }
     if(tab === 'pcssync'){
       setTimeout(() => { window.__pcsLoad && window.__pcsLoad(); }, 30);
@@ -49882,6 +50235,326 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         if(b) b.textContent = (err && err.message) || 'Unknown error — see the console for details.';
       }
     }
+  };
+
+  /* ════════════════════════════════════════════════════════════════════════
+     Cashflow Configuration — cashflow column × business events.
+
+     Same shape as the GL mapping module above: workspace defaults in the
+     database with team-scoped overrides on top, a resolver that prefers the
+     team row, and edits held in memory until Save so a half-finished change
+     never reaches the server. Written beside it deliberately — the two
+     screens share the gl_business_events catalogue, and keeping them apart
+     is how they would drift.
+     ════════════════════════════════════════════════════════════════════════ */
+  const _cfcState = { events: [], columns: [], loaded: false, teamId: null, edits: {} };
+
+  function _cfcEsc(s){ return String(s == null ? '' : s).replace(/[<>&"']/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+  // Team override wins over the workspace default for a given column.
+  function _cfcResolve(columnKey){
+    const rows = _cfcState.columns.filter(c => c.column_key === columnKey);
+    if(!rows.length) return null;
+    const teamRow = rows.find(c => c.team_id && c.team_id === _cfcState.teamId);
+    return teamRow || rows.find(c => !c.team_id) || rows[0];
+  }
+
+  // The effective event list: an in-memory edit beats the stored row.
+  function _cfcEventsOf(columnKey){
+    if(Object.prototype.hasOwnProperty.call(_cfcState.edits, columnKey)){
+      return _cfcState.edits[columnKey];
+    }
+    const row = _cfcResolve(columnKey);
+    return (row && Array.isArray(row.events)) ? row.events : [];
+  }
+
+  function _cfcEventLabel(key){
+    const e = _cfcState.events.find(x => x.event_key === key);
+    return e ? e.event_label : key;
+  }
+  function _cfcEventTrigger(key){
+    const e = _cfcState.events.find(x => x.event_key === key);
+    return e ? (e.system_trigger || '') : '';
+  }
+
+  function _cfcMarkDirty(){
+    const btn = document.getElementById('cfc-save');
+    const n = Object.keys(_cfcState.edits).length;
+    if(btn){
+      btn.disabled = n === 0;
+      btn.innerHTML = '<span class="material-icons-outlined text-[15px]">save</span>' +
+                      (n ? 'Save ' + n + ' change' + (n === 1 ? '' : 's') : 'Save changes');
+    }
+  }
+
+  window.__cfcLoad = async function(force){
+    if(_cfcState.loaded && !force){ window.__cfcRender(); return; }
+    const table = document.getElementById('cfc-table');
+    const empty = document.getElementById('cfc-empty');
+    const status = document.getElementById('cfc-status');
+    if(!document.getElementById('cfc-body')) return;
+    if(table) table.style.display = 'none';
+    if(empty) empty.style.display = 'block';
+    if(status) status.textContent = 'Loading cashflow configuration…';
+    if(!window.SB || !window.SB.connected){
+      if(status) status.textContent =
+        'Not connected to the database. Cashflow configuration is stored server-side — ' +
+        'reconnect using the DB chip in the top bar, then reopen this page.';
+      return;
+    }
+    try {
+      /* Scope is the USER'S team, not the loaded deal's.
+
+         Cashflow configuration describes how this workspace reports every
+         deal, so tying it to whichever deal happens to be open is the wrong
+         axis — and in practice it was fatal: not one of the 54 deals in this
+         database carries a team_id, so the deal-derived team was always null,
+         saving was always refused, and the screen would have been permanently
+         read-only with an explanation that sounded like a missing permission.
+         The deal's team is still honoured when it has one. */
+      _cfcState.teamId =
+        (window.SB && typeof window.SB.currentTeamId === 'function' && window.SB.currentTeamId()) ||
+        (window.B && window.B.deal && window.B.deal.teamId) || null;
+      const res = await window.SB.fetchCashflowColumnConfig();
+      _cfcState.events  = res.events  || [];
+      _cfcState.columns = res.columns || [];
+      _cfcState.loaded  = true;
+      _cfcState.edits   = {};
+      window.__cfcRender();
+    } catch(err){
+      console.error('[CFC] load failed:', err);
+      if(status) status.textContent = 'Could not load cashflow configuration: ' + (err && err.message || err);
+    }
+  };
+
+  window.__cfcRender = function(){
+    const table  = document.getElementById('cfc-table');
+    const tbody  = document.getElementById('cfc-tbody');
+    const empty  = document.getElementById('cfc-empty');
+    const status = document.getElementById('cfc-status');
+    const foot   = document.getElementById('cfc-footer-summary');
+    const kCols  = document.getElementById('cfc-kpi-cols');
+    const kCust  = document.getElementById('cfc-kpi-custom');
+    if(!table || !tbody) return;
+
+    // One entry per distinct column key, default-or-override resolved.
+    const keys = [];
+    _cfcState.columns.forEach(c => { if(keys.indexOf(c.column_key) === -1) keys.push(c.column_key); });
+    const rows = keys.map(k => _cfcResolve(k)).filter(Boolean)
+                     .sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
+
+    const q = ((document.getElementById('cfc-filter') || {}).value || '').toLowerCase();
+    const onlyCustom = !!(document.getElementById('cfc-only-custom') || {}).checked;
+
+    const matches = (row) => {
+      if(!q) return true;
+      if(String(row.column_label || '').toLowerCase().indexOf(q) !== -1) return true;
+      if(String(row.column_key   || '').toLowerCase().indexOf(q) !== -1) return true;
+      if(String(row.derivation   || '').toLowerCase().indexOf(q) !== -1) return true;
+      return _cfcEventsOf(row.column_key).some(e =>
+        _cfcEventLabel(e.event_key).toLowerCase().indexOf(q) !== -1 ||
+        String(e.event_key).toLowerCase().indexOf(q) !== -1);
+    };
+
+    const visible = rows.filter(r => matches(r) && (!onlyCustom || r.is_custom));
+
+    if(kCols) kCols.textContent = String(rows.length);
+    if(kCust) kCust.textContent = String(rows.filter(r => r.is_custom).length);
+
+    if(!rows.length){
+      table.style.display = 'none';
+      if(empty) empty.style.display = 'block';
+      if(status) status.textContent = '';
+      return;
+    }
+    if(empty) empty.style.display = 'none';
+    table.style.display = '';
+
+    tbody.innerHTML = visible.map(row => {
+      const key = row.column_key;
+      const evs = _cfcEventsOf(key);
+      const dirty = Object.prototype.hasOwnProperty.call(_cfcState.edits, key);
+      const chips = evs.map((e, idx) => {
+        const sign = (+e.sign < 0) ? -1 : 1;
+        const cls  = sign < 0 ? 'minus' : 'plus';
+        const trig = _cfcEventTrigger(e.event_key);
+        return '<span class="cfc-chip ' + cls + '" title="' +
+               _cfcEsc(e.event_key + (trig ? ' · posts as “' + trig + '”' : '')) + '">' +
+               '<span class="cfc-chip-sign">' + (sign < 0 ? '−' : '+') + '</span>' +
+               _cfcEsc(_cfcEventLabel(e.event_key)) +
+               '<button class="cfc-chip-x" title="Remove this event" ' +
+               'onclick="window.__cfcRemoveEvent(\'' + _cfcEsc(key) + '\',' + idx + ')">×</button>' +
+               '</span>';
+      }).join('');
+
+      /* A derived column shows its formula and no event control. Offering an
+         "add event" button here would invite an edit that the engine cannot
+         honour, because the value comes from other columns. */
+      const eventCell = row.is_derived
+        ? '<span style="font-size:11px; color:var(--n-400);">Derived — no events applied</span>'
+        : (chips || '<span style="font-size:11px; color:var(--n-400);">No events — this column would always read zero</span>') +
+          '<div><button class="cfc-add" onclick="window.__cfcAddEvent(\'' + _cfcEsc(key) + '\')">+ Add business event</button></div>';
+
+      const formulaCell = row.is_derived
+        ? '<div class="cfc-derivation">' + _cfcEsc(row.derivation || '—') + '</div>'
+        : '<div class="cfc-derivation">' + _cfcEsc(_cfcFormulaText(key)) + '</div>';
+
+      return '<tr class="' + (dirty ? 'cfc-dirty' : '') + '">' +
+        '<td class="cfc-col-cell">' +
+          (row.is_custom ? '<span class="cfc-custom-dot" title="Customised for this team"></span>' : '') +
+          _cfcEsc(row.column_label) +
+          '<div class="cfc-col-key">' + _cfcEsc(key) + '</div>' +
+        '</td>' +
+        '<td class="cfc-cell">' + formulaCell +
+          (row.notes ? '<div class="cfc-note">' + _cfcEsc(row.notes) + '</div>' : '') + '</td>' +
+        '<td class="cfc-cell">' + eventCell + '</td>' +
+        '<td class="cfc-cell" style="text-align:center;">' +
+          (row.is_custom || dirty
+            ? '<button class="cfc-reset-btn" title="Discard this column\'s customisation and return it to the shipped default" ' +
+              'onclick="window.__cfcResetOne(\'' + _cfcEsc(key) + '\')">' +
+              '<span class="material-icons-outlined" style="font-size:15px;">restart_alt</span></button>'
+            : '') +
+        '</td>' +
+      '</tr>';
+    }).join('');
+
+    if(status){
+      status.textContent = _cfcState.teamId
+        ? 'Editing this team\'s configuration. Unedited columns fall back to the workspace defaults.'
+        : 'Showing the workspace defaults. Load a deal that belongs to a team to customise — the defaults themselves are read-only, so Reset always has something to return to.';
+    }
+    if(foot){
+      foot.textContent = visible.length === rows.length
+        ? rows.length + ' columns'
+        : visible.length + ' of ' + rows.length + ' columns shown';
+    }
+    _cfcMarkDirty();
+  };
+
+  /* The formula in words, built from the event list so it cannot fall out of
+     step with it. A stored formula string would be a second description of
+     the same thing, and the two would disagree the first time anyone edited
+     the events and not the text. */
+  function _cfcFormulaText(columnKey){
+    const evs = _cfcEventsOf(columnKey);
+    if(!evs.length) return '—';
+    return evs.map((e, i) => {
+      const neg = (+e.sign < 0);
+      const lab = _cfcEventLabel(e.event_key);
+      if(i === 0) return (neg ? '− ' : '') + lab;
+      return (neg ? ' − ' : ' + ') + lab;
+    }).join('');
+  }
+
+  window.__cfcAddEvent = function(columnKey){
+    const used = new Set(_cfcEventsOf(columnKey).map(e => e.event_key));
+    const avail = _cfcState.events.filter(e => !used.has(e.event_key));
+    if(!avail.length){
+      if(typeof toast === 'function') toast('Every business event is already included in this column.', 3500);
+      return;
+    }
+    const names = avail.map((e, i) => (i+1) + '. ' + e.event_label).join('\n');
+    const pick = window.prompt(
+      'Add a business event to "' + columnKey + '".\n\n' + names +
+      '\n\nEnter the number, optionally prefixed with - for a negative sign (e.g. "-3").');
+    if(pick == null) return;
+    const neg = /^\s*-/.test(pick);
+    const n = parseInt(String(pick).replace(/[^0-9]/g, ''), 10);
+    if(!n || n < 1 || n > avail.length){
+      if(typeof toast === 'function') toast('That is not one of the listed numbers — nothing was added.', 4000);
+      return;
+    }
+    const next = _cfcEventsOf(columnKey).slice();
+    next.push({ event_key: avail[n-1].event_key, sign: neg ? -1 : 1 });
+    _cfcState.edits[columnKey] = next;
+    window.__cfcRender();
+  };
+
+  window.__cfcRemoveEvent = function(columnKey, idx){
+    const next = _cfcEventsOf(columnKey).slice();
+    if(idx < 0 || idx >= next.length) return;
+    next.splice(idx, 1);
+    _cfcState.edits[columnKey] = next;
+    window.__cfcRender();
+  };
+
+  window.__cfcResetOne = async function(columnKey){
+    // Drop an unsaved edit first — no server call needed for something that
+    // was never sent.
+    if(Object.prototype.hasOwnProperty.call(_cfcState.edits, columnKey)){
+      delete _cfcState.edits[columnKey];
+      window.__cfcRender();
+      return;
+    }
+    if(!_cfcState.teamId){
+      if(typeof toast === 'function') toast('Nothing to reset — these are the workspace defaults.', 3500);
+      return;
+    }
+    const res = await window.SB.resetCashflowColumnConfig(columnKey, _cfcState.teamId);
+    if(!res.ok){
+      if(typeof toast === 'function') toast('Could not reset: ' + res.reason, 5000, { kind:'warning' });
+      return;
+    }
+    await window.__cfcLoad(true);
+    if(typeof toast === 'function') toast('“' + columnKey + '” returned to the shipped default.', 3500);
+  };
+
+  window.__cfcSaveAll = async function(){
+    const keys = Object.keys(_cfcState.edits);
+    if(!keys.length) return;
+    if(!_cfcState.teamId){
+      if(typeof toast === 'function'){
+        toast('These are the workspace defaults and are read-only. Load a deal that belongs to a team to save a customisation.',
+              6000, { kind:'warning' });
+      }
+      return;
+    }
+    const btn = document.getElementById('cfc-save');
+    if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+    const failed = [];
+    for(const k of keys){
+      const base = _cfcResolve(k) || {};
+      const res = await window.SB.upsertCashflowColumnConfig({
+        team_id:      _cfcState.teamId,
+        column_key:   k,
+        column_label: base.column_label || k,
+        sort_order:   base.sort_order || 0,
+        is_derived:   !!base.is_derived,
+        derivation:   base.derivation || null,
+        notes:        base.notes || null,
+        events:       _cfcState.edits[k]
+      });
+      if(!res.ok) failed.push(k + ': ' + res.reason);
+    }
+    await window.__cfcLoad(true);
+    if(failed.length){
+      console.error('[CFC] save failures:', failed);
+      if(typeof toast === 'function'){
+        toast(failed.length + ' column(s) did not save — see the console. The rest were saved.',
+              7000, { kind:'warning' });
+      }
+    } else if(typeof toast === 'function'){
+      toast('Saved ' + keys.length + ' column' + (keys.length === 1 ? '' : 's') + '.', 3500);
+    }
+  };
+
+  window.__cfcResetAll = async function(){
+    const n = Object.keys(_cfcState.edits).length;
+    if(!_cfcState.teamId && !n){
+      if(typeof toast === 'function') toast('Nothing to reset — these are the workspace defaults.', 3500);
+      return;
+    }
+    if(!window.confirm('Discard every customisation for this workspace and return all columns to the shipped defaults?\n\nUnsaved edits are discarded too. This cannot be undone.')) return;
+    _cfcState.edits = {};
+    if(_cfcState.teamId){
+      const res = await window.SB.resetCashflowColumnConfig(null, _cfcState.teamId);
+      if(!res.ok){
+        if(typeof toast === 'function') toast('Could not reset: ' + res.reason, 5000, { kind:'warning' });
+        return;
+      }
+    }
+    await window.__cfcLoad(true);
+    if(typeof toast === 'function') toast('All columns returned to the shipped defaults.', 3500);
   };
 
   window.__glcRender = function(){
