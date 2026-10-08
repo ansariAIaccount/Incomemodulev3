@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 61; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 63; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.61"></script>
+<script src="portf-excel-parser.js?v=4.63"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -7710,7 +7710,9 @@
           <div id="fc-preview" style="margin-top:8px; font-size:10.5px; color:var(--n-500);"></div>
         </div>
 
-        <div id="fc-points" style="margin-top:10px; max-height:220px; overflow-y:auto; border:0.5px solid var(--n-200); border-radius:8px; background:var(--n-0);"></div>
+        <!-- Taller than it was: the panel now carries a curve chart above the
+             table, and 220px left the list too short to scroll usefully. -->
+        <div id="fc-points" style="margin-top:10px; max-height:360px; overflow-y:auto; border:0.5px solid var(--n-200); border-radius:8px; background:var(--n-0);"></div>
       </div>
     </div>
     <div class="json-modal-f">
@@ -9329,14 +9331,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.61"></script>
-<script src="loan-module-instruments.js?v=4.61"></script>
-<script src="loan-module-analytics.js?v=4.61"></script>
+<script src="loan-module-engine.js?v=4.63"></script>
+<script src="loan-module-instruments.js?v=4.63"></script>
+<script src="loan-module-analytics.js?v=4.63"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.61"></script>
-<script src="demo-assistant-system-prompt.js?v=4.61"></script>
+<script src="demo-assistant-kb.js?v=4.63"></script>
+<script src="demo-assistant-system-prompt.js?v=4.63"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -53083,16 +53085,27 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         'only valid for deals carrying that same margin; and the observation window that straddles the changeover ' +
         'mixes benchmark days with all-in days, so rates within about one tenor of ' +
         (pts[0] ? pts[0].fix_date : 'the cutover') + ' are a blend of the two.';
-      return;   // the step-at-cutover check below is meaningless for an all-in curve
     }
-    if(badge && !isAllIn){ /* benchmark curve — fall through to the step check */ }
 
     /* Cutover sanity. The forecast is supposed to continue the actual series,
        so a large step where one ends and the other begins is worth saying out
        loud: the usual cause is a curve that is an ALL-IN rate (benchmark plus
        margin) being loaded as the benchmark, which double-counts the margin on
-       every deal that references the index. */
-    try {
+       every deal that references the index.
+
+       Skipped for an all-in curve, because there the first forecast point and
+       the last published fixing are not the same kind of number and a step
+       between them means nothing.
+
+       Skipped with an `else`, NOT an early return. The return that used to sit
+       in the all-in branch above was written to skip this one check and skipped
+       everything after it as well — including the rate table at the bottom of
+       this function. The effect was an all-in curve showing its summary, its
+       badge and its warning above a list that had just been emptied on entry
+       and was never refilled: the panel said 2,211 points had loaded and showed
+       none of them. */
+    if(isAllIn){ /* no cutover comparison is meaningful — fall through to render */ }
+    else try {
       const fixings = await window.SB.listFixings(idx);
       if(fixings.length && warn){
         const lastActual = fixings[fixings.length-1];
@@ -53111,8 +53124,53 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       }
     } catch(_){ /* the warning is a courtesy; never block the panel on it */ }
 
-    const show = pts.slice(0, 40);
-    list.innerHTML =
+    /* Shape before detail. A curve that is wrong — a step at the cutover, a
+       flat tail where the source ran out, an inverted stub — is obvious as a
+       line and invisible in a list of four-decimal numbers.
+
+       Plotted against DATE, not row index: the series is business-day, so
+       spacing by index would silently compress every weekend and bank holiday
+       and draw a shape the curve does not have. */
+    const spark = (() => {
+      if(pts.length < 2) return '';
+      const W = 620, H = 74, PX = 3, PY = 7;
+      const t = p => Date.parse(p.fix_date + 'T00:00:00Z');
+      const t0 = t(pts[0]), t1 = t(pts[pts.length-1]);
+      let lo = Infinity, hi = -Infinity;
+      for(const p of pts){ const r = +p.rate; if(r < lo) lo = r; if(r > hi) hi = r; }
+      const span = (hi - lo) || 1, tspan = (t1 - t0) || 1;
+      const X = p => PX + ((t(p) - t0) / tspan) * (W - PX*2);
+      const Y = p => H - PY - ((+p.rate - lo) / span) * (H - PY*2);
+      /* One point per horizontal pixel is all the screen can show; past that
+         the extra coordinates cost DOM and resolve to the same column. */
+      const step = Math.max(1, Math.ceil(pts.length / (W - PX*2)));
+      const kept = [];
+      for(let i = 0; i < pts.length; i += step) kept.push(pts[i]);
+      if(kept[kept.length-1] !== pts[pts.length-1]) kept.push(pts[pts.length-1]);
+      const line = kept.map(p => X(p).toFixed(1) + ',' + Y(p).toFixed(1)).join(' ');
+      const area = PX + ',' + (H - PY) + ' ' + line + ' ' + (W - PX) + ',' + (H - PY);
+      const pc = r => (r*100).toFixed(4) + '%';
+      return '<div style="padding:8px 10px 2px; border-bottom:0.5px solid var(--n-100);">' +
+        '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+             'style="width:100%; height:74px; display:block;">' +
+          '<polygon points="' + area + '" fill="#6D28D9" opacity="0.08"/>' +
+          '<polyline points="' + line + '" fill="none" stroke="#6D28D9" ' +
+                    'stroke-width="1.2" stroke-linejoin="round"/>' +
+        '</svg>' +
+        '<div style="display:flex; justify-content:space-between; font-size:9.5px; ' +
+                    'color:var(--n-500); font-variant-numeric:tabular-nums; padding-top:2px;">' +
+          '<span>' + pts[0].fix_date + '</span>' +
+          '<span>low <b style="color:#6D28D9;">' + pc(lo) + '</b> · ' +
+                 'high <b style="color:#6D28D9;">' + pc(hi) + '</b></span>' +
+          '<span>' + pts[pts.length-1].fix_date + '</span>' +
+        '</div></div>';
+    })();
+
+    /* Every point, not the first 40. The container already scrolls and the
+       header is already sticky, so the cap was showing roughly two months of a
+       nine-year curve for no reason anyone could act on. */
+    const show = pts;
+    list.innerHTML = spark +
       '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
         '<thead><tr style="background:#F5F3FF; position:sticky; top:0; z-index:1;">' +
           '<th style="padding:5px 8px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:#6D28D9; font-weight:600;">Date</th>' +
@@ -53123,10 +53181,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           '<td style="padding:4px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600; color:#6D28D9;">' +
             (+p.rate*100).toFixed(4) + '%</td></tr>').join('') +
         '</tbody></table>' +
-        (pts.length > show.length
-          ? '<div style="padding:6px 8px; font-size:10px; color:var(--n-500); border-top:0.5px solid var(--n-100);">' +
-            'Showing the first ' + show.length + ' of ' + pts.length + ' points.</div>'
-          : '');
+        '<div style="padding:6px 8px; font-size:10px; color:var(--n-500); border-top:0.5px solid var(--n-100);">' +
+          'All <b>' + pts.length.toLocaleString() + '</b> points shown · ' +
+          pts[0].fix_date + ' → ' + pts[pts.length-1].fix_date + '</div>';
   };
 
   window.__fcApplyImport = async function(){
