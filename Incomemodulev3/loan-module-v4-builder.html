@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 54; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 56; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.54"></script>
+<script src="portf-excel-parser.js?v=4.56"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9329,14 +9329,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.54"></script>
-<script src="loan-module-instruments.js?v=4.54"></script>
-<script src="loan-module-analytics.js?v=4.54"></script>
+<script src="loan-module-engine.js?v=4.56"></script>
+<script src="loan-module-instruments.js?v=4.56"></script>
+<script src="loan-module-analytics.js?v=4.56"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.54"></script>
-<script src="demo-assistant-system-prompt.js?v=4.54"></script>
+<script src="demo-assistant-kb.js?v=4.56"></script>
+<script src="demo-assistant-system-prompt.js?v=4.56"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -11213,6 +11213,77 @@ window.SB = (function(){
   /* The latest run against the one before it, metric by metric.
      Restatement is the point: when actuals replace forecast rates the numbers
      move, and that movement has to be shown rather than discovered later. */
+  /* ── GL mapping overrides ────────────────────────────────────────────────
+     Turns the General Ledger Mapping screen into the thing the engine obeys.
+
+     Two vocabularies have to meet. gl_business_events names an event once and
+     carries ONE engine transaction type in system_trigger — but the engine
+     emits a separate transaction type per LEG, so "Interest Accrual" arrives
+     as "Interest Receivable" on the debit and "Income - Daily Accrued
+     Interest" on the credit. Matching on system_trigger alone therefore
+     configures half of each entry and silently leaves the other half on the
+     shipped account, which is worse than configuring neither: the journal
+     balances and looks right.
+
+     So the second leg is listed explicitly. The table is deliberately boring
+     and auditable — if a transaction type is not here it keeps its default
+     account and is reported as such, rather than being guessed at. */
+  const GL_EVENT_LEG_ALIASES = {
+    drawdown:            ['loan drawdown', 'loan drawdown — cash'],
+    paydown:             ['loan repayment', 'loan repayment — cash'],
+    prepayment:          ['loan prepayment', 'loan prepayment — cash'],
+    mandatory_prepay:    ['mandatory prepayment', 'mandatory prepayment — cash'],
+    interest_accrual:    ['interest receivable', 'income - daily accrued interest'],
+    interest_receipt:    ['interest cash receipt', 'interest receivable clear'],
+    pik_capitalisation:  ['pik interest capitalised', 'pik interest income', 'pik investment'],
+    ecl_impairment:      ['impairment expense (ecl)', 'loan loss allowance (contra-asset)',
+                          'impairment reversal (ecl)', 'loan loss allowance reversal'],
+    loan_restructuring:  ['modification — loan asset adjustment', 'modification gain (ifrs 9)',
+                          'modification loss (ifrs 9)'],
+    write_off:           ['loan write-off — allowance applied', 'loan write-off — residual expense',
+                          'loan write-off — asset derecognition'],
+    origination_fee:     ['deferred fee — cash received', 'deferred fee liability',
+                          'deferred fee — loan asset adjustment', 'deferred fee release on drawdown'],
+    eir_accretion:       ['discount accretion', 'premium amortization', 'premium amortization offset'],
+    recovery:            ['recovery — cash', 'recovery income'],
+    loan_sale:           ['loan sale — cash', 'loan sale — asset derecognition'],
+    default_interest:    ['default interest', 'default interest receivable']
+  };
+
+  /* Build the override map for a framework. A team-scoped mapping beats the
+     workspace default, the same precedence the GL screen itself displays. */
+  async function buildGLMappingOverrides(frameworkCode){
+    if(!_client || !_connected) return { map:{}, count:0, framework:frameworkCode };
+    const fw = String(frameworkCode || 'IFRS').toUpperCase();
+    const teamId = currentTeamId();
+    const cfg = await fetchGLConfiguration();
+    const events   = cfg.events   || [];
+    const mappings = cfg.mappings || [];
+    const pick = (eventKey) => {
+      const rows = mappings.filter(m => m.event_key === eventKey && m.framework_code === fw);
+      if(!rows.length) return null;
+      return rows.find(m => m.team_id && m.team_id === teamId) || rows.find(m => !m.team_id) || rows[0];
+    };
+    const map = {};
+    let count = 0;
+    events.forEach(ev => {
+      const m = pick(ev.event_key);
+      if(!m) return;
+      const entry = {
+        eventKey:  ev.event_key,
+        transType: ev.event_label || null,
+        dr: { account: m.dr_account_code || null, accountName: m.dr_account_name || null },
+        cr: { account: m.cr_account_code || null, accountName: m.cr_account_name || null }
+      };
+      // The trigger named on the event, plus every leg alias listed above.
+      const keys = [];
+      if(ev.system_trigger) keys.push(String(ev.system_trigger).toLowerCase());
+      (GL_EVENT_LEG_ALIASES[ev.event_key] || []).forEach(a => keys.push(a));
+      keys.forEach(k => { if(k && !map[k]){ map[k] = entry; count++; } });
+    });
+    return { map, count, framework: fw, teamId };
+  }
+
   async function fetchRunComparison(dealId){
     if(!_client || !_connected || !dealId) return [];
     try {
@@ -15285,7 +15356,7 @@ window.SB = (function(){
     // Forecast RFR curves — the forward view, kept apart from observed fixings
     listForecastCurves, listForecastPoints, upsertForecastCurve, bulkUpsertForecastPoints,
     warmForecast, getCachedForecast,
-    fetchRunComparison,
+    fetchRunComparison, buildGLMappingOverrides,
     listReportingRequirements, upsertReportingRequirement, deleteReportingRequirement, markReportingReceived, sweepReportingNotices,
     listTeamMembers, addUserToTeam, removeUserFromTeam, updateDealTeam,
     // Loan agent notices (Tier 1 #3)
@@ -22488,6 +22559,28 @@ async function runAccountingImpl(){
       await window.SB.warmForecast(_ix, 'base');
     }
   } catch(e){ console.warn('[rfr] forecast warm failed — the run will use held-flat rates:', e && e.message); }
+
+  /* Load the configured GL mapping for this deal's framework, fresh, on every
+     run. Not cached: the whole point is that an operator edits an account on
+     the GL Mapping screen, re-runs, and sees the new account — a cache would
+     reintroduce exactly the disconnect being fixed, and the read is two small
+     queries.
+
+     On failure the overrides are CLEARED rather than left as they were. Stale
+     mappings from a previous deal's framework would be worse than the shipped
+     defaults, because they would look configured. */
+  try {
+    if(typeof window.setGLMappingOverrides === 'function' && window.SB && window.SB.buildGLMappingOverrides){
+      const fw = (window.B && window.B.deal && window.B.deal.framework) || 'IFRS';
+      const built = await window.SB.buildGLMappingOverrides(fw);
+      const n = window.setGLMappingOverrides(built.map);
+      console.log('[gl] ' + n + ' configured account mapping(s) loaded for ' + built.framework +
+                  (built.teamId ? ' (team override in effect)' : ''));
+    }
+  } catch(e){
+    console.warn('[gl] could not load the configured mapping — falling back to the shipped chart:', e && e.message);
+    try { window.setGLMappingOverrides(null); } catch(_){}
+  }
 
   // v2 — accept either PortF data OR a builder-generated instrument. If neither
   // is loaded, fall back to the active instrument from the dropdown so the

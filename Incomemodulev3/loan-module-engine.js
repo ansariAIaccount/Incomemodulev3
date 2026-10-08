@@ -3777,6 +3777,36 @@ const INVESTRAN_GL = {
 // Map our internal placeholder-account-codes / transaction-type strings onto
 // the Investran chart. Called once on each batch of JE entries after the
 // generators run so we don't have to thread the mapping through every add().
+/* ── Configured GL mapping ───────────────────────────────────────────────────
+   The accounts below are DEFAULTS. The General Ledger Mapping screen is what
+   decides, and whatever it holds has to win here — otherwise the screen is a
+   form that stores a preference nobody acts on, which is exactly what it was:
+   a user could rename and renumber every account, re-run, and watch the
+   journals come back on the shipped codes with nothing to say why.
+
+   Keyed by engine transaction type, lowercased, with the DR and CR account for
+   that business event. Populated by the builder before each run from
+   gl_business_events + gl_event_mappings; empty here, so the engine keeps
+   working standalone and tests that never load a workspace still pass. */
+let _glOverrides = Object.create(null);
+function setGLMappingOverrides(map){
+  _glOverrides = Object.create(null);
+  if(!map) return 0;
+  let n = 0;
+  Object.keys(map).forEach(k => {
+    const v = map[k];
+    if(!v) return;
+    _glOverrides[String(k).toLowerCase()] = v;
+    n++;
+  });
+  return n;
+}
+function getGLMappingOverrides(){ return _glOverrides; }
+if(typeof window !== 'undefined'){
+  window.setGLMappingOverrides = setGLMappingOverrides;
+  window.getGLMappingOverrides = getGLMappingOverrides;
+}
+
 function applyInvestranGLMapping(entries){
   // Transaction-type keyword → Investran GL key. Order matters: more specific
   // keywords must be checked before more general ones.
@@ -3978,6 +4008,29 @@ function applyInvestranGLMapping(entries){
     return null;
   };
   for(const e of entries){
+    /* Configuration first, defaults second.
+
+       The leg matters: a business event carries a debit account and a credit
+       account, and each engine row is one leg of it. Picking by `isDebit` is
+       what makes "Interest Accrual · DR 113000 · CR 421000" on the mapping
+       screen come out as a receivable debit and an income credit here, rather
+       than both legs landing on whichever account was listed first. */
+    const ov = _glOverrides[String(e.transactionType || '').toLowerCase()];
+    if(ov){
+      const side = e.isDebit ? ov.dr : ov.cr;
+      if(side && side.account){
+        e.account        = side.account;
+        e.glAccountName  = side.accountName || side.account;
+        e.glTransType    = ov.transType || e.transactionType;
+        e.glGap          = false;
+        e.glGapNote      = null;
+        // Recorded so the GL panel can show which rows followed configuration
+        // and which fell back to the shipped chart.
+        e.glSource       = 'configured';
+        e.glEventKey     = ov.eventKey || null;
+        continue;
+      }
+    }
     const map = lookup(e.transactionType, e.account);
     if(map){
       e.account = map.account;
@@ -3985,6 +4038,7 @@ function applyInvestranGLMapping(entries){
       e.glTransType = map.transType || e.transactionType;
       e.glGap = !!map.gap;
       e.glGapNote = map.gapNote || null;
+      e.glSource = 'default';
     } else {
       // No mapping found — flag as a gap so the GL Coverage panel surfaces it
       e.glAccountName = '— UNMAPPED —';
