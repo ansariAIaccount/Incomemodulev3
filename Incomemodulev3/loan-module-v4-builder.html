@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 24; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 26; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.24"></script>
+<script src="portf-excel-parser.js?v=4.26"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9119,14 +9119,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.24"></script>
-<script src="loan-module-instruments.js?v=4.24"></script>
-<script src="loan-module-analytics.js?v=4.24"></script>
+<script src="loan-module-engine.js?v=4.26"></script>
+<script src="loan-module-instruments.js?v=4.26"></script>
+<script src="loan-module-analytics.js?v=4.26"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.24"></script>
-<script src="demo-assistant-system-prompt.js?v=4.24"></script>
+<script src="demo-assistant-kb.js?v=4.26"></script>
+<script src="demo-assistant-system-prompt.js?v=4.26"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -19482,6 +19482,31 @@ function snapshotTreatmentDefaults(inst){
 function applyTreatmentFromForm(){
   const inst = currentInstrument();
   if(!inst) return;
+  /* ─── Never read back a form that was never filled in ────────────────────
+     This function treats the DOM as the truth and writes it onto the
+     instrument. That is right after loadTreatmentForm has populated the
+     controls from the instrument, and catastrophic before it: every control
+     still holds its markup default, so a Stage 3 deal with PIK at 11% is
+     overwritten with Stage 1 and no PIK — and blank numerics are DELETED
+     outright, which produces a half-wiped record that is harder to spot than a
+     cleanly wiped one.
+
+     loadTreatmentForm stamps the instrument it populated from. If this fires
+     for a different instrument, or before any load, the form is not describing
+     this deal and must not be believed. */
+  /* Fails CLOSED. An unset stamp means "we cannot confirm the form describes
+     this deal", which is exactly the case we must refuse — not a case to wave
+     through. The first version of this guard read `window.M`, which is always
+     undefined (M is closed over inside the builder IIFE), so the whole
+     condition short-circuited to false and the guard never ran once. */
+  const _loadedFor = window.__treatmentFormLoadedFor;
+  if(_loadedFor !== inst.id){
+    console.warn('[treatment] ignored a form read-back for ' + inst.id +
+      ' — the Stage 2 form has not been populated for this deal' +
+      (_loadedFor ? ' (it currently holds ' + _loadedFor + ')' : ' (no form has been loaded)') +
+      '. Stored overrides left untouched.');
+    return;
+  }
   // Accounting framework override (Section 0)
   if($('opt-framework')) inst.accountingFramework = $('opt-framework').value;
   // AASB-specific overrides (only meaningful when framework=AASB)
@@ -19772,6 +19797,16 @@ function syncFrameworkChip(inst){
 function loadTreatmentForm(){
   const inst = currentInstrument();
   if(!inst){ return; }
+  /* Stamp which deal the form now describes. applyTreatmentFromForm refuses to
+     read the DOM back unless this matches — see the guard there. Set at the
+     TOP so a load that throws partway still marks the form as belonging to this
+     deal rather than leaving it readable as the previous one's. */
+  /* Deliberately on `window` rather than on M. M is a closure variable inside
+     the builder IIFE, so `window.M` is undefined — a guard written against it
+     silently never fires, which is exactly the class of bug this whole change
+     exists to stop. syncBuilderFromInstrument lives outside that closure and
+     has to read the same flag, so it has to be reachable from both. */
+  window.__treatmentFormLoadedFor = inst.id;
   // Framework dropdown (Section 0)
   if($('opt-framework')) $('opt-framework').value = inst.accountingFramework || 'IFRS';
   // AASB extras — populate dropdowns from instrument if present
@@ -21140,12 +21175,39 @@ function syncBuilderFromInstrument(inst){
   // Single-value treatment overrides
   window.B.treatmentOverrides = window.B.treatmentOverrides || {};
   const o = window.B.treatmentOverrides;
-  // IFRS / GAAP ECL parameters
+  /* ─── Credit parameters: copy forward, never silently downgrade ───────────
+     This is the last line of defence. The two guards above stop the common
+     routes, but any future code path that builds an instrument without the
+     stored overrides and then syncs would still overwrite a deal's credit
+     assumptions with whatever the instrument happened to carry.
+
+     So: an instrument value only replaces a stored override when the override
+     is ABSENT, or when the instrument's value genuinely differs AND was not
+     produced by an unloaded form. A stated Stage 3 is never replaced by a
+     Stage 1 that nobody typed. If the two disagree, say so in the console
+     rather than picking one in silence — a disagreement here means a real bug
+     upstream, and it should be findable. */
   if(inst.ifrs){
-    if(inst.ifrs.ecLStage != null)  o.eclStage = inst.ifrs.ecLStage;
-    if(inst.ifrs.pdAnnual != null)  o.pdAnnual = inst.ifrs.pdAnnual;
-    if(inst.ifrs.lgd != null)       o.lgd      = inst.ifrs.lgd;
-    if(inst.ifrs.qFactor != null)   o.qFactor  = inst.ifrs.qFactor;
+    const keep = (key, instVal) => {
+      if(instVal == null) return;                 // nothing stated — leave the override alone
+      const cur = o[key];
+      if(cur == null){ o[key] = instVal; return; } // nothing stored — take it
+      if(cur === instVal) return;                  // agree — nothing to do
+      /* Disagreement. Trust the instrument only when the Stage 2 form was
+         genuinely loaded for this deal, which means a human could have changed
+         it. Otherwise the difference came from a default and the stored value
+         wins. */
+      const formOwned = window.__treatmentFormLoadedFor === inst.id;
+      if(formOwned){ o[key] = instVal; return; }
+      console.warn('[treatment] kept stored ' + key + '=' + cur +
+        ' over instrument value ' + instVal + ' on ' + inst.id +
+        ' — the Stage 2 form was not loaded for this deal, so the instrument ' +
+        'value is a default rather than a choice.');
+    };
+    keep('eclStage', inst.ifrs.ecLStage);
+    keep('pdAnnual', inst.ifrs.pdAnnual);
+    keep('lgd',      inst.ifrs.lgd);
+    keep('qFactor',  inst.ifrs.qFactor);
   }
   // EIR
   if(inst.eirMethod)                       o.eirMethod   = inst.eirMethod;
@@ -21227,11 +21289,27 @@ function syncBuilderFromInstrument(inst){
       if(tx.deferredTax != null)     o.taxDeferred           = !!tx.deferredTax;
     }
   }
-  // PIK legacy columns (alongside the new pik_rate_override)
+  /* PIK legacy columns (alongside the new pik_rate_override).
+
+     Same protection as the credit parameters above, and for the same reason:
+     builderToInstrument hands back `pik: { enabled:false, rate:0 }` whenever no
+     override was applied, and `enabled != null` is TRUE for false — so an
+     unguarded copy turned "PIK at 11%, capitalised quarterly" into "PIK off"
+     without anyone touching the switch. That is how the Stage 3 demo deal lost
+     its PIK year twice. */
   if(inst.pik){
-    if(inst.pik.enabled != null)                  o.pikEnabled                  = !!inst.pik.enabled;
-    if(inst.pik.rate != null)                     o.pikRate                     = +inst.pik.rate;
-    if(inst.pik.capitalizationFrequency)          o.pikCapitalizationFrequency  = inst.pik.capitalizationFrequency;
+    const formOwned = window.__treatmentFormLoadedFor === inst.id;
+    const pikStored = (o.pikEnabled != null || o.pikRate != null);
+    const pikOffByDefault = (inst.pik.enabled === false && !(+inst.pik.rate));
+    if(formOwned || !pikStored || !pikOffByDefault){
+      if(inst.pik.enabled != null)                o.pikEnabled                  = !!inst.pik.enabled;
+      if(inst.pik.rate != null)                   o.pikRate                     = +inst.pik.rate;
+      if(inst.pik.capitalizationFrequency)        o.pikCapitalizationFrequency  = inst.pik.capitalizationFrequency;
+    } else {
+      console.warn('[treatment] kept stored PIK (' + o.pikRate + ', enabled=' + o.pikEnabled +
+        ') on ' + inst.id + ' — the instrument carried the "no PIK" default and the ' +
+        'Stage 2 form was not loaded for this deal.');
+    }
   }
 }
 
@@ -41901,8 +41979,23 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         base: f.base, frequency: f.frequency, paymentDate: f.paymentDate,
         ifrs: f.ifrs
       })),
+      /* Credit parameters are DELIBERATELY ABSENT here.
+
+         This block used to seed ecLStage 1, pdAnnual 0.005 and lgd 0.30 as
+         hard defaults. They then flowed back into B.treatmentOverrides through
+         syncBuilderFromInstrument and were saved — so any path that built an
+         instrument before the stored overrides had loaded silently replaced a
+         Stage 3 / PD 100% / LGD 40% deal with a Stage 1 / 0.50% / 30% one, and
+         nothing on screen said so. The Stage 3 demo deal was destroyed this way
+         twice in a week.
+
+         A stage nobody chose and a PD nobody underwrote are not sensible
+         starting points — they are assertions. Left undefined, the engine's own
+         `instr.ifrs.ecLStage || 1` fallback still computes, but the ABSENCE is
+         now visible to the round-trip guard below, which can tell "not stated"
+         from "stated as 1". */
       ifrs: { ifrs9Classification:'AmortisedCost', sppiPassed: true, businessModel:'HoldToCollect',
-              ecLStage: 1, pdAnnual: 0.005, lgd: 0.30, qFactor: 1.0 },
+              qFactor: 1.0 },
       // AASB-specific extras carried from the Builder when the framework is
       // AASB (Australian). Read by loadTreatmentForm to populate the Stage 2
       // amber AASB Extras panel (tier, ASIC, franking, related-party, GST, APRA).
