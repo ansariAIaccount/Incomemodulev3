@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 56; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 59; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.56"></script>
+<script src="portf-excel-parser.js?v=4.59"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9329,14 +9329,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.56"></script>
-<script src="loan-module-instruments.js?v=4.56"></script>
-<script src="loan-module-analytics.js?v=4.56"></script>
+<script src="loan-module-engine.js?v=4.59"></script>
+<script src="loan-module-instruments.js?v=4.59"></script>
+<script src="loan-module-analytics.js?v=4.59"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.56"></script>
-<script src="demo-assistant-system-prompt.js?v=4.56"></script>
+<script src="demo-assistant-kb.js?v=4.59"></script>
+<script src="demo-assistant-system-prompt.js?v=4.59"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -11228,27 +11228,85 @@ window.SB = (function(){
      So the second leg is listed explicitly. The table is deliberately boring
      and auditable — if a transaction type is not here it keeps its default
      account and is reported as such, rather than being guessed at. */
-  const GL_EVENT_LEG_ALIASES = {
-    drawdown:            ['loan drawdown', 'loan drawdown — cash'],
-    paydown:             ['loan repayment', 'loan repayment — cash'],
-    prepayment:          ['loan prepayment', 'loan prepayment — cash'],
-    mandatory_prepay:    ['mandatory prepayment', 'mandatory prepayment — cash'],
-    interest_accrual:    ['interest receivable', 'income - daily accrued interest'],
-    interest_receipt:    ['interest cash receipt', 'interest receivable clear'],
-    pik_capitalisation:  ['pik interest capitalised', 'pik interest income', 'pik investment'],
-    ecl_impairment:      ['impairment expense (ecl)', 'loan loss allowance (contra-asset)',
-                          'impairment reversal (ecl)', 'loan loss allowance reversal'],
-    loan_restructuring:  ['modification — loan asset adjustment', 'modification gain (ifrs 9)',
-                          'modification loss (ifrs 9)'],
-    write_off:           ['loan write-off — allowance applied', 'loan write-off — residual expense',
-                          'loan write-off — asset derecognition'],
-    origination_fee:     ['deferred fee — cash received', 'deferred fee liability',
-                          'deferred fee — loan asset adjustment', 'deferred fee release on drawdown'],
-    eir_accretion:       ['discount accretion', 'premium amortization', 'premium amortization offset'],
-    recovery:            ['recovery — cash', 'recovery income'],
-    loan_sale:           ['loan sale — cash', 'loan sale — asset derecognition'],
-    default_interest:    ['default interest', 'default interest receivable']
+  /* Each engine transaction type names the event it belongs to AND which of
+     that event's two accounts it takes — 'dr' or 'cr' as a ROLE, not as a
+     direction.
+
+     Deriving the account from the row's debit/credit flag seemed natural and
+     is wrong twice over. A reversal runs the event backwards while using the
+     same two accounts, so an ECL release is a debit to the ALLOWANCE, not to
+     the expense. And a modification can be a gain or a loss, which flips both
+     legs while the asset is still the asset and the P&L account is still the
+     P&L account. Both failures balance perfectly and post to the wrong
+     accounts, which is the hardest kind to notice.
+
+     Naming the role instead makes those cases fall out: the asset leg always
+     takes the asset account however the sign lands. */
+  const GL_LEG_SIDES = {
+    // Funding and principal
+    'loan drawdown':                        { event:'drawdown',         side:'dr' },
+    'loan drawdown — cash':                 { event:'drawdown',         side:'cr' },
+    'loan repayment':                       { event:'paydown',          side:'cr' },
+    'loan repayment — cash':                { event:'paydown',          side:'dr' },
+    'loan prepayment':                      { event:'prepayment',       side:'cr' },
+    'loan prepayment — cash':               { event:'prepayment',       side:'dr' },
+    'mandatory prepayment':                 { event:'mandatory_prepay', side:'cr' },
+    'mandatory prepayment — cash':          { event:'mandatory_prepay', side:'dr' },
+    // Interest
+    'interest receivable':                  { event:'interest_accrual', side:'dr' },
+    'income - daily accrued interest':      { event:'interest_accrual', side:'cr' },
+    'interest cash receipt':                { event:'interest_receipt', side:'dr' },
+    'interest receivable clear':            { event:'interest_receipt', side:'cr' },
+    'default interest':                     { event:'default_interest', side:'cr' },
+    'default interest receivable':          { event:'default_interest', side:'dr' },
+    // PIK
+    'pik interest capitalised':             { event:'pik_capitalisation', side:'dr' },
+    'pik interest income':                  { event:'pik_capitalisation', side:'cr' },
+    'pik investment':                       { event:'pik_capitalisation', side:'dr' },
+    // Impairment. The reversal legs take the SAME accounts as the charge —
+    // only the direction differs, which is why the role is what is named.
+    'impairment expense (ecl)':             { event:'ecl_impairment', side:'dr' },
+    'loan loss allowance (contra-asset)':   { event:'ecl_impairment', side:'cr' },
+    'impairment reversal (ecl)':            { event:'ecl_impairment', side:'dr' },
+    'loan loss allowance reversal':         { event:'ecl_impairment', side:'cr' },
+    // Modification — asset leg and P&L leg, whichever way the sign falls.
+    'modification — loan asset adjustment': { event:'loan_restructuring', side:'dr' },
+    'modification gain (ifrs 9)':           { event:'loan_restructuring', side:'cr' },
+    'modification loss (ifrs 9)':           { event:'loan_restructuring', side:'cr' },
+    // Write-off. The residual-expense leg has no counterpart in this event's
+    // pair, so it is deliberately absent and keeps its default.
+    'loan write-off — allowance applied':      { event:'write_off', side:'dr' },
+    'loan write-off — asset derecognition':    { event:'write_off', side:'cr' },
+    // Recovery / disposal
+    'recovery — cash':                      { event:'recovery',   side:'dr' },
+    'recovery income':                      { event:'recovery',   side:'cr' },
+    'loan sale — cash':                     { event:'loan_sale',  side:'dr' },
+    'loan sale — asset derecognition':      { event:'loan_sale',  side:'cr' },
+    // Capitalised transaction costs
+    'capitalised cost':                     { event:'capitalised_cost', side:'dr' },
+    'capitalised cost — cash':              { event:'capitalised_cost', side:'cr' }
   };
+
+  /* Fees are matched by RULE, not by name, because the transaction type is
+     built from the fee's own label — "Commitment fee (undrawn capex)",
+     "Agency fee", whatever the operator typed — and no fixed list can cover
+     user data. Each type is "<label> <role>", so the label picks the event and
+     the role picks the account.
+
+     The cash leg is left out on purpose: cash is not one of the two accounts a
+     fee event carries, and the shipped 111000 is already right. */
+  const GL_FEE_LABEL_RULES = [
+    { re: /commitment fee|line fee|undrawn/i, event: 'commitment_fee'  },
+    { re: /arrangement|origination|upfront/i, event: 'origination_fee' },
+    { re: /exit fee/i,                        event: 'exit_fee'        },
+    { re: /utilisation|utilization/i,         event: 'utilisation_fee' },
+    { re: /agency/i,                          event: 'agency_fee'      }
+  ];
+  const GL_FEE_ROLE_RULES = [
+    { re: /\breceivable clear$/i, side: 'dr' },   // same receivable, credited
+    { re: /\breceivable$/i,       side: 'dr' },
+    { re: /\bincome\b/i,          side: 'cr' }
+  ];
 
   /* Build the override map for a framework. A team-scoped mapping beats the
      workspace default, the same precedence the GL screen itself displays. */
@@ -11264,24 +11322,51 @@ window.SB = (function(){
       if(!rows.length) return null;
       return rows.find(m => m.team_id && m.team_id === teamId) || rows.find(m => !m.team_id) || rows[0];
     };
-    const map = {};
-    let count = 0;
+    // event_key → { dr, cr, label } for every configured event.
+    const byEvent = {};
     events.forEach(ev => {
       const m = pick(ev.event_key);
       if(!m) return;
-      const entry = {
-        eventKey:  ev.event_key,
-        transType: ev.event_label || null,
+      byEvent[ev.event_key] = {
+        eventKey: ev.event_key,
+        label:    ev.event_label || ev.event_key,
+        trigger:  ev.system_trigger ? String(ev.system_trigger).toLowerCase() : null,
         dr: { account: m.dr_account_code || null, accountName: m.dr_account_name || null },
         cr: { account: m.cr_account_code || null, accountName: m.cr_account_name || null }
       };
-      // The trigger named on the event, plus every leg alias listed above.
-      const keys = [];
-      if(ev.system_trigger) keys.push(String(ev.system_trigger).toLowerCase());
-      (GL_EVENT_LEG_ALIASES[ev.event_key] || []).forEach(a => keys.push(a));
-      keys.forEach(k => { if(k && !map[k]){ map[k] = entry; count++; } });
     });
-    return { map, count, framework: fw, teamId };
+
+    /* One entry per engine transaction type, already resolved to a single
+       account. The engine then needs no knowledge of debits, credits or event
+       structure — it looks up a string and uses what it finds, which is the
+       only way this stays debuggable. */
+    const map = {};
+    let count = 0;
+    const put = (key, ev, side) => {
+      if(!key || map[key] || !ev) return;
+      const acct = ev[side];
+      if(!acct || !acct.account) return;
+      map[key] = { account: acct.account, accountName: acct.accountName || acct.account,
+                   eventKey: ev.eventKey, transType: ev.label, side };
+      count++;
+    };
+    // The event's own trigger takes whichever side the explicit table says,
+    // defaulting to the credit account — the trigger names the income or
+    // outcome leg on nearly every event in the catalogue.
+    Object.keys(byEvent).forEach(k => {
+      const ev = byEvent[k];
+      if(!ev.trigger) return;
+      const explicit = GL_LEG_SIDES[ev.trigger];
+      put(ev.trigger, ev, explicit ? explicit.side : 'cr');
+    });
+    Object.keys(GL_LEG_SIDES).forEach(tt => {
+      const spec = GL_LEG_SIDES[tt];
+      put(tt, byEvent[spec.event], spec.side);
+    });
+    return { map, count, framework: fw, teamId,
+             feeEvents: byEvent,
+             feeLabelRules: GL_FEE_LABEL_RULES.map(r => ({ src: r.re.source, flags: r.re.flags, event: r.event })),
+             feeRoleRules:  GL_FEE_ROLE_RULES.map(r => ({ src: r.re.source, flags: r.re.flags, side: r.side })) };
   }
 
   async function fetchRunComparison(dealId){
@@ -22573,7 +22658,11 @@ async function runAccountingImpl(){
     if(typeof window.setGLMappingOverrides === 'function' && window.SB && window.SB.buildGLMappingOverrides){
       const fw = (window.B && window.B.deal && window.B.deal.framework) || 'IFRS';
       const built = await window.SB.buildGLMappingOverrides(fw);
-      const n = window.setGLMappingOverrides(built.map);
+      const n = window.setGLMappingOverrides(built.map, {
+        feeEvents:     built.feeEvents,
+        feeLabelRules: built.feeLabelRules,
+        feeRoleRules:  built.feeRoleRules
+      });
       console.log('[gl] ' + n + ' configured account mapping(s) loaded for ' + built.framework +
                   (built.teamId ? ' (team override in effect)' : ''));
     }

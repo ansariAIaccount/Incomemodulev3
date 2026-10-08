@@ -3789,8 +3789,10 @@ const INVESTRAN_GL = {
    gl_business_events + gl_event_mappings; empty here, so the engine keeps
    working standalone and tests that never load a workspace still pass. */
 let _glOverrides = Object.create(null);
-function setGLMappingOverrides(map){
+let _glFeeCtx    = null;      // { events, labelRules, roleRules } for fee routing
+function setGLMappingOverrides(map, opts){
   _glOverrides = Object.create(null);
+  _glFeeCtx    = null;
   if(!map) return 0;
   let n = 0;
   Object.keys(map).forEach(k => {
@@ -3799,9 +3801,44 @@ function setGLMappingOverrides(map){
     _glOverrides[String(k).toLowerCase()] = v;
     n++;
   });
+  if(opts && opts.feeEvents && opts.feeLabelRules && opts.feeRoleRules){
+    _glFeeCtx = {
+      events: opts.feeEvents,
+      labelRules: opts.feeLabelRules.map(r => ({ re: new RegExp(r.src, r.flags), event: r.event })),
+      roleRules:  opts.feeRoleRules.map(r  => ({ re: new RegExp(r.src, r.flags), side: r.side }))
+    };
+  }
   return n;
 }
 function getGLMappingOverrides(){ return _glOverrides; }
+
+/* Fee rows by rule. Their transaction type is "<the operator's fee label>
+   <role>" — "Commitment fee (undrawn capex) Receivable" — so no fixed list of
+   names can cover them and they fell through to the shipped chart. That is how
+   a commitment fee came to credit 492000 Other Income while the mapping screen
+   said 492200 Commitment Fee Income, and how BOTH legs of the commitment-fee
+   accrual ended up on the income account, so the pair cancelled and no
+   receivable was ever raised.
+
+   The label picks the event, the role picks which of its two accounts to use.
+   Cash legs are left alone: cash is not one of the accounts a fee event
+   carries. */
+function _glFeeOverride(transactionType){
+  if(!_glFeeCtx) return null;
+  const tt = String(transactionType || '');
+  if(!/fee/i.test(tt)) return null;
+  if(/cash receipt/i.test(tt)) return null;
+  const lab = _glFeeCtx.labelRules.find(r => r.re.test(tt));
+  if(!lab) return null;
+  const ev = _glFeeCtx.events[lab.event];
+  if(!ev) return null;
+  const role = _glFeeCtx.roleRules.find(r => r.re.test(tt));
+  if(!role) return null;
+  const acct = ev[role.side];
+  if(!acct || !acct.account) return null;
+  return { account: acct.account, accountName: acct.accountName || acct.account,
+           eventKey: ev.eventKey, transType: ev.label, side: role.side };
+}
 if(typeof window !== 'undefined'){
   window.setGLMappingOverrides = setGLMappingOverrides;
   window.getGLMappingOverrides = getGLMappingOverrides;
@@ -4015,21 +4052,23 @@ function applyInvestranGLMapping(entries){
        what makes "Interest Accrual · DR 113000 · CR 421000" on the mapping
        screen come out as a receivable debit and an income credit here, rather
        than both legs landing on whichever account was listed first. */
-    const ov = _glOverrides[String(e.transactionType || '').toLowerCase()];
-    if(ov){
-      const side = e.isDebit ? ov.dr : ov.cr;
-      if(side && side.account){
-        e.account        = side.account;
-        e.glAccountName  = side.accountName || side.account;
-        e.glTransType    = ov.transType || e.transactionType;
-        e.glGap          = false;
-        e.glGapNote      = null;
-        // Recorded so the GL panel can show which rows followed configuration
-        // and which fell back to the shipped chart.
-        e.glSource       = 'configured';
-        e.glEventKey     = ov.eventKey || null;
-        continue;
-      }
+    /* Exact transaction type first, then the fee rules. Each entry already
+       names a single account — the debit/credit flag plays no part, because
+       which account a leg uses is a question about its ROLE in the event, not
+       about the direction it happens to post in today. */
+    const ov = _glOverrides[String(e.transactionType || '').toLowerCase()]
+            || _glFeeOverride(e.transactionType);
+    if(ov && ov.account){
+      e.account       = ov.account;
+      e.glAccountName = ov.accountName || ov.account;
+      e.glTransType   = ov.transType || e.transactionType;
+      e.glGap         = false;
+      e.glGapNote     = null;
+      // Recorded so the GL panel can show which rows followed configuration
+      // and which fell back to the shipped chart.
+      e.glSource      = 'configured';
+      e.glEventKey    = ov.eventKey || null;
+      continue;
     }
     const map = lookup(e.transactionType, e.account);
     if(map){
