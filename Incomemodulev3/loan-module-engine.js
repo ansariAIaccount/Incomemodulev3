@@ -655,6 +655,103 @@ function pikRateOn(instr, dateISO){
 }
 if(typeof window !== 'undefined') window.pikRateOn = pikRateOn;
 
+/* ── RFR provenance ──────────────────────────────────────────────────────────
+   Where the rate for a given day came from: 'actual' | 'forecast' |
+   'held-flat' | 'base' | 'none'.
+
+   Placed HERE, beside the other module-scope helpers, and not next to
+   computeCompoundedRFR where it logically belongs — because that function is
+   not module scope. It sits inside buildSchedule, at column zero, which reads
+   exactly like a top-level declaration and is not one. Defining these two
+   there left them invisible to every caller outside the schedule builder and
+   silently un-exported, and the indentation gave no hint.
+
+   Taking the instrument and a date rather than remembering what the last rate
+   calculation did: a "what happened on the previous call" channel works until
+   something calls it twice, or out of order, or not at all, and then it
+   reports the wrong day's provenance with complete confidence.
+
+   'held-flat' is the honest name for the long-standing behaviour — no
+   forecast supplied, so the last published fixing is carried into the future.
+   It is not an observation and must never be shown as one. */
+function rfrRateSourceOn(instr, dateISO){
+  const rfr = instr && instr.rfr;
+  if(!rfr || !Array.isArray(rfr.fixings) || !rfr.fixings.length){
+    return (rfr && rfr.baseRate != null) ? 'base' : 'none';
+  }
+  const fxs = rfr.fixings.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  const lastActual  = fxs[fxs.length - 1].date;
+  const firstActual = fxs[0].date;
+  if(dateISO <= lastActual){
+    return (dateISO >= firstActual) ? 'actual' : 'base';
+  }
+  const fcs = Array.isArray(rfr.forecast) ? rfr.forecast : [];
+  if(fcs.length){
+    /* Inside the curve's own span it is a forecast. PAST its last point the
+       rate is the final forecast value carried forward, which is an
+       extrapolation and not a view anybody published — so it is reported as
+       held-flat, the same as having no curve at all.
+
+       This matters at the long end: the SONIA curve runs to June 2035 and
+       Suffolk matures in 2062, so twenty-seven years would otherwise be
+       labelled "forecast" on the strength of a curve that stops decades
+       earlier. */
+    let first = null, last = null;
+    for(const f of fcs){
+      if(!f || !f.date) continue;
+      if(first === null || f.date < first) first = f.date;
+      if(last  === null || f.date > last)  last  = f.date;
+    }
+    if(first !== null && dateISO >= first && dateISO <= last) return 'forecast';
+  }
+  return 'held-flat';
+}
+if(typeof window !== 'undefined') window.rfrRateSourceOn = rfrRateSourceOn;
+
+/* The published rate in force on a day — actuals first, forecast beyond them,
+   last actual held flat if there is no forecast. No compounding.
+
+   This is the correct reading for a TERM rate (Term SOFR, EURIBOR, BBSW,
+   BBSY): the rate is published for the period and taken as it stands. A
+   compounded-in-arrears RFR (SONIA, SOFR, ESTR) is a different calculation and
+   goes through computeCompoundedRFR instead — compounding a term fixing would
+   overstate it, and reading a daily RFR as a term rate would understate the
+   convention it was contracted on.
+
+   Returns null when nothing is known, so the caller can fall back to the
+   static rate rather than being handed a zero that looks deliberate. */
+function rfrRateOn(instr, dateISO){
+  const rfr = instr && instr.rfr;
+  if(!rfr) return null;
+  const pick = (series) => {
+    if(!Array.isArray(series) || !series.length) return null;
+    let last = null;
+    for(const f of series.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''))){
+      if(f.date <= dateISO) last = +f.rate; else break;
+    }
+    return (last != null && isFinite(last)) ? last : null;
+  };
+  const fxs = Array.isArray(rfr.fixings) ? rfr.fixings : [];
+  if(!fxs.length) return null;
+  const sorted = fxs.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  const lastActual = sorted[sorted.length - 1].date;
+  if(dateISO <= lastActual) return pick(sorted);          // inside the actuals
+  const fc = pick(rfr.forecast);
+  if(fc != null) return fc;                               // forecast beyond
+  return pick(sorted);                                    // held flat
+}
+if(typeof window !== 'undefined') window.rfrRateOn = rfrRateOn;
+
+/* The last day with an ACTUAL fixing — the cutover. Exposed so the UI can say
+   "observed to 17 Sep 2026, forecast thereafter" instead of leaving the reader
+   to work out which part of a 35-year schedule was ever observed. */
+function rfrLastActualDate(instr){
+  const fxs = instr && instr.rfr && instr.rfr.fixings;
+  if(!Array.isArray(fxs) || !fxs.length) return null;
+  return fxs.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''))[fxs.length-1].date;
+}
+if(typeof window !== 'undefined') window.rfrLastActualDate = rfrLastActualDate;
+
 /* True when PIK runs at any point in the deal's life. A schedule whose bands
    are all zero is not a PIK deal; one with a single non-zero band is, even if
    the rate today is nil. Getting this wrong in either direction is costly: too
@@ -1938,17 +2035,64 @@ function computeCompoundedRFR(asOfDate, instr){
   const periodEnd       = addDays(asOfDate, -lookback);
   const periodStart     = addDays(periodEnd, -tenorDays + (obsShift ? obsShift : 0));
   const lockoutCutoff   = addDays(periodEnd, -lockout);
-  // Build a date → rate lookup from fixings (latest fix on or before each day wins).
+  /* Date → rate, from ACTUAL fixings first and the FORECAST curve beyond them.
+
+     Two different things were being conflated by one rule.
+
+     Within the published series, carrying the last fixing forward is correct:
+     SONIA is not published at weekends or on bank holidays, and the rate that
+     applies on a Saturday is Friday's. That behaviour is kept.
+
+     PAST the last published fixing it is not a convention, it is an
+     assumption — and it was invisible. A loan maturing in 2030 was priced at
+     whatever SONIA last printed, held flat for four years, and reported in the
+     same column, same formatting, as an observed rate. Nobody chose that and
+     nothing said it was happening.
+
+     So the series now ends where the actuals end, and the forecast curve takes
+     over from the day after. `rateSourceAt` reports which of the two produced
+     a given day so the caller can show provenance rather than implying
+     observation. */
   const fxs = rfr.fixings.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
-  function fixingAt(d){
-    const iso = toISO(d);
-    let lastRate = null;
-    for(const f of fxs){
-      if(f.date <= iso) lastRate = +f.rate || 0;
+  const fcs = (Array.isArray(rfr.forecast) ? rfr.forecast.slice() : [])
+                .sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  const lastActualISO = fxs.length ? fxs[fxs.length - 1].date : null;
+
+  function _lookupIn(series, iso){
+    let last = null;
+    for(const f of series){
+      if(f.date <= iso) last = +f.rate || 0;
       else break;
     }
-    return lastRate != null ? lastRate : (rfr.baseRate || 0);
+    return last;
   }
+
+  function fixingAt(d){
+    const iso = toISO(d);
+    // Inside the actual series — including non-publication days, where the
+    // previous fixing legitimately applies.
+    if(lastActualISO && iso <= lastActualISO){
+      const a = _lookupIn(fxs, iso);
+      if(a != null) return a;
+      return (rfr.baseRate || 0);        // before the first fixing
+    }
+    // Beyond the actuals: the forecast curve, carried forward between its own
+    // points the same way.
+    if(fcs.length){
+      const f = _lookupIn(fcs, iso);
+      if(f != null) return f;
+      // The forecast starts later than this date — fall back to the last
+      // actual rather than to nothing.
+      if(lastActualISO) return _lookupIn(fxs, lastActualISO) ?? (rfr.baseRate || 0);
+    }
+    /* No forecast supplied. The last actual held flat is the old behaviour and
+       stays the fallback, because refusing to produce a rate would stop the
+       schedule entirely. It is reported as 'held-flat', not as an observation,
+       so the assumption travels with the number. */
+    if(lastActualISO) return _lookupIn(fxs, lastActualISO) ?? (rfr.baseRate || 0);
+    return (rfr.baseRate || 0);
+  }
+
   // Walk daily across the observation window.
   let product = 1;     // for compounded
   let sum     = 0;     // for simple
@@ -2446,10 +2590,26 @@ function lookupMarginBps(dateISO){
          written for a floating rate. */
       if(todayBandBps != null) couponRate = (instr.coupon?.fixedRate ?? 0) + todayBandBps / 10000;
     } else if(instr.coupon?.type === 'Floating'){
-      // Apply spread + cap/floor. A band in force today replaces the constant
-      // spread rather than adding to it — `spread` is the fallback for "no
-      // band given", so using both would charge the margin twice.
-      let r = floatingRate + (todayBandBps != null ? todayBandBps / 10000 : (instr.coupon.spread ?? 0));
+      /* The benchmark for today, from the fixings series when there is one.
+
+         This branch used `floatingRate` — a single number captured at build
+         time — for the entire life of the deal, and every index except SONIA
+         is routed here. So a seven-year SOFR loan sitting on 272 observed SOFR
+         fixings ran at the 4.00% base rate for all seven years and never read
+         one of them. The fixings were loaded, stored, round-tripped and
+         ignored, which is the same shape of defect as the discarded spread
+         bands.
+
+         Term rates belong here and are taken as published — no compounding.
+         Daily compounded-in-arrears RFRs are routed to the branch below by
+         builderToInstrument instead, because reading them as term rates would
+         apply the wrong convention.
+
+         `floatingRate` remains the fallback when no fixings exist, so a deal
+         with nothing observed behaves exactly as before. */
+      const observed = rfrRateOn(instr, todayISO);
+      const base = (observed != null) ? observed : floatingRate;
+      let r = base + (todayBandBps != null ? todayBandBps / 10000 : (instr.coupon.spread ?? 0));
       if(instr.coupon.floor != null) r = Math.max(r, instr.coupon.floor);
       if(instr.coupon.cap   != null) r = Math.min(r, instr.coupon.cap);
       couponRate = r;
@@ -3001,6 +3161,10 @@ function lookupMarginBps(dateISO){
       capitalized,
       interestAdjustments: 0,
       cashInterestPayment: 0,
+      /* Where today's benchmark rate came from. Only meaningful on a
+         floating/RFR coupon; null on a fixed one, because "actual" would be a
+         misleading thing to say about a rate nobody observes. */
+      rateSource: isFloatingCoupon ? rfrRateSourceOn(instr, todayISO) : null,
       pikRate: pikRateToday,
       dailyPik,
       cumPikAccrued,

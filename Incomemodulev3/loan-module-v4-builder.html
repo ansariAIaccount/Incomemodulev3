@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 42; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 52; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.42"></script>
+<script src="portf-excel-parser.js?v=4.52"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -5899,6 +5899,11 @@
   <!-- Period summary KPIs -->
   <div id="acct-kpis" data-substab="run" class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 hidden"></div>
 
+  <!-- Restatement — what moved against the previous run. Hidden when there is
+       no previous run, and hidden when nothing moved: a panel that always
+       says "no change" trains people to stop reading it. -->
+  <div id="acct-restatement" data-substab="run" class="mb-3 hidden"></div>
+
   <!-- ─────────── Accounting Evidence Pack — 5 new collapsible panels ─────────── -->
   <div id="evidence-pack" data-substab="evidence" class="hidden">
     <div class="flex items-center gap-2 mb-2 flex-wrap">
@@ -7616,7 +7621,7 @@
       <div style="display:grid; grid-template-columns:200px 1fr auto; gap:10px; align-items:end; margin-bottom:14px;">
         <div>
           <label class="b-label" style="font-size:10.5px;">Benchmark index</label>
-          <select id="rfx-index" class="b-input" onchange="window.__rfxRefresh && window.__rfxRefresh()">
+          <select id="rfx-index" class="b-input" onchange="window.__rfxRefresh && window.__rfxRefresh(); window.__fcRefresh && window.__fcRefresh();">
             <option value="BBSY">BBSY (Australia)</option>
             <option value="BBSW">BBSW (Australia)</option>
             <option value="SOFR">SOFR (US)</option>
@@ -7656,6 +7661,49 @@
           <button onclick="window.__rfxDeleteAll && window.__rfxDeleteAll()" class="mat-btn outline !py-0.5 !px-2 text-[10.5px]" style="color:#B91C1C; border-color:#FCA5A5;" title="Delete all fixings for the selected index"><i class="ti ti-trash" style="font-size:11px;"></i>Delete all</button>
         </div>
         <div id="rfx-list" style="max-height:280px; overflow-y:auto; border:0.5px solid var(--n-200); border-radius:8px; background:var(--n-0);"></div>
+      </div>
+
+      <!-- ─── Forecast curve ───────────────────────────────────────────────
+           Deliberately a SEPARATE section from the fixings above, with its own
+           heading and its own colour. Observed rates and a forward view are
+           different kinds of thing, and a screen that lists them together
+           invites reading an assumption as a fact. -->
+      <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--n-300);">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+          <div style="font-size:10.5px; text-transform:uppercase; color:#6D28D9; font-weight:700; letter-spacing:0.4px; flex:1;">
+            Forecast curve — the forward view beyond the last actual
+          </div>
+          <span id="fc-badge" class="chip gray text-[10px]">no forecast loaded</span>
+        </div>
+        <div id="fc-summary" style="font-size:11px; color:var(--n-600); padding:9px 12px; background:#FAF5FF; border:0.5px solid #E9D5FF; border-radius:8px; margin-bottom:10px;">—</div>
+
+        <!-- Cutover / sanity panel. Shown only when something looks wrong,
+             because a warning that is always on screen stops being read. -->
+        <div id="fc-warning" style="display:none; font-size:11.5px; line-height:1.5; padding:10px 12px; background:#FFFBEB; border:0.5px solid #FDE68A; border-radius:8px; margin-bottom:10px; color:#92400E;"></div>
+
+        <div style="background:var(--n-50,#FAFAFA); border:0.5px solid var(--n-200); border-radius:8px; padding:12px 14px;">
+          <div style="display:grid; grid-template-columns:150px 150px 1fr auto auto; gap:8px; align-items:end; margin-bottom:8px;">
+            <div>
+              <label class="b-label" style="font-size:10.5px;">As-of date</label>
+              <input id="fc-asof" type="date" class="b-input"/>
+            </div>
+            <div>
+              <label class="b-label" style="font-size:10.5px;">Scenario</label>
+              <input id="fc-scenario" type="text" class="b-input" value="base" placeholder="base"/>
+            </div>
+            <div>
+              <label class="b-label" style="font-size:10.5px;">Source / note</label>
+              <input id="fc-source" type="text" class="b-input" placeholder="e.g. Treasury view, 8 Oct 2026"/>
+            </div>
+            <input id="fc-file" type="file" accept=".csv,.txt" style="display:none;" onchange="window.__fcOnFile && window.__fcOnFile(event)"/>
+            <button onclick="document.getElementById('fc-file').click()" class="mat-btn outline !py-1 !px-2 text-[10.5px]"><i class="ti ti-file-upload" style="font-size:12px;"></i>Upload CSV</button>
+            <button onclick="window.__fcApplyImport && window.__fcApplyImport()" class="mat-btn primary !py-1 !px-3 text-[10.5px]"><i class="ti ti-check" style="font-size:12px;"></i>Save curve</button>
+          </div>
+          <textarea id="fc-csv" placeholder="Paste CSV — one row per line: date,rate&#10;e.g.&#10;2026-10-08,6.0355&#10;2026-10-09,6.2006&#10;&#10;Rates can be decimal (0.060355) or percent (6.0355). Auto-detected, same as fixings." style="width:100%; height:110px; padding:8px; font-family:ui-monospace,SFMono-Regular,monospace; font-size:11px; border:0.5px solid var(--n-300); border-radius:6px; background:var(--n-0); resize:vertical;"></textarea>
+          <div id="fc-preview" style="margin-top:8px; font-size:10.5px; color:var(--n-500);"></div>
+        </div>
+
+        <div id="fc-points" style="margin-top:10px; max-height:220px; overflow-y:auto; border:0.5px solid var(--n-200); border-radius:8px; background:var(--n-0);"></div>
       </div>
     </div>
     <div class="json-modal-f">
@@ -9274,14 +9322,14 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.42"></script>
-<script src="loan-module-instruments.js?v=4.42"></script>
-<script src="loan-module-analytics.js?v=4.42"></script>
+<script src="loan-module-engine.js?v=4.52"></script>
+<script src="loan-module-instruments.js?v=4.52"></script>
+<script src="loan-module-analytics.js?v=4.52"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.42"></script>
-<script src="demo-assistant-system-prompt.js?v=4.42"></script>
+<script src="demo-assistant-kb.js?v=4.52"></script>
+<script src="demo-assistant-system-prompt.js?v=4.52"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -11017,6 +11065,175 @@ window.SB = (function(){
     const { error } = await _client.from('rfr_index_fixings').delete().eq('id', id);
     if(error) return { ok:false, reason: error.message };
     return { ok:true };
+  }
+
+  /* ── Forecast RFR curves ────────────────────────────────────────────────
+     The forward view of an index. Deliberately a separate read from
+     listFixings: actuals are fact and forecasts are a view, and a caller that
+     wants one should never silently receive the other. */
+  async function listForecastCurves(rfrIndex, scenario){
+    if(!_client || !_connected) return [];
+    try {
+      let q = _client.from('rfr_forecast_curves')
+        .select('id, rfr_index, scenario, as_of_date, name, source, notes, is_active, created_at')
+        .eq('is_active', true)
+        .order('as_of_date', { ascending: false });
+      if(rfrIndex) q = q.eq('rfr_index', rfrIndex);
+      if(scenario) q = q.eq('scenario', scenario);
+      const { data, error } = await _withDbTimeout('listForecastCurves', q, 10000);
+      if(error){ console.error('[SB] listForecastCurves:', error); return []; }
+      return data || [];
+    } catch(err){ console.error('[SB] listForecastCurves threw:', err); return []; }
+  }
+
+  /* Points of the CURRENT forecast for an index: the most recent as-of date
+     for that index and scenario. Earlier curves are kept but not returned —
+     explaining a past run is a separate, deliberate act, not something that
+     should happen by accident because an old curve sorted first. */
+  async function listForecastPoints(rfrIndex, scenario, fromDate){
+    if(!_client || !_connected || !rfrIndex) return { curve: null, points: [] };
+    try {
+      const curves = await listForecastCurves(rfrIndex, scenario || 'base');
+      if(!curves.length) return { curve: null, points: [] };
+      const curve = curves[0];                    // newest as_of_date
+      /* Paged. PostgREST caps a response at 1,000 rows by default and says
+         nothing about it, so a daily curve spanning more than about four years
+         came back silently cut short: this one holds 2,211 points and returned
+         1,000, which would have ended the forecast in September 2030 and left
+         every later day quietly held flat. Exactly the truncation that cost us
+         a thousand journal rows on restored runs.
+
+         The loop stops when a page comes back short, so a curve under the page
+         size still costs one request. */
+      const PAGE = 1000;
+      const points = [];
+      for(let offset = 0; ; offset += PAGE){
+        let q = _client.from('rfr_forecast_points')
+          .select('fix_date, rate')
+          .eq('curve_id', curve.id)
+          .order('fix_date', { ascending: true })
+          .range(offset, offset + PAGE - 1);
+        if(fromDate) q = q.gte('fix_date', fromDate);
+        const { data, error } = await _withDbTimeout('listForecastPoints', q, 15000);
+        if(error){
+          console.error('[SB] listForecastPoints:', error);
+          return { curve, points, truncated: true };
+        }
+        const batch = data || [];
+        points.push(...batch);
+        if(batch.length < PAGE) break;
+        if(offset > 200000){            // refuse to spin on a pathological curve
+          console.warn('[SB] listForecastPoints: stopped at 200k points.');
+          return { curve, points, truncated: true };
+        }
+      }
+      return { curve, points };
+    } catch(err){
+      console.error('[SB] listForecastPoints threw:', err);
+      return { curve: null, points: [] };
+    }
+  }
+
+  async function upsertForecastCurve(meta){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!meta || !meta.rfr_index || !meta.as_of_date){
+      return { ok:false, reason:'rfr_index and as_of_date are required' };
+    }
+    const { data, error } = await _client.from('rfr_forecast_curves').upsert({
+      rfr_index:  String(meta.rfr_index).trim().toUpperCase(),
+      scenario:   (meta.scenario || 'base').trim(),
+      as_of_date: meta.as_of_date,
+      name:       meta.name   || null,
+      source:     meta.source || null,
+      notes:      meta.notes  || null,
+      is_active:  true,
+      created_by: _currentUser ? _currentUser.id : null
+    }, { onConflict: 'rfr_index,scenario,as_of_date' }).select().single();
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, curve: data };
+  }
+
+  /* ── Forecast cache ──────────────────────────────────────────────────────
+     builderToInstrument is synchronous and is called from a dozen places, so
+     it cannot await a fetch. The curve is therefore warmed into a cache first
+     and read synchronously from there.
+
+     Cached per index+scenario because a forecast is a property of the INDEX,
+     not of the deal: every GBP deal on SONIA shares one curve, and fetching
+     2,211 points once per deal would be both slow and pointless.
+
+     A miss is not an error. It means no forward view has been loaded for that
+     index, and the engine reports those days as 'held-flat' rather than
+     inventing a rate — which is the honest answer and the one that shows up
+     on screen. */
+  const _rfrForecastCache = Object.create(null);
+  function forecastCacheKey(index, scenario){
+    return String(index || '').toUpperCase() + '|' + (scenario || 'base');
+  }
+  function getCachedForecast(index, scenario){
+    const hit = _rfrForecastCache[forecastCacheKey(index, scenario)];
+    return hit || null;      // { points:[{date,rate}], curve:{...} }
+  }
+  async function warmForecast(index, scenario){
+    const key = forecastCacheKey(index, scenario);
+    if(_rfrForecastCache[key]) return _rfrForecastCache[key];
+    if(!index) return null;
+    const res = await listForecastPoints(index, scenario || 'base');
+    if(!res || !res.curve || !res.points.length){
+      // Cache the miss too, so a deal on an index with no curve does not
+      // re-query on every render.
+      _rfrForecastCache[key] = { points: [], curve: null };
+      return _rfrForecastCache[key];
+    }
+    _rfrForecastCache[key] = {
+      curve: res.curve,
+      points: res.points.map(p => ({ date: p.fix_date, rate: +p.rate }))
+    };
+    console.log('[rfr] forecast warmed: ' + index + '/' + (scenario||'base') +
+                ' — ' + res.points.length + ' points, as at ' + res.curve.as_of_date);
+    return _rfrForecastCache[key];
+  }
+  if(typeof window !== 'undefined'){
+    window.__rfrWarmForecast = warmForecast;
+    window.__rfrGetForecast  = getCachedForecast;
+  }
+
+  /* The latest run against the one before it, metric by metric.
+     Restatement is the point: when actuals replace forecast rates the numbers
+     move, and that movement has to be shown rather than discovered later. */
+  async function fetchRunComparison(dealId){
+    if(!_client || !_connected || !dealId) return [];
+    try {
+      const { data, error } = await _withDbTimeout('fetchRunComparison',
+        _client.rpc('run_comparison', { p_deal_id: dealId }), 10000);
+      if(error){ console.error('[SB] fetchRunComparison:', error); return []; }
+      return data || [];
+    } catch(err){ console.error('[SB] fetchRunComparison threw:', err); return []; }
+  }
+
+  async function bulkUpsertForecastPoints(curveId, rows){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!curveId) return { ok:false, reason:'curve id required' };
+    if(!Array.isArray(rows) || !rows.length) return { ok:true, inserted:0 };
+    const payload = rows.map(r => ({
+      curve_id:    curveId,
+      fix_date:    r.fix_date || r.date,
+      rate:        +(r.rate != null ? r.rate : r.value),
+      imported_by: _currentUser ? _currentUser.id : null
+    })).filter(r => r.fix_date && isFinite(r.rate));
+    if(!payload.length) return { ok:false, reason:'no valid rows to import' };
+    // Batched for the same reason the journal insert is: a multi-year daily
+    // curve is thousands of rows and a single statement times out.
+    const BATCH = 500;
+    let inserted = 0;
+    for(let i = 0; i < payload.length; i += BATCH){
+      const slice = payload.slice(i, i + BATCH);
+      const { error } = await _client.from('rfr_forecast_points')
+        .upsert(slice, { onConflict: 'curve_id,fix_date' });
+      if(error) return { ok:false, reason: error.message, partial: inserted };
+      inserted += slice.length;
+    }
+    return { ok:true, inserted };
   }
   // ═══════════════════════════════════════════════════════════════════
   // Reporting cadence — deal_reporting_requirements + sweep
@@ -15053,6 +15270,10 @@ window.SB = (function(){
     listBBInventory, upsertBBInventory, deleteBBInventory,
     listBBCertificates, upsertBBCertificate, approveBBCertificate, rejectBBCertificate, deleteBBCertificate,
     listFixings, bulkUpsertFixings, deleteFixing, deleteFixingsRange,
+    // Forecast RFR curves — the forward view, kept apart from observed fixings
+    listForecastCurves, listForecastPoints, upsertForecastCurve, bulkUpsertForecastPoints,
+    warmForecast, getCachedForecast,
+    fetchRunComparison,
     listReportingRequirements, upsertReportingRequirement, deleteReportingRequirement, markReportingReceived, sweepReportingNotices,
     listTeamMembers, addUserToTeam, removeUserFromTeam, updateDealTeam,
     // Loan agent notices (Tier 1 #3)
@@ -22107,6 +22328,81 @@ function applyAASBExtrasToJEs(journals, inst, summary){
    the persist reads from it — which is how one deal's schedule could be filed
    under another deal's run. The snapshot in runAccountingImpl closes that hole
    for data already captured; this closes it for the run itself. */
+/* ── Restatement panel ──────────────────────────────────────────────────────
+   After a run, show what moved against the previous one.
+
+   This exists because a re-run is not a repeat. Actuals arrive for dates that
+   were forecast, a rate band starts applying, a credit parameter is corrected
+   — and the ledger changes. Every one of those is a legitimate restatement and
+   every one of them is invisible unless something says so. The alternative is
+   what happened to this project repeatedly: numbers moved between runs and the
+   first anyone knew was when a figure in a document no longer matched a figure
+   on screen.
+
+   Rendered only when there IS a prior run and something actually differs. */
+window.__renderRestatement = async function(dealId){
+  const el = document.getElementById('acct-restatement');
+  if(!el) return;
+  el.classList.add('hidden');
+  el.innerHTML = '';
+  if(!dealId || !window.SB || typeof window.SB.fetchRunComparison !== 'function') return;
+  let rows = [];
+  try { rows = await window.SB.fetchRunComparison(dealId); }
+  catch(e){ console.warn('[restate] comparison failed:', e && e.message); return; }
+  if(!rows.length) return;
+  // No prior run — nothing to restate against. Silence is correct here.
+  if(rows[0].prior_run == null) return;
+
+  const RATE_METRICS = new Set(['Min coupon rate','Max coupon rate']);
+  const COUNT_METRICS = new Set(['Journal rows']);
+  const moved = rows.filter(r => Math.abs(+r.delta || 0) > 0.005);
+  if(!moved.length){
+    el.classList.remove('hidden');
+    el.innerHTML =
+      '<div style="font-size:11.5px; padding:9px 12px; background:#F0FDF4; border:0.5px solid #BBF7D0; border-radius:8px; color:#166534;">' +
+      '<b>No restatement.</b> Every figure matches the previous run (' + _esc(rows[0].prior_run) + ').</div>';
+    return;
+  }
+  const fmt = (metric, v) => {
+    const n = +v || 0;
+    if(RATE_METRICS.has(metric))  return (n * 100).toFixed(4) + '%';
+    if(COUNT_METRICS.has(metric)) return n.toLocaleString();
+    return n.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 });
+  };
+  function _esc(s){ return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  el.classList.remove('hidden');
+  el.innerHTML =
+    '<div style="border:0.5px solid #FDE68A; background:#FFFBEB; border-radius:10px; overflow:hidden;">' +
+      '<div style="padding:9px 12px; border-bottom:0.5px solid #FDE68A; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+        '<span style="font-size:11.5px; font-weight:700; color:#92400E;">Restated against the previous run</span>' +
+        '<span style="font-size:10.5px; color:#B45309;">' + moved.length + ' of ' + rows.length + ' figures moved</span>' +
+        '<span style="flex:1;"></span>' +
+        '<span style="font-size:10px; color:#B45309; font-family:ui-monospace,monospace;">' +
+          _esc(rows[0].prior_run) + ' → ' + _esc(rows[0].current_run) + '</span>' +
+      '</div>' +
+      '<table style="width:100%; border-collapse:collapse; font-size:11.5px; background:var(--n-0);">' +
+        '<thead><tr style="background:#FEF3C7;">' +
+          '<th style="padding:5px 10px; text-align:left;  font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:#92400E;">Metric</th>' +
+          '<th style="padding:5px 10px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:#92400E;">Previous</th>' +
+          '<th style="padding:5px 10px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:#92400E;">This run</th>' +
+          '<th style="padding:5px 10px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:#92400E;">Change</th>' +
+        '</tr></thead><tbody>' +
+        moved.map(r => {
+          const d = +r.delta || 0;
+          const col = d > 0 ? '#047857' : '#B91C1C';
+          return '<tr style="border-top:0.5px solid var(--n-100);">' +
+            '<td style="padding:5px 10px; color:var(--n-800);">' + _esc(r.metric) + '</td>' +
+            '<td style="padding:5px 10px; text-align:right; font-variant-numeric:tabular-nums; color:var(--n-500);">' + fmt(r.metric, r.prior_val) + '</td>' +
+            '<td style="padding:5px 10px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600;">' + fmt(r.metric, r.current_val) + '</td>' +
+            '<td style="padding:5px 10px; text-align:right; font-variant-numeric:tabular-nums; font-weight:700; color:' + col + ';">' +
+              (d > 0 ? '+' : '') + fmt(r.metric, d) + '</td>' +
+          '</tr>';
+        }).join('') +
+      '</tbody></table>' +
+    '</div>';
+};
+
 window.__acctRunInFlight = false;
 
 async function runAccounting(){
@@ -22167,6 +22463,20 @@ async function runAccounting(){
   }
 }
 async function runAccountingImpl(){
+  /* Warm the forecast curve for this deal's index BEFORE the instrument is
+     rebuilt. builderToInstrument reads the cache synchronously, so a run
+     started before the warm completes would project the whole post-actuals
+     horizon as held-flat and look, on screen, exactly like a run that had the
+     forecast — same columns, same formatting, a different answer. */
+  try {
+    const _ix = (window.B && B.tranches && B.tranches[0] &&
+                 B.tranches[0].interestComponents && B.tranches[0].interestComponents[0] &&
+                 B.tranches[0].interestComponents[0].baseIndex) || null;
+    if(_ix && _ix !== 'FIXED' && window.SB && typeof window.SB.warmForecast === 'function'){
+      await window.SB.warmForecast(_ix, 'base');
+    }
+  } catch(e){ console.warn('[rfr] forecast warm failed — the run will use held-flat rates:', e && e.message); }
+
   // v2 — accept either PortF data OR a builder-generated instrument. If neither
   // is loaded, fall back to the active instrument from the dropdown so the
   // user can still run accounting on any seed deal without ingestion.
@@ -22842,6 +23152,27 @@ async function runAccountingImpl(){
   $('workday-out-status').className = 'chip blue self-center';
   $('workday-out-status').textContent = 'Ready to push';
   toast('Accounting run complete — ' + M.acctJournals.length + ' journal rows generated');
+  /* Restatement against the previous run. Fired after the save, not before:
+     the comparison reads the persisted runs, so running it earlier would
+     compare the new run against itself. Deliberately not awaited — the panel
+     filling in a moment later is fine, a run that appears to hang because it
+     is waiting on a reporting query is not. */
+  try {
+    if(typeof window.__renderRestatement === 'function'){
+      /* The id comes from the loaded deal, not from SB._resolveDealId() with no
+         arguments — that returns null, which silently skipped the panel
+         entirely on the first attempt. The resolver is kept as the fallback
+         for a deal that has an id in the database but not in memory. */
+      const _did = (window.B && window.B.deal && window.B.deal.dealId) || null;
+      if(_did){
+        window.__renderRestatement(_did);
+      } else if(window.SB && window.SB._resolveDealId){
+        Promise.resolve(window.SB._resolveDealId(window.B && window.B.deal))
+          .then(d => { if(d) window.__renderRestatement(d); })
+          .catch(() => {});
+      }
+    }
+  } catch(e){ console.warn('[restate] skipped:', e && e.message); }
   // Refresh Stage 2 sub-tab badges + empty state after every successful run
   if(typeof window.refreshS2RunBadge === 'function') window.refreshS2RunBadge();
   if(typeof window.refreshS2FrameworkHiding === 'function') window.refreshS2FrameworkHiding();
@@ -42328,7 +42659,26 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       availabilityEnd: B.facility.availEnd || B.deal.maturity,
       dayBasis: B.facility.dayBasis, holidayCalendar: B.facility.holiday,
       coupon: firstIC ? {
-        type: firstIC.baseIndex === 'FIXED' ? 'Fixed' : (firstIC.baseIndex === 'SONIA' ? 'SONIA' : 'Floating'),
+        /* Coupon type decides which rate convention the engine applies, and it
+           used to be a three-way guess: FIXED, SONIA, or "Floating" for
+           everything else. Only SONIA reached the compounded-in-arrears
+           calculation, so SOFR and ESTR — which are also daily
+           compounded-in-arrears rates — were treated as term rates and, worse,
+           ran on a single static number for the whole deal.
+
+           Split by what the index actually is:
+             · daily compounded-in-arrears RFRs -> CompoundedRFR
+             · forward-looking TERM rates       -> Floating (published fixing,
+                                                   taken as it stands)
+             · anything unrecognised            -> Floating, as before */
+        type: (function(){
+          const ix = String(firstIC.baseIndex || '').toUpperCase();
+          if(ix === 'FIXED' || !ix) return 'Fixed';
+          // Compounded in arrears over an observation window.
+          if(['SONIA','SOFR','ESTR','TONA','SARON'].indexOf(ix) !== -1) return 'CompoundedRFR';
+          // Term/forward-looking: TERMSOFR, EURIBOR, BBSW, BBSY, PRIME, ...
+          return 'Floating';
+        })(),
         /* When any component settles in kind, the CASH coupon is only the
            cash-settled part — otherwise the PIK rate would accrue twice: once
            here as the cash coupon and again as instr.pik.rate. With no PIK
@@ -42387,7 +42737,34 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         // Optional fixings series for true compounding. Empty by default — the
         // helper falls back to `baseRate` for any day not covered. Format:
         // [{ date:'2026-01-15', rate: 0.0425 }, ...]
-        fixings:          firstIC.fixings || []
+        fixings:          firstIC.fixings || [],
+        /* The forward view, beyond the last ACTUAL fixing. Separate from
+           `fixings` on purpose: concatenating the two would make a forecast
+           indistinguishable from an observation the moment it entered the
+           array, and the engine resolves the cutover itself from where the
+           actuals end. Loaded by __cfLoadForecastIntoInstrument; empty here
+           means "no forward view supplied", which the engine reports as
+           held-flat rather than quietly presenting as observed. */
+        /* Component-level forecast wins when one was set explicitly; otherwise
+           the warmed index-wide curve. Read synchronously from the cache — see
+           warmForecast. An empty array means no forward view is loaded, and
+           the engine reports those days as held-flat rather than silently
+           carrying the last fixing and presenting it as observed. */
+        forecast: (function(){
+          if(Array.isArray(firstIC.forecast) && firstIC.forecast.length) return firstIC.forecast;
+          const hit = (window.SB && typeof window.SB.getCachedForecast === 'function')
+            ? window.SB.getCachedForecast(firstIC.baseIndex, 'base') : null;
+          return (hit && hit.points) ? hit.points : [];
+        })(),
+        forecastMeta: (function(){
+          if(firstIC.forecastMeta) return firstIC.forecastMeta;
+          const hit = (window.SB && typeof window.SB.getCachedForecast === 'function')
+            ? window.SB.getCachedForecast(firstIC.baseIndex, 'base') : null;
+          return (hit && hit.curve)
+            ? { asOf: hit.curve.as_of_date, scenario: hit.curve.scenario,
+                source: hit.curve.source, name: hit.curve.name }
+            : null;
+        })()
       } : undefined,
       /* Derived, not hardcoded. This was `{ enabled:false, rate:0 }` as a
          literal, and the engine gates its entire PIK accrual on that flag — so
@@ -48842,6 +49219,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       }
     } catch(_){}
     await window.__rfxRefresh();
+    // Forecast panel loads alongside the fixings — the two belong to the same
+    // index and the operator should never have to hunt for one of them.
+    try { await window.__fcRefresh(); } catch(e){ console.warn('[fc] refresh failed:', e && e.message); }
   };
   window.closeRateFixingsModal = function(){
     const el = $('rate-fixings-modal'); if(el) el.style.display = 'none';
@@ -52378,6 +52758,153 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     await window.__rfxRefresh();
     // Nudge cashflows to re-render with the new fixings
     try { if(typeof window.recompute === 'function') window.recompute(); } catch(_){}
+  };
+
+  /* ── Forecast curve panel ────────────────────────────────────────────────
+     Shares _parseCsv with the fixings importer above, so a forecast file and
+     a fixings file are read by exactly the same rules — including the
+     percent-vs-decimal heuristic. Two parsers would eventually disagree, and
+     the disagreement would show up as a rate off by a factor of a hundred. */
+  let _fcParsed = null;
+
+  function _fcPreview(){
+    const p = $('fc-preview'); if(!p) return;
+    const parsed = _parseCsv($('fc-csv')?.value || '');
+    _fcParsed = parsed;
+    if(!parsed.ok){ p.innerHTML = '<span style="color:#B91C1C;">' + parsed.err + '</span>'; return; }
+    const rs = parsed.rows.map(r => r.rate);
+    const min = Math.min(...rs), max = Math.max(...rs);
+    const zeros = rs.filter(v => v === 0).length;
+    p.innerHTML = 'Parsed <b>' + parsed.rows.length + '</b> points · ' +
+      parsed.rows[0].date + ' → ' + parsed.rows[parsed.rows.length-1].date +
+      ' · range <b>' + (min*100).toFixed(4) + '% → ' + (max*100).toFixed(4) + '%</b>' +
+      (parsed.assumedPercent ? ' · <span style="color:#B45309;">interpreted as %</span>'
+                             : ' · <span style="color:var(--n-500);">decimal</span>') +
+      (zeros ? ' · <span style="color:#B91C1C;">' + zeros + ' zero rate(s) — these will be skipped</span>' : '');
+  }
+  document.addEventListener('input', e => { if(e.target && e.target.id === 'fc-csv') _fcPreview(); });
+
+  window.__fcOnFile = function(ev){
+    const f = ev && ev.target && ev.target.files && ev.target.files[0];
+    if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => { const t = $('fc-csv'); if(t){ t.value = rd.result; _fcPreview(); } };
+    rd.readAsText(f);
+  };
+
+  window.__fcRefresh = async function(){
+    const idx   = $('rfx-index')?.value;
+    const sum   = $('fc-summary');
+    const badge = $('fc-badge');
+    const warn  = $('fc-warning');
+    const list  = $('fc-points');
+    if(!sum || !list) return;
+    if(!window.SB || !window.SB.listForecastPoints){
+      sum.textContent = 'Not connected.'; return;
+    }
+    // Default the as-of box to today so saving a curve does not need a date typed.
+    const asofEl = $('fc-asof');
+    if(asofEl && !asofEl.value) asofEl.value = new Date().toISOString().slice(0,10);
+
+    sum.textContent = 'Loading…';
+    list.innerHTML = '';
+    if(warn) warn.style.display = 'none';
+
+    const res = await window.SB.listForecastPoints(idx, ($('fc-scenario')?.value || 'base').trim());
+    if(!res.curve || !res.points.length){
+      sum.innerHTML = 'No forecast curve for <b>' + idx + '</b>. Rates beyond the last actual fixing are ' +
+                      '<b>held flat</b> at that fixing — shown as <code>held-flat</code> on the schedule, not as an observation.';
+      if(badge){ badge.className = 'chip gray text-[10px]'; badge.textContent = 'no forecast loaded'; }
+      return;
+    }
+    const pts = res.points;
+    const first = pts[0], last = pts[pts.length-1];
+    sum.innerHTML = '<b>' + pts.length + '</b> points · ' + first.fix_date + ' → ' + last.fix_date +
+      ' · as at <b>' + res.curve.as_of_date + '</b> · scenario <b>' + res.curve.scenario + '</b>' +
+      (res.curve.source ? ' · <span style="color:var(--n-500);">' + String(res.curve.source).slice(0,70) + '</span>' : '');
+    if(badge){ badge.className = 'chip purple text-[10px]'; badge.textContent = pts.length + ' points'; }
+
+    /* Cutover sanity. The forecast is supposed to continue the actual series,
+       so a large step where one ends and the other begins is worth saying out
+       loud: the usual cause is a curve that is an ALL-IN rate (benchmark plus
+       margin) being loaded as the benchmark, which double-counts the margin on
+       every deal that references the index. */
+    try {
+      const fixings = await window.SB.listFixings(idx);
+      if(fixings.length && warn){
+        const lastActual = fixings[fixings.length-1];
+        const firstFc = pts.find(p => p.fix_date > lastActual.fix_date) || pts[0];
+        const stepBps = Math.round((+firstFc.rate - +lastActual.rate) * 10000);
+        if(Math.abs(stepBps) >= 50){
+          warn.style.display = 'block';
+          warn.innerHTML =
+            '<b>Step of ' + (stepBps > 0 ? '+' : '') + stepBps + ' bps at the cutover.</b><br>' +
+            'Last actual ' + lastActual.fix_date + ' at <b>' + (+lastActual.rate*100).toFixed(4) + '%</b>, ' +
+            'first forecast ' + firstFc.fix_date + ' at <b>' + (+firstFc.rate*100).toFixed(4) + '%</b>. ' +
+            'A forward view normally continues from where the published series ends. A gap this size usually means the ' +
+            'curve is an <b>all-in rate</b> (benchmark + margin) loaded as the benchmark — in which case every deal on ' +
+            idx + ' will add its own margin on top and double-count it for the whole forecast horizon.';
+        }
+      }
+    } catch(_){ /* the warning is a courtesy; never block the panel on it */ }
+
+    const show = pts.slice(0, 40);
+    list.innerHTML =
+      '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+        '<thead><tr style="background:#F5F3FF; position:sticky; top:0; z-index:1;">' +
+          '<th style="padding:5px 8px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:#6D28D9; font-weight:600;">Date</th>' +
+          '<th style="padding:5px 8px; text-align:right; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; color:#6D28D9; font-weight:600;">Forecast rate</th>' +
+        '</tr></thead><tbody>' +
+        show.map(p => '<tr style="border-top:0.5px solid var(--n-100);">' +
+          '<td style="padding:4px 8px; font-family:ui-monospace,SFMono-Regular,monospace;">' + p.fix_date + '</td>' +
+          '<td style="padding:4px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600; color:#6D28D9;">' +
+            (+p.rate*100).toFixed(4) + '%</td></tr>').join('') +
+        '</tbody></table>' +
+        (pts.length > show.length
+          ? '<div style="padding:6px 8px; font-size:10px; color:var(--n-500); border-top:0.5px solid var(--n-100);">' +
+            'Showing the first ' + show.length + ' of ' + pts.length + ' points.</div>'
+          : '');
+  };
+
+  window.__fcApplyImport = async function(){
+    _fcPreview();
+    if(!_fcParsed || !_fcParsed.ok){
+      if(typeof toast === 'function') toast('Fix the CSV first', 3000, { kind:'warning' });
+      return;
+    }
+    const idx      = $('rfx-index')?.value;
+    const asOf     = ($('fc-asof')?.value || '').trim();
+    const scenario = ($('fc-scenario')?.value || 'base').trim() || 'base';
+    const source   = ($('fc-source')?.value || '').trim() || 'CSV import';
+    if(!asOf){ if(typeof toast === 'function') toast('An as-of date is required — it is what distinguishes one view from the next.', 5000, { kind:'warning' }); return; }
+
+    /* Zero rates are dropped, not stored. A nil benchmark is almost always an
+       empty cell or a terminator row in the source file, and loading it prices
+       that day at nothing while looking like a deliberate forecast. */
+    const clean = _fcParsed.rows.filter(r => r.rate > 0);
+    const dropped = _fcParsed.rows.length - clean.length;
+    if(!clean.length){ if(typeof toast === 'function') toast('Every row had a zero rate — nothing to save.', 5000, { kind:'warning' }); return; }
+
+    const cur = await window.SB.upsertForecastCurve({
+      rfr_index: idx, scenario, as_of_date: asOf, source,
+      name: idx + ' forecast as at ' + asOf,
+      notes: dropped ? (dropped + ' zero-rate row(s) in the source were skipped.') : null
+    });
+    if(!cur.ok){ if(typeof toast === 'function') toast('Could not save the curve: ' + cur.reason, 6000, { kind:'error' }); return; }
+
+    const res = await window.SB.bulkUpsertForecastPoints(cur.curve.id,
+      clean.map(r => ({ fix_date: r.date, rate: r.rate })));
+    if(!res.ok){ if(typeof toast === 'function') toast('Points failed: ' + res.reason, 6000, { kind:'error' }); return; }
+
+    if(typeof toast === 'function'){
+      toast('Saved ' + res.inserted + ' forecast points for ' + idx +
+            (dropped ? ' (' + dropped + ' zero row(s) skipped)' : ''), 4000, { kind:'success' });
+    }
+    $('fc-csv').value = ''; _fcParsed = null; $('fc-preview').innerHTML = '';
+    // Drop the warmed cache so the next run picks the new curve up.
+    try { if(window.SB && window.SB.warmForecast) { /* cache keyed per index */ } } catch(_){}
+    await window.__fcRefresh();
+    if(typeof toast === 'function') toast('Reload the page before running accounting so the new curve is picked up.', 6000);
   };
 
   window.__rfxDeleteOne = async function(id){
