@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 64; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 65; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.64"></script>
+<script src="portf-excel-parser.js?v=4.65"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -6545,8 +6545,18 @@
   }
   #da-h .title { font-weight:700; font-size:13px; }
   #da-h .sub { font-size:10.5px; opacity:.85; }
-  #da-h .close { margin-left:auto; cursor:pointer; opacity:.85; }
-  #da-h .close:hover { opacity:1; }
+  /* The badge already carries margin-left:auto to push this group right. The
+     two icons had it as well, so three items in one flex row were each claiming
+     the free space; when the header ran out of room the icons were the ones
+     that lost, and #da-panel has overflow:hidden, so the X could be clipped off
+     the right edge while still being "on screen" as far as the DOM was
+     concerned. One auto margin, on the badge, is enough.
+     The padding is a hit target: a 16px glyph is a small thing to ask someone
+     to hit on a projector mid-demo. */
+  #da-h .close { cursor:pointer; opacity:.85; padding:3px; border-radius:5px;
+    flex:0 0 auto; line-height:1; }
+  #da-h .close:hover { opacity:1; background:rgba(255,255,255,.18); }
+  #da-h .title, #da-h .sub { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #da-body { flex:1; overflow:auto; padding:12px 14px; background:#fafbff; }
   #da-input-row { padding:10px 12px; border-top:1px solid #e1e4ec; background:white;
     display:flex; gap:6px; align-items:center;
@@ -6618,13 +6628,16 @@
   .da-msg .a p { margin:6px 0; }
   .da-cost { font-size:9.5px; color:#9ca3af; margin-top:4px; }
 </style>
-<!-- Bulletproof toggle: inline onclick guarantees the FAB works even if
-     setupDemoAssistant() failed to run due to a JS error earlier in init.
-     If setupDemoAssistant did run, addEventListener still fires too — the
-     two just toggle in sequence with no visible glitch since both call
-     classList.toggle('open') and end in the same visible state on odd
-     clicks. Odd/even parity across double-toggles gives the correct
-     result: the panel opens on first click. -->
+<!-- Inline onclick so the FAB works even if setupDemoAssistant() never ran,
+     e.g. a JS error earlier in init. setupDemoAssistant deliberately adds NO
+     listener to this button: two handlers would both call toggle('open'), the
+     panel would toggle twice per click and never appear to open.
+     (An earlier version of this comment claimed a listener was also attached
+     and that odd/even parity made it work out. It is not attached, and parity
+     would not have saved it if it were.)
+     The close button is different and does carry a listener as well — see
+     setupDemoAssistant: remove('open') is idempotent, so a second handler
+     costs nothing and gives the X a fallback. -->
 <button id="da-fab" title="Loan Assistant — ask a question about accounting, IFRS, ECL, or how the application works"
         onclick="(function(){var p=document.getElementById('da-panel');if(!p)return;p.classList.toggle('open');if(p.classList.contains('open')){setTimeout(function(){document.getElementById('da-input')?.focus();},50);}})();return false;">
   <span class="material-icons-outlined">chat</span>
@@ -9331,21 +9344,21 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.64"></script>
-<script src="loan-module-instruments.js?v=4.64"></script>
-<script src="loan-module-analytics.js?v=4.64"></script>
+<script src="loan-module-engine.js?v=4.65"></script>
+<script src="loan-module-instruments.js?v=4.65"></script>
+<script src="loan-module-analytics.js?v=4.65"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.64"></script>
+<script src="demo-assistant-kb.js?v=4.65"></script>
 <!-- IFRS answer book, generated from PCS-IFRS-Demo-Answers.md. Loaded AFTER the
      curated KB above because it APPENDS to window.FAQ_KB; loading it first would
      have nothing to append to and the 256 IFRS entries would be dropped on the
      floor without an error. Regenerate with tools/build-ifrs-kb.py — never edit
      by hand, or the PDF the presenter reads and the answers the assistant gives
      will drift apart. -->
-<script src="demo-assistant-kb-ifrs.js?v=4.64"></script>
-<script src="demo-assistant-system-prompt.js?v=4.64"></script>
+<script src="demo-assistant-kb-ifrs.js?v=4.65"></script>
+<script src="demo-assistant-system-prompt.js?v=4.65"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -35839,11 +35852,32 @@ function setupDemoAssistant(){
   };
   refreshKeyHint();
 
-  // Toggle panel — inline onclick attribute on #da-fab handles the open/close
-  // toggle. That guarantees the button works even if setupDemoAssistant() never
-  // ran (e.g. an earlier JS error broke the init sequence). Not adding a
-  // second addEventListener here — it would double-toggle and cancel out.
-  // Same principle for the close button.
+  // Toggle panel — the inline onclick on #da-fab handles open/close. No second
+  // listener here: both would call classList.toggle('open'), the panel would
+  // toggle twice per click and never appear to change.
+  //
+  // The close button is NOT the same case, and treating it as one left it with
+  // a single code path and no fallback. The FAB toggles; the X calls
+  // classList.remove('open'), which is idempotent — removing a class twice does
+  // exactly what removing it once does. So a second handler here is harmless,
+  // and it means the panel still closes if the inline attribute is ever
+  // stripped, overwritten or blocked.
+  closeBtn?.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    panel.classList.remove('open');
+  });
+
+  // Escape closes it too. In a demo the panel sits over the screen being
+  // presented, so there has to be a way out that does not depend on hitting a
+  // 16-pixel icon.
+  document.addEventListener('keydown', (ev) => {
+    if(ev.key === 'Escape' && panel.classList.contains('open')){
+      const settingsOpen = settings?.classList.contains('open');
+      if(settingsOpen) settings.classList.remove('open');   // first Escape shuts settings
+      else panel.classList.remove('open');                  // second shuts the panel
+    }
+  });
 
   // Settings toggle · Save · Clear — inline onclick attributes on the buttons
   // themselves guarantee these work even if setupDemoAssistant() never runs.
