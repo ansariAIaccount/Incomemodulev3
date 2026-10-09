@@ -4469,10 +4469,33 @@ function generateDIU(instr, summary, opts){
       jeIndex++;
     }
   }
+  /* ─── Acquisition of a purchased asset ───────────────────────────────────
+     A purchased loan is recognised at what was PAID, not at the face value of
+     the claim acquired (IFRS 9 §5.1.1). buildSchedule already opens the
+     carrying amount at the consideration — that is why the POCI schedule
+     starts at 60,000,000 against a 100,000,000 face — but this journal was
+     posting the face, so the ledger and the schedule on the same run
+     disagreed by the whole discount: £100m of cash shown leaving when £60m
+     did, and the loan asset recognised 40m above what the schedule carried.
+
+     Only the acquisition itself is re-priced. A later drawdown on a purchased
+     facility is funded at par and keeps its own amount, so the substitution is
+     limited to the first draw on the settlement date. */
+  const _acqConsideration = (instr.purchasePrice != null && +instr.purchasePrice > 0)
+    ? +instr.purchasePrice : null;
+  let _acqPosted = false;
+
   for(const r of summary.rows){
     if(r.draw && r.draw > 0.005){
-      add('Loan Drawdown',          r.draw, true,  '15000', r.date, `Drawdown ${r.date}`);
-      add('Loan Drawdown — Cash',   r.draw, false, '10000', r.date, `Drawdown ${r.date}`);
+      const isAcquisition = _acqConsideration != null && !_acqPosted
+                         && r.date === instr.settlementDate;
+      const drawAmt = isAcquisition ? _acqConsideration : r.draw;
+      const memo = isAcquisition
+        ? `Acquisition ${r.date} — consideration paid for a ${Math.round(r.draw).toLocaleString('en-GB')} claim`
+        : `Drawdown ${r.date}`;
+      add('Loan Drawdown',          drawAmt, true,  '15000', r.date, memo);
+      add('Loan Drawdown — Cash',   drawAmt, false, '10000', r.date, memo);
+      if(isAcquisition) _acqPosted = true;
       jeIndex++;
     }
     if(r.paydown && r.paydown > 0.005){
@@ -5332,6 +5355,83 @@ function splitInterestJEsByCouponPeriod(journals, inst, schedule){
       jeIndex++;
     }
   }
+  /* ── Discount accretion / premium amortisation — the same problem ────────
+     generateDIU adds ONE amortisation pair for the whole window at
+     summary.periodEnd, exactly as it did for interest. Interest was split
+     above and amortisation was left behind, so a deal whose fee accretes
+     across twenty quarters posted the entire accretion in the last one:
+     DEMO-FEES-EIR recognised £2,000,000 of interest income in a single
+     period, and CYPRESS_001 posted its accretion in January 2031 against
+     interest that stopped in May 2026.
+
+     The daily figures were always right — buildSchedule computes
+     amortDaily = carryingValue × effectiveYield × dcf − dailyCash per day.
+     Only the posting granularity was wrong, which is why the totals always
+     reconciled and nothing looked broken until someone read the dates.
+
+     Same period boundaries as the interest split, so the accretion lands on
+     the coupon dates its own schedule produced it on. The sign is evaluated
+     per period rather than once for the window: accretion and amortisation
+     are opposite directions and a deal can in principle do both. */
+  const AMORT_TYPES = new Set(['Discount Accretion', 'Discount Accretion Offset',
+                               'Premium Amortization', 'Premium Amortization Offset']);
+  let finalKept = kept;
+  const amortCounts = {};
+  for(const j of kept){
+    if(AMORT_TYPES.has(j.transactionType)){
+      amortCounts[j.transactionType] = (amortCounts[j.transactionType] || 0) + 1;
+    }
+  }
+  const amortIsAggregate = Object.keys(amortCounts).length > 0
+                        && Object.values(amortCounts).every(c => c <= 2);
+  if(amortIsAggregate){
+    const amortTotals = paymentDates.map(d => ({ end: d, sum: 0 }));
+    for(const r of schedule){
+      if(!r.date || !r.amortDaily) continue;
+      let b = amortTotals.find(p => r.date <= p.end);
+      if(!b) b = amortTotals[amortTotals.length - 1];
+      b.sum += (+r.amortDaily || 0);
+    }
+    const activeAmort = amortTotals.filter(p => Math.abs(p.sum) > 0.005);
+    // One active period means the single line is already on the right date.
+    if(activeAmort.length > 1){
+      let incomeTmpl = null, offsetTmpl = null;
+      const withoutAmort = [];
+      for(const j of kept){
+        if(AMORT_TYPES.has(j.transactionType)){
+          if(/ Offset$/.test(j.transactionType)){ if(!offsetTmpl) offsetTmpl = j; }
+          else if(!incomeTmpl) incomeTmpl = j;
+          continue;
+        }
+        withoutAmort.push(j);
+      }
+      if(incomeTmpl && offsetTmpl){
+        for(const p of activeAmort){
+          const isAccretion = p.sum > 0;
+          const label = isAccretion ? 'Discount Accretion' : 'Premium Amortization';
+          const abs   = Math.abs(p.sum);
+          const memo  = label + ' · period ending ' + p.end;
+          // Income leg: CR on accretion (income up), DR on premium (income down).
+          newRows.push(clone(incomeTmpl, {
+            jeIndex, txIndex: 1, glDate: p.end, effectiveDate: p.end,
+            transactionType: label,
+            originalAmount: abs, amountLE: abs, amountLocal: abs,
+            isDebit: !isAccretion, transactionComments: memo
+          }));
+          // Carrying-value leg: the mirror.
+          newRows.push(clone(offsetTmpl, {
+            jeIndex, txIndex: 2, glDate: p.end, effectiveDate: p.end,
+            transactionType: label + ' Offset',
+            originalAmount: abs, amountLE: abs, amountLocal: abs,
+            isDebit: isAccretion, transactionComments: memo
+          }));
+          jeIndex++;
+        }
+        finalKept = withoutAmort;
+      }
+    }
+  }
+
   /* Route the new rows through the GL mapper.
      These rows are CLONES of the template line, so without this they inherit
      the template's account on every leg — the receivable legs would carry the
@@ -5340,7 +5440,7 @@ function splitInterestJEsByCouponPeriod(journals, inst, schedule){
      why the per-period interest lines were the only ones still showing 23000
      instead of 421000 (Income - Daily Accrued Interest) and 113000
      (Interest Receivable Clear). One source of truth: INVESTRAN_GL. */
-  return kept.concat(applyInvestranGLMapping(newRows));
+  return finalKept.concat(applyInvestranGLMapping(newRows));
 }
 
 if(typeof window !== 'undefined') window.splitInterestJEsByCouponPeriod = splitInterestJEsByCouponPeriod;
