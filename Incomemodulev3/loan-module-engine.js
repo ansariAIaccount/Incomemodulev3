@@ -56,7 +56,40 @@ const HOLIDAY_CALENDARS = {
     '2026-01-01','2026-04-03','2026-04-06','2026-05-01','2026-12-25','2026-12-28'
   ])
 };
+/* Calendars are configuration, not code — the sets above are only a fallback
+   for when the page has no database connection. public.holiday_calendars /
+   holiday_dates is the source of truth, and the builder pushes them in here
+   through registerHolidayCalendar at load.
+
+   Replaces rather than merges. A calendar edited in the config screen to
+   REMOVE a date (Koningsdag on a EUR deal settling through TARGET2, say)
+   must actually lose it; merging would make removal impossible and the
+   screen would disagree with the engine with nothing to show for it. */
+function registerHolidayCalendar(code, dates){
+  if(!code || code === 'none') return false;
+  HOLIDAY_CALENDARS[code] = new Set(
+    (dates || []).map(d => (typeof d === 'string' ? d : toISO(d))).filter(Boolean)
+  );
+  return true;
+}
+
+/* Calendars asked for but never defined. 'auFederal' sat in the builder's
+   dropdown for months with no entry in HOLIDAY_CALENDARS, so every Australian
+   deal rolled against a calendar of no holidays and looked fine doing it — a
+   missing calendar and an empty one are indistinguishable from the schedule.
+   Recording the misses makes the difference visible; the UI reads this to
+   warn. Logged once per code, because this is called per day per deal. */
+const _UNKNOWN_CALENDARS = new Set();
 function isHoliday(date, calendarId){
+  if(calendarId && calendarId !== 'none' && !HOLIDAY_CALENDARS[calendarId]){
+    if(!_UNKNOWN_CALENDARS.has(calendarId)){
+      _UNKNOWN_CALENDARS.add(calendarId);
+      console.warn('[CAL] Unknown holiday calendar "' + calendarId +
+        '" — treating every day as a business day. Dates will NOT roll for holidays. ' +
+        'Check Holiday Calendars configuration.');
+    }
+    return false;
+  }
   const cal = HOLIDAY_CALENDARS[calendarId] || HOLIDAY_CALENDARS.none;
   return cal.has(toISO(date));
 }
@@ -150,6 +183,13 @@ if(typeof window !== 'undefined'){
   window.generatePaymentSchedule = generatePaymentSchedule;
   window.isBusinessDay = isBusinessDay;
   window.isHoliday_engine = isHoliday;
+  window.registerHolidayCalendar = registerHolidayCalendar;
+  // Read-only views for the config screen: which calendars the engine will
+  // actually honour, and which it was asked for and does not have.
+  window.listHolidayCalendars = () => Object.keys(HOLIDAY_CALENDARS)
+    .filter(k => k !== 'none')
+    .map(k => ({ code: k, count: HOLIDAY_CALENDARS[k].size }));
+  window.unknownHolidayCalendars = () => Array.from(_UNKNOWN_CALENDARS);
 }
 
 /* ---------- Capitalization gate ---------- */

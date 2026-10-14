@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 65; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 66; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.65"></script>
+<script src="portf-excel-parser.js?v=4.66"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -2288,6 +2288,12 @@
   <button class="v4-sb-item" data-v4-tab="cfconfig" onclick="v4NavClick(this)">
     <i class="ti ti-list-details" aria-hidden="true"></i>Cashflow configuration
   </button>
+  <!-- Holiday Calendars — the business-day sets payment dates roll against.
+       Reference data alongside the other two config screens: a new
+       jurisdiction is now a row here, not a code change and a deploy. -->
+  <button class="v4-sb-item" data-v4-tab="holcal" onclick="v4NavClick(this)">
+    <i class="ti ti-calendar-event" aria-hidden="true"></i>Holiday calendars
+  </button>
   <!-- GL account setup — HIDDEN. Superseded by "General ledger mapping"
        above, which configures accounts per business event × framework
        (the axis clients actually think in). The modal + its SB adapters
@@ -2896,6 +2902,11 @@
         <span class="tab-icon"><span class="material-icons-outlined">account_tree</span></span>
         <span class="tab-text"><span class="tab-label">General Ledger Mapping</span></span>
       </button>
+      <!-- Holiday Calendars — sidebar-only nav, same hidden-router pattern. -->
+      <button class="tab-btn" data-tab="holcal" role="tab" aria-selected="false" style="display:none;">
+        <span class="tab-icon"><span class="material-icons-outlined">event</span></span>
+        <span class="tab-text"><span class="tab-label">Holiday Calendars</span></span>
+      </button>
       <!-- Cashflow Configuration — sidebar-only nav, same hidden-router pattern. -->
       <button class="tab-btn" data-tab="cfconfig" role="tab" aria-selected="false" style="display:none;">
         <span class="tab-icon"><span class="material-icons-outlined">view_column</span></span>
@@ -3236,6 +3247,20 @@
             <div class="text-[10px] text-gray-500 mt-1">Drives which config sections show below (mezz support, borrowing base, etc.)</div>
           </div>
           <div><label class="b-label">Deal ID</label><input id="b-deal-id" type="text" placeholder="e.g. AUR-2026-001 (auto-derived if blank)" class="b-input"/></div>
+          <!-- Workday Investment ID — what this investment is called in the
+               client's own ledger. Held so a PCS journal can be matched back
+               to the Workday record that receives it; it rides on every
+               exported JE row and on the Investran DIU payload.
+
+               Not external_system / external_deal_id. Those identify a deal
+               PortF sent us and are the key the re-import matches on — a
+               Workday reference in there would make a re-import miss its own
+               deal. Where a deal came from and what it is called downstream
+               are different facts. -->
+          <div><label class="b-label">Workday Investment ID</label>
+            <input id="b-workday-id" type="text" placeholder="e.g. INV-0004821" class="b-input" spellcheck="false"/>
+            <div class="text-[10px] text-gray-500 mt-1">Carried on exported journals and the Investran batch. Leave blank if not tracked in Workday.</div>
+          </div>
           <div><label class="b-label">Counterparty</label><input id="b-counterparty" type="text" placeholder="e.g. Aurora Holdings plc" class="b-input"/></div>
           <!-- Legal Entity moved to its own section. It's now an allocation
                across Investran entities rather than one free-text name, since
@@ -3276,6 +3301,30 @@
           <div><label class="b-label">Original Maturity Date</label>
             <input id="b-original-maturity" type="date" class="b-input"/>
             <div id="b-original-maturity-hint" class="text-[10px] text-gray-500 mt-1">Maturity before any extension. Leave blank if never extended.</div>
+          </div>
+          <!-- Maturity extension history.
+               Two date boxes can describe exactly one extension. A facility with
+               a 1+1+1 mechanic has three, and the middle one used to vanish: the
+               deal read as a single jump from the original date to the final one,
+               with no record of when each leg was agreed, on what basis, or for
+               what fee. This table is that record.
+
+               One source of truth, in one direction: while the table has rows it
+               drives the two date boxes above (first row's "from" is the original
+               maturity, last row's "to" is the current one) and they go read-only.
+               Empty table, and the boxes behave exactly as they always have —
+               nothing about existing single-extension deals changes. -->
+          <div style="grid-column:1/-1" class="mt-1">
+            <div class="flex items-center justify-between">
+              <label class="b-label" style="margin-bottom:0">Maturity extension history</label>
+              <div class="flex items-center gap-2">
+                <span id="b-mx-count" class="chip gray text-[10px]">No extensions</span>
+                <button type="button" id="b-mx-add" class="mat-btn outline !py-0.5 !px-2 text-[10px]">
+                  <span class="material-icons-outlined text-[12px]">add</span> Add extension
+                </button>
+              </div>
+            </div>
+            <div id="b-mx-list" class="mt-1"></div>
           </div>
           <!-- Agent Name — the facility agent / administrative agent. Populated
                on most NWF deals, so it sits in the core Deal Setup grid rather
@@ -3498,7 +3547,12 @@
             <select id="b-day-basis" class="b-input"><option value="ACT/360">ACT/360</option><option value="ACT/365">ACT/365</option><option value="ACT/ACT">ACT/ACT</option><option value="30/360">30/360</option><option value="30E/360">30E/360</option></select>
           </div>
           <div><label class="b-label">Holiday Calendar</label>
-            <select id="b-holiday" class="b-input"><option value="none">None</option><option value="usFederal">US Federal</option><option value="ukBank">UK Bank</option><option value="target">TARGET (EUR)</option><option value="auFederal">Australian National</option></select>
+            <!-- Options are replaced from public.holiday_calendars at load by
+                 __holRefresh(). These are only the pre-connection fallback, so
+                 the control is never empty. 'auFederal' used to be listed here
+                 and did not exist in the engine — every Australian deal rolled
+                 against nothing. It is now 'auNational' and it is real. -->
+            <select id="b-holiday" class="b-input"><option value="none">None</option><option value="usFederal">US Federal</option><option value="ukBank">UK Bank</option><option value="target">TARGET (EUR)</option><option value="nlNational">Netherlands National</option><option value="luNational">Luxembourg National</option><option value="auNational">Australian National</option></select>
           </div>
           <div><label class="b-label">Repayment Type</label>
             <select id="b-repayment" class="b-input"><option value="AtMaturity">Bullet at maturity</option><option value="Periodic">Periodic (amortising)</option></select>
@@ -4090,6 +4144,100 @@
   @keyframes pcs-spin { to { transform: rotate(360deg); } }
   #pcssync .pcs-spinning { animation: pcs-spin 0.9s linear infinite; display:inline-block; }
 </style>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Holiday Calendars — the business-day sets payment dates roll against.
+     Configuration, not code: adding a jurisdiction used to mean editing
+     HOLIDAY_CALENDARS in loan-module-engine.js and deploying.
+     Data comes from holiday_calendars / holiday_dates.
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="holcal" class="stage-card stage-tab-content p-5">
+  <div class="builder-hero" style="display:flex; align-items:flex-start; gap:14px; padding:14px 16px; margin-bottom:14px; background:var(--n-0); border:0.5px solid var(--n-200); border-radius:12px;">
+    <div style="flex-shrink:0; width:36px; height:36px; border-radius:10px; background:#EEF2FF; color:#4338CA; display:inline-flex; align-items:center; justify-content:center;">
+      <i class="ti ti-calendar-event" aria-hidden="true" style="font-size:20px;"></i>
+    </div>
+    <div style="flex:1; min-width:0;">
+      <div style="font-size:10.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">Reference data</div>
+      <h2 style="font-size:18px; font-weight:700; color:var(--n-900); letter-spacing:-0.3px; margin:2px 0 0;">Holiday Calendars</h2>
+      <p style="font-size:12px; color:var(--n-500); margin:4px 0 0; line-height:1.55;">The non-business days a deal&rsquo;s payment dates roll against. Add a jurisdiction here rather than asking for a code change &mdash; the engine reads these directly.</p>
+    </div>
+    <div style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:96px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Calendars</div>
+      <div id="hol-kpi-cals" style="font-size:20px; font-weight:700; color:var(--n-900); font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+    <div style="padding:8px 14px; border:0.5px solid var(--n-200); border-radius:8px; text-align:center; min-width:96px; background:var(--n-0);">
+      <div style="font-size:9.5px; color:var(--n-500); text-transform:uppercase; letter-spacing:0.4px; font-weight:600;">Dates</div>
+      <div id="hol-kpi-dates" style="font-size:20px; font-weight:700; color:#4338CA; font-variant-numeric:tabular-nums; margin-top:2px;">0</div>
+    </div>
+  </div>
+
+  <!-- Coverage warning. A calendar that runs out is the failure this screen
+       exists to prevent: dates past its last year roll against nothing and
+       the schedule looks perfectly normal doing it. -->
+  <div id="hol-coverage-warn" style="display:none; background:#FFFBEB; border:0.5px solid #FDE68A; border-left:3px solid #D97706; border-radius:8px; padding:9px 12px; margin-bottom:12px; font-size:11.5px; color:#92400E; line-height:1.5;"></div>
+
+  <div style="display:grid; grid-template-columns:260px 1fr; gap:14px; align-items:start;">
+    <!-- Calendar list -->
+    <div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; overflow:hidden;">
+      <div style="padding:10px 12px; border-bottom:0.5px solid var(--n-200); display:flex; align-items:center; gap:8px;">
+        <div style="font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--n-500); flex:1;">Calendars</div>
+        <button onclick="window.__holOpenAdd && window.__holOpenAdd()" class="mat-btn outline !py-0.5 !px-2" style="font-size:10.5px;" title="Add a new calendar">
+          <i class="ti ti-plus" style="font-size:12px;"></i> New
+        </button>
+      </div>
+      <div id="hol-cal-list" style="max-height:560px; overflow:auto;"></div>
+      <!-- New-calendar form -->
+      <div id="hol-add-panel" style="display:none; padding:12px; border-top:0.5px solid var(--n-200); background:var(--n-50,#FAFAFA);">
+        <label style="display:block; font-size:10px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; color:var(--n-600); margin-bottom:3px;">Code</label>
+        <input id="hol-new-code" type="text" placeholder="e.g. deNational" maxlength="32" spellcheck="false"
+               style="width:100%; padding:5px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:6px;"/>
+        <label style="display:block; font-size:10px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; color:var(--n-600); margin-bottom:3px;">Label</label>
+        <input id="hol-new-label" type="text" placeholder="e.g. Germany National"
+               style="width:100%; padding:5px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:6px;"/>
+        <label style="display:block; font-size:10px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; color:var(--n-600); margin-bottom:3px;">Country (ISO-2, optional)</label>
+        <input id="hol-new-country" type="text" placeholder="DE" maxlength="2"
+               style="width:100%; padding:5px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; margin-bottom:10px; text-transform:uppercase;"/>
+        <div style="display:flex; gap:6px; justify-content:flex-end;">
+          <button onclick="document.getElementById('hol-add-panel').style.display='none'" class="mat-btn outline !py-1 !px-2" style="font-size:11px;">Cancel</button>
+          <button onclick="window.__holAddCalendar && window.__holAddCalendar()" class="mat-btn primary !py-1 !px-3" style="font-size:11px; background:var(--indigo-600,#4F46E5); color:white; border-color:var(--indigo-600,#4F46E5);">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dates for the selected calendar -->
+    <div style="background:var(--n-0); border:0.5px solid var(--n-200); border-radius:10px; overflow:hidden;">
+      <div style="padding:10px 14px; border-bottom:0.5px solid var(--n-200); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div id="hol-sel-title" style="font-size:13px; font-weight:700; color:var(--n-900);">Select a calendar</div>
+        <span id="hol-sel-chip" class="chip gray text-[10px]"></span>
+        <div style="flex:1;"></div>
+        <select id="hol-year-filter" onchange="window.__holRender && window.__holRender()"
+                style="padding:4px 8px; border:0.5px solid var(--n-300); border-radius:6px; font-size:11px; background:var(--n-0);"></select>
+        <button onclick="window.__holOpenPaste && window.__holOpenPaste()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;">
+          <i class="ti ti-clipboard-plus" style="font-size:12px;"></i> Add dates
+        </button>
+        <button onclick="window.__holExportCsv && window.__holExportCsv()" class="mat-btn outline !py-1 !px-2" style="font-size:10.5px;">
+          <i class="ti ti-download" style="font-size:12px;"></i> Export
+        </button>
+      </div>
+      <div id="hol-sel-notes" style="display:none; padding:8px 14px; border-bottom:0.5px solid var(--n-200); background:#F5F3FF; font-size:11px; color:#4C1D95; line-height:1.5;"></div>
+      <!-- Paste panel: one date per line, ISO or DD/MM/YYYY, optional name -->
+      <div id="hol-paste-panel" style="display:none; padding:12px 14px; border-bottom:0.5px solid var(--n-200); background:var(--n-50,#FAFAFA);">
+        <div style="font-size:11px; color:var(--n-600); margin-bottom:6px; line-height:1.5;">
+          One per line: <code>2027-05-01</code> or <code>2027-05-01, Labour Day</code>. <code>DD/MM/YYYY</code> is accepted too.
+          Dates already in the calendar are skipped rather than duplicated.
+        </div>
+        <textarea id="hol-paste-box" rows="6" spellcheck="false" placeholder="2027-01-01, New Year&#10;2027-04-02, Good Friday"
+                  style="width:100%; padding:7px 9px; border:0.5px solid var(--n-300); border-radius:6px; font-size:12px; font-family:ui-monospace,Menlo,monospace;"></textarea>
+        <div id="hol-paste-preview" style="font-size:11px; color:var(--n-600); margin-top:6px; min-height:16px;"></div>
+        <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
+          <button onclick="document.getElementById('hol-paste-panel').style.display='none'" class="mat-btn outline !py-1 !px-2" style="font-size:11px;">Cancel</button>
+          <button onclick="window.__holAddPasted && window.__holAddPasted()" class="mat-btn primary !py-1 !px-3" style="font-size:11px; background:var(--indigo-600,#4F46E5); color:white; border-color:var(--indigo-600,#4F46E5);">Add dates</button>
+        </div>
+      </div>
+      <div id="hol-date-list" style="max-height:560px; overflow:auto;"></div>
+    </div>
+  </div>
+</section>
 
 <!-- ═══════════════════════════════════════════════════════════════
      GL Configuration — business event × framework DR/CR matrix.
@@ -5157,6 +5305,44 @@
           <option value="false">No — disable ECL provisioning</option>
         </select>
       </div>
+    </div>
+
+    <!-- ─── Stage timeline ───────────────────────────────────────────────
+         When each stage began. The ECL Stage dropdown above says WHICH stage
+         the exposure is in; it cannot say SINCE WHEN, so a loan that moved to
+         Stage 2 in March and Stage 3 in September has looked identical to one
+         that was Stage 3 from the start, and "since when" is the first thing
+         a reviewer asks about a staged exposure.
+
+         These are RECORDED, not computed from: the dropdown still drives the
+         ECL measurement. That split is a decision, not an oversight, so the
+         banner below says so and flags it whenever the dates and the dropdown
+         disagree — a date nobody acts on is worse than no date, but only if
+         the disagreement is silent. -->
+    <div class="mt-3 pt-3 border-t border-indigo-200">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="material-icons-outlined text-[16px]" style="color:#4338ca">timeline</span>
+        <h4 class="text-[12px] font-bold text-indigo-900">Stage timeline (IFRS 9 §5.5)</h4>
+        <span class="text-[10px] text-indigo-700">When each stage began · disclosure, not a driver of the ECL measurement</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="text-[10px] font-semibold uppercase tracking-wider text-gray-600 mb-1 block">Stage 1 start date</label>
+          <input id="opt-stage1-date" type="date" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"/>
+          <div class="text-[10px] text-gray-500 mt-1">Usually initial recognition.</div>
+        </div>
+        <div>
+          <label class="text-[10px] font-semibold uppercase tracking-wider text-gray-600 mb-1 block">Stage 2 start date</label>
+          <input id="opt-stage2-date" type="date" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"/>
+          <div class="text-[10px] text-gray-500 mt-1">Date of the significant increase in credit risk. Blank if never reached.</div>
+        </div>
+        <div>
+          <label class="text-[10px] font-semibold uppercase tracking-wider text-gray-600 mb-1 block">Stage 3 start date</label>
+          <input id="opt-stage3-date" type="date" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"/>
+          <div class="text-[10px] text-gray-500 mt-1">Date the exposure became credit-impaired. Blank if never reached.</div>
+        </div>
+      </div>
+      <div id="opt-stage-timeline-note" class="text-[10px] mt-2 hidden"></div>
     </div>
 
     <!-- ─── Credit Risk & ECL Detail ─── -->
@@ -9344,21 +9530,21 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.65"></script>
-<script src="loan-module-instruments.js?v=4.65"></script>
-<script src="loan-module-analytics.js?v=4.65"></script>
+<script src="loan-module-engine.js?v=4.66"></script>
+<script src="loan-module-instruments.js?v=4.66"></script>
+<script src="loan-module-analytics.js?v=4.66"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.65"></script>
+<script src="demo-assistant-kb.js?v=4.66"></script>
 <!-- IFRS answer book, generated from PCS-IFRS-Demo-Answers.md. Loaded AFTER the
      curated KB above because it APPENDS to window.FAQ_KB; loading it first would
      have nothing to append to and the 256 IFRS entries would be dropped on the
      floor without an error. Regenerate with tools/build-ifrs-kb.py — never edit
      by hand, or the PDF the presenter reads and the answers the assistant gives
      will drift apart. -->
-<script src="demo-assistant-kb-ifrs.js?v=4.65"></script>
-<script src="demo-assistant-system-prompt.js?v=4.65"></script>
+<script src="demo-assistant-kb-ifrs.js?v=4.66"></script>
+<script src="demo-assistant-system-prompt.js?v=4.66"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -11941,6 +12127,11 @@ window.SB = (function(){
       cr_account_code: row.cr_account_code || null,
       cr_account_name: row.cr_account_name || null,
       notes:           row.notes || null,
+      /* Posting switch. Written explicitly rather than left to the column
+         default, because this upsert overwrites the whole row: omitting it
+         would silently re-enable an event every time someone edited one of
+         its account codes. */
+      is_suppressed:   !!row.is_suppressed,
       is_custom:       true,
       team_id:         row.team_id || null,
       updated_by:      uid,
@@ -11954,6 +12145,89 @@ window.SB = (function(){
       .single();
     if(error) return { ok:false, reason: error.message };
     return { ok:true, row: data };
+  }
+
+  /* ── Holiday calendars ───────────────────────────────────────────────────
+     Reference data, workspace-wide: no team scoping on the read, because a
+     calendar is a fact about a country rather than about a client. */
+  async function fetchHolidayCalendars(){
+    if(!_client || !_connected || _authKicked) return { calendars: [], dates: [] };
+    try {
+      const calRes = await _withDbTimeout('fetchHolidayCalendars.calendars',
+        _client.from('holiday_calendars').select('*').eq('is_active', true).order('sort_order'), 8000);
+      if(calRes.error) throw calRes.error;
+      /* PostgREST caps a response at 1,000 rows and says nothing when it
+         truncates. Six calendars x twelve years is already 611; add a couple
+         of jurisdictions and the tail would vanish silently, which on a
+         calendar means "those years have no holidays". Paged explicitly. */
+      const dates = [];
+      const PAGE = 1000;
+      for(let from = 0; ; from += PAGE){
+        const res = await _withDbTimeout('fetchHolidayCalendars.dates',
+          _client.from('holiday_dates')
+            .select('calendar_code, holiday_date, holiday_name')
+            .order('calendar_code').order('holiday_date')
+            .range(from, from + PAGE - 1), 12000);
+        if(res.error) throw res.error;
+        const batch = res.data || [];
+        dates.push(...batch);
+        if(batch.length < PAGE) break;
+        if(from > 50000) break;         // runaway guard
+      }
+      return { calendars: calRes.data || [], dates };
+    } catch(err){
+      console.error('[SB] fetchHolidayCalendars:', err && err.message ? err.message : err);
+      return { calendars: [], dates: [], error: err && err.message };
+    }
+  }
+
+  async function upsertHolidayCalendar(row){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!row || !row.code || !row.label) return { ok:false, reason:'code + label required' };
+    const uid = (_currentUser && _currentUser.id) || null;
+    const { data, error } = await _client.from('holiday_calendars').upsert({
+      code: row.code, label: row.label,
+      country_code: row.country_code || null,
+      notes: row.notes || null,
+      is_active: row.is_active !== false,
+      sort_order: row.sort_order != null ? row.sort_order : 500,
+      created_by: uid, updated_at: new Date().toISOString()
+    }, { onConflict: 'code' }).select().single();
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, row: data };
+  }
+
+  async function addHolidayDates(calendarCode, rows){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!calendarCode || !Array.isArray(rows) || !rows.length) return { ok:false, reason:'nothing to add' };
+    const uid = (_currentUser && _currentUser.id) || null;
+    const payload = rows.map(r => ({
+      calendar_code: calendarCode,
+      holiday_date:  r.date,
+      holiday_name:  r.name || null,
+      created_by:    uid
+    }));
+    const { error } = await _client.from('holiday_dates')
+      .upsert(payload, { onConflict: 'calendar_code,holiday_date,team_id', ignoreDuplicates: true });
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true, added: payload.length };
+  }
+
+  async function deleteHolidayDate(calendarCode, isoDate){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    const { error } = await _client.from('holiday_dates').delete()
+      .eq('calendar_code', calendarCode).eq('holiday_date', isoDate);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
+  }
+
+  async function deleteHolidayCalendar(code){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    // Dates go with it via ON DELETE CASCADE.
+    const { error } = await _client.from('holiday_calendars')
+      .delete().eq('code', code).eq('is_builtin', false);
+    if(error) return { ok:false, reason: error.message };
+    return { ok:true };
   }
 
   /* ── Cashflow Configuration ──────────────────────────────────────────────
@@ -13654,6 +13928,9 @@ window.SB = (function(){
            assert "never extended" on every deal and make the field useless as
            a signal. */
         original_maturity_date: B.deal.originalMaturity || null,
+        // Empty string would store as a Workday ID of "", which reads as
+        // "tracked in Workday, reference unknown". Null says "not tracked".
+        workday_investment_id: (B.deal.workdayId || '').trim() || null,
         // Signing date is optional and has no fallback: an unstated execution
         // date must stay null, not silently become today, or it would read as
         // a fact nobody asserted.
@@ -14069,6 +14346,13 @@ window.SB = (function(){
             if(typeof ov.eclStage === 'string' && /^(stage1|stage2|stage3|poci)$/.test(ov.eclStage)) return ov.eclStage;
             return null;
           })(),
+          /* Stage timeline — when each stage began. Disclosure alongside
+             ecl_stage, which remains what the measurement reads. Empty string
+             to null: a blank date field means the stage was never reached,
+             and '' would fail the date cast rather than say that. */
+          stage1_start_date:            ov.stage1StartDate || null,
+          stage2_start_date:            ov.stage2StartDate || null,
+          stage3_start_date:            ov.stage3StartDate || null,
           pd_annual:                    (ov.pdAnnual != null ? +ov.pdAnnual : null),
           lgd:                          (ov.lgd != null ? +ov.lgd : null),
           q_factor:                     (ov.qFactor != null ? +ov.qFactor : null),
@@ -14207,6 +14491,36 @@ window.SB = (function(){
                      'stored row rather than leaving the deal with none.');
         counts.treatmentOverrides = 1;
       }
+      }
+
+      // 7b. maturity_extensions (1:N) — the ordered history behind
+      // deals.maturity_date. Delete-and-reinsert like every other child here;
+      // seq is assigned from array position, which is the order the user sees.
+      // Rows with no end date are dropped rather than written half-formed: a
+      // row that says a loan was extended to nothing is worse than no row.
+      await _client.from('maturity_extensions').delete().eq('deal_id', dealId);
+      const mxList = (Array.isArray(B.deal.maturityExtensions) ? B.deal.maturityExtensions : [])
+        .filter(x => x && x.maturityBefore && x.maturityAfter &&
+                     x.maturityBefore !== x.maturityAfter);
+      if(mxList.length){
+        const mxRows = mxList.map((x, i) => ({
+          deal_id:        dealId,
+          seq:            i + 1,
+          maturity_before: x.maturityBefore,
+          maturity_after:  x.maturityAfter,
+          agreed_date:     x.agreedDate   || null,
+          // Effective date defaults to the date being replaced — an extension
+          // takes effect when the old maturity would have fallen due.
+          effective_date:  x.effectiveDate || x.maturityBefore || null,
+          basis:           x.basis || 'option',
+          extension_fee:   (x.fee != null && x.fee !== '' ? +x.fee : null),
+          document_ref:    x.documentRef || null,
+          notes:           x.notes || null,
+          created_by:      _uid
+        }));
+        const { error: mxErr } = await _client.from('maturity_extensions').insert(mxRows);
+        if(mxErr){ console.error('[SB] saveDeal: maturity_extensions:', mxErr); return { ok:false, reason: mxErr.message }; }
+        counts.maturityExtensions = mxRows.length;
       }
 
       // 8. modification_events (1:N) — uses LEGACY column names from the
@@ -14533,6 +14847,7 @@ window.SB = (function(){
           // V3 — Stage 2 settings tables (proper relational persistence)
           'treatment_overrides(*), ' +
           'modification_events(*), ' +
+          'maturity_extensions(*), ' +
           'default_events(*), ' +
           'prepayment_penalty_schedule(*), ' +
           'loan_lifecycle_events(*), ' +
@@ -14556,6 +14871,7 @@ window.SB = (function(){
           deal: {
             name:         row.name,
             dealId:       row.deal_code,
+            workdayId:    row.workday_investment_id || '',
             counterparty: row.counterparty || '',
             le:           row.legal_entity || '',
             currency:     row.currency,
@@ -14563,6 +14879,21 @@ window.SB = (function(){
             settle:       row.settlement_date,
             maturity:     row.maturity_date,
             originalMaturity: row.original_maturity_date || '',
+            // Extension history, oldest first. Sorted on seq rather than
+            // trusting the embed's order — PostgREST makes no promise about it,
+            // and here the order IS the chain.
+            maturityExtensions: (Array.isArray(row.maturity_extensions) ? row.maturity_extensions : [])
+              .slice().sort((a, b) => (a.seq || 0) - (b.seq || 0))
+              .map(x => ({
+                maturityBefore: x.maturity_before,
+                maturityAfter:  x.maturity_after,
+                agreedDate:     x.agreed_date    || '',
+                effectiveDate:  x.effective_date || '',
+                basis:          x.basis || 'option',
+                fee:            x.extension_fee != null ? +x.extension_fee : null,
+                documentRef:    x.document_ref || '',
+                notes:          x.notes || ''
+              })),
             signingDate:  row.signing_date || '',
             agentName:    row.agent_name || '',
             participationPct: row.participation_pct,
@@ -14762,6 +15093,9 @@ window.SB = (function(){
                 if(v === 'poci')   return null;
                 return v;
               })(),
+              stage1StartDate:             o.stage1_start_date || null,
+              stage2StartDate:             o.stage2_start_date || null,
+              stage3StartDate:             o.stage3_start_date || null,
               pdAnnual:                    o.pd_annual != null ? +o.pd_annual : null,
               lgd:                         o.lgd != null ? +o.lgd : null,
               qFactor:                     o.q_factor != null ? +o.q_factor : null,
@@ -15476,6 +15810,9 @@ window.SB = (function(){
     // GL Configuration — business event × framework DR/CR matrix
     fetchGLConfiguration, upsertGLEventMapping, resetGLEventMapping,
     addGLFramework, deleteGLFramework,
+    // Holiday calendars — business-day rolling, configured not coded
+    fetchHolidayCalendars, upsertHolidayCalendar, addHolidayDates,
+    deleteHolidayDate, deleteHolidayCalendar,
     // Cashflow Configuration — column × business-event composition
     fetchCashflowColumnConfig, upsertCashflowColumnConfig, resetCashflowColumnConfig,
     loadCurrentTeamId, currentTeamId,
@@ -20360,6 +20697,11 @@ function applyTreatmentFromForm(){
   const pd  = parseFloat($('opt-pd').value);  if(!isNaN(pd))  inst.ifrs.pdAnnual = pd; else delete inst.ifrs.pdAnnual;
   const lgd = parseFloat($('opt-lgd').value); if(!isNaN(lgd)) inst.ifrs.lgd = lgd;       else delete inst.ifrs.lgd;
   inst.ifrs.computeECL = $('opt-compute-ecl').value === 'true';
+  // ─── Stage timeline — recorded dates, not a driver of the measurement ───
+  inst.ifrs.stage1StartDate = $('opt-stage1-date')?.value || null;
+  inst.ifrs.stage2StartDate = $('opt-stage2-date')?.value || null;
+  inst.ifrs.stage3StartDate = $('opt-stage3-date')?.value || null;
+  if(typeof window.__stageTimelineCheck === 'function') window.__stageTimelineCheck(inst);
   // ─── Credit Risk & ECL Detail (Priority 1 additions) ───
   inst.ifrs.poci                = $('opt-poci').value === 'true';
   inst.ifrs.stage3InterestBase  = $('opt-stage3-int').value;        // 'gross' | 'net'
@@ -20649,6 +20991,13 @@ function loadTreatmentForm(){
   $('opt-sppi').value             = String(inst.ifrs?.sppiPassed !== false);
   $('opt-fv-level').value         = inst.ifrs?.fairValueLevel       || '';
   $('opt-ecl-stage').value        = String(inst.ifrs?.ecLStage || 1);
+  // Stage timeline. Settlement seeds the Stage 1 date on a deal that has
+  // never had one — a loan is in Stage 1 from initial recognition, and making
+  // someone type a date the system already knows is how it ends up wrong.
+  if($('opt-stage1-date')) $('opt-stage1-date').value = inst.ifrs?.stage1StartDate || inst.settlementDate || '';
+  if($('opt-stage2-date')) $('opt-stage2-date').value = inst.ifrs?.stage2StartDate || '';
+  if($('opt-stage3-date')) $('opt-stage3-date').value = inst.ifrs?.stage3StartDate || '';
+  if(typeof window.__stageTimelineCheck === 'function') window.__stageTimelineCheck(inst);
   $('opt-pd').value               = inst.ifrs?.pdAnnual ?? '';
   $('opt-lgd').value               = inst.ifrs?.lgd      ?? '';
   $('opt-compute-ecl').value     = String(inst.ifrs?.computeECL !== false);
@@ -22006,6 +22355,9 @@ function syncBuilderFromInstrument(inst){
         'value is a default rather than a choice.');
     };
     keep('eclStage', inst.ifrs.ecLStage);
+    keep('stage1StartDate', inst.ifrs.stage1StartDate);
+    keep('stage2StartDate', inst.ifrs.stage2StartDate);
+    keep('stage3StartDate', inst.ifrs.stage3StartDate);
     keep('pdAnnual', inst.ifrs.pdAnnual);
     keep('lgd',      inst.ifrs.lgd);
     keep('qFactor',  inst.ifrs.qFactor);
@@ -22125,7 +22477,8 @@ function _treatmentStateHash(){
     'opt-framework','opt-eir-method','opt-eir-override','opt-eir-floating-policy',
     'opt-oid-treatment','opt-oid-method',
     'opt-ifrs9-class','opt-business-model','opt-sppi','opt-fv-level',
-    'opt-ecl-stage','opt-pd','opt-lgd','opt-compute-ecl',
+    'opt-ecl-stage','opt-stage1-date','opt-stage2-date','opt-stage3-date',
+    'opt-pd','opt-lgd','opt-compute-ecl',
     'opt-poci','opt-stage3-int','opt-suspended','opt-ccf',
     'opt-dpd-stage2','opt-dpd-stage3','opt-dpd-current','opt-covenant-breach','opt-watchlist','opt-macro-weight',
     'opt-mod-threshold','opt-mod-reir','opt-mod-default','opt-continuing',
@@ -23646,7 +23999,11 @@ function closeJEDetailModal(){
 function copyJEDetailTSV(){
   const rows = (typeof M !== 'undefined' && M.acctJournals) ? M.acctJournals : [];
   if(!rows.length){ if(typeof toast==='function') toast('No JE rows to copy'); return; }
-  const headers = ['JE','Tx','EffectiveDate','GLDate','TransactionType','Account','DR/CR','AmountLE','Comments'];
+  // Workday ID rides along: this TSV is pasted straight into a reconciliation
+  // sheet, where a row with no identifier is a row someone has to trace back
+  // by hand. Blank when the deal is not tracked in Workday.
+  const _wdId = (window.B && window.B.deal && window.B.deal.workdayId) || '';
+  const headers = ['JE','Tx','EffectiveDate','GLDate','TransactionType','Account','DR/CR','AmountLE','WorkdayInvestmentID','Comments'];
   const lines = [headers.join('\t')];
   for(const r of rows){
     lines.push([
@@ -23654,6 +24011,7 @@ function copyJEDetailTSV(){
       (r.transactionType||'').replace(/\t/g,' '),
       r.account, r.isDebit ? 'DR' : 'CR',
       (r.amountLE!=null && !isNaN(r.amountLE)) ? Number(r.amountLE).toFixed(2) : '',
+      _wdId,
       (r.transactionComments||'').replace(/\t/g,' ').replace(/\n/g,' ')
     ].join('\t'));
   }
@@ -24014,6 +24372,11 @@ window.__inlineJEExportXlsx = function(){
         'Currency':        ccy,
         'Fund / entity':   fundOf(r),
         'Deal':            r.deal || dealName,
+        /* Per row, not just in the summary tab. A reconciler filters and
+           sorts this sheet, and pastes slices of it next to rows from other
+           deals — an identifier that only exists on a separate tab stops
+           being attached to the row the moment anyone does that. */
+        'Workday investment ID': (window.B && window.B.deal && window.B.deal.workdayId) || '',
         'Position':        r.position || '',
         'Batch':           r.batchId != null ? r.batchId : '',
         'Description':     r.transactionComments || '',
@@ -24028,7 +24391,10 @@ window.__inlineJEExportXlsx = function(){
     // is only half an export.
     wsJe['!cols'] = [
       {wch:7},{wch:6},{wch:13},{wch:13},{wch:12},{wch:34},{wch:30},{wch:30},
-      {wch:16},{wch:16},{wch:9},{wch:20},{wch:26},{wch:26},{wch:7},{wch:60},
+      // Widths track the header order above — the Workday ID sits between
+      // Deal and Position, so its width does too. Get this out of step and
+      // every column after it is sized for its neighbour's content.
+      {wch:16},{wch:16},{wch:9},{wch:20},{wch:26},{wch:22},{wch:26},{wch:7},{wch:60},
       {wch:8},{wch:50}
     ];
     wsJe['!freeze'] = { xSplit:0, ySplit:1 };
@@ -24038,6 +24404,7 @@ window.__inlineJEExportXlsx = function(){
     const summary = [
       { Field:'Deal',                 Value: dealName },
       { Field:'Deal code',            Value: (window.B && window.B.deal && window.B.deal.dealId) || '' },
+      { Field:'Workday investment ID', Value: (window.B && window.B.deal && window.B.deal.workdayId) || '' },
       { Field:'Currency',             Value: ccy },
       { Field:'Framework',            Value: (inst && inst.accountingFramework) ||
                                              (window.B && window.B.deal && window.B.deal.framework) || '' },
@@ -33625,6 +33992,95 @@ function renderCovenantAdjustments(inst, summary){
 // the engine applies to compute the period's ECL allowance, with each input
 // shown alongside its current value pulled from the Treatment panel + summary.
 // Auditors can step through every multiplicand to verify the impairment posting.
+/* ─── Stage timeline ──────────────────────────────────────────────────────
+   Top level, not inside the form-sync function: populateForm calls the check
+   too, and on a fresh page load it runs first. Defined inside sync, these
+   would not exist yet and the note would stay blank until something changed.
+
+   Stage implied by the recorded dates as at `asOf` (today by default): the
+   latest stage whose start date has arrived. Returns NULL when no date has
+   been reached, which is deliberately different from Stage 1 — a deal with no
+   dates recorded must not read as a positive claim of Stage 1. */
+window.__stageFromDates = function(ifrs, asOf){
+  if(!ifrs) return null;
+  const today = asOf || new Date().toISOString().slice(0,10);
+  let stage = null;
+  if(ifrs.stage1StartDate && ifrs.stage1StartDate <= today) stage = 1;
+  if(ifrs.stage2StartDate && ifrs.stage2StartDate <= today) stage = 2;
+  if(ifrs.stage3StartDate && ifrs.stage3StartDate <= today) stage = 3;
+  return stage;
+};
+
+/* The dates are disclosure; the ECL Stage dropdown still drives the
+   measurement. Two fields describing one fact, only one of them wired to the
+   maths, is exactly the arrangement that goes wrong quietly — so when they
+   disagree, say so and offer the single click that resolves it. Nothing is
+   changed automatically: recording a date is not the same as restaging a
+   deal, and doing the second because someone did the first would be a
+   measurement change nobody asked for. */
+window.__stageTimelineCheck = function(inst){
+  const note = document.getElementById('opt-stage-timeline-note');
+  if(!note) return;
+  const sel  = document.getElementById('opt-ecl-stage');
+  const ifrs = (inst && inst.ifrs) || {};
+  const d1 = ifrs.stage1StartDate, d2 = ifrs.stage2StartDate, d3 = ifrs.stage3StartDate;
+  const problems = [];
+
+  // Ordering. The DB constraint rejects these too, but that surfaces as a
+  // failed save long after the typo, with nothing pointing at the field.
+  if(d1 && d2 && d2 < d1) problems.push('Stage 2 starts before Stage 1.');
+  if(d2 && d3 && d3 < d2) problems.push('Stage 3 starts before Stage 2.');
+  if(d1 && d3 && d3 < d1) problems.push('Stage 3 starts before Stage 1.');
+  if(d3 && !d2) problems.push('Stage 3 is dated but Stage 2 is not — a direct Stage 1 to 3 move. Intended?');
+  if(inst && inst.settlementDate && d1 && d1 < inst.settlementDate){
+    problems.push('Stage 1 starts before settlement (' + inst.settlementDate + ').');
+  }
+
+  if(problems.length){
+    note.className = 'text-[10px] mt-2 text-red-700';
+    note.innerHTML = problems.map(p => '&bull; ' + p).join('<br/>');
+    note.classList.remove('hidden');
+    return;
+  }
+
+  const implied  = window.__stageFromDates(ifrs);
+  const selected = parseInt((sel || {}).value, 10) || 1;
+
+  if(implied != null && implied !== selected){
+    note.className = 'text-[10px] mt-2 text-amber-800';
+    note.innerHTML =
+      'These dates put the exposure in <b>Stage ' + implied + '</b> today, but ECL Stage above is set to ' +
+      '<b>Stage ' + selected + '</b> — and it is the dropdown that drives the ECL measurement, not these dates. ' +
+      '<button type="button" id="opt-stage-apply" class="underline font-semibold">Set the dropdown to Stage ' + implied + '</button>' +
+      ' or leave it if the difference is deliberate.';
+    note.classList.remove('hidden');
+    const btn = document.getElementById('opt-stage-apply');
+    if(btn) btn.onclick = () => {
+      if(!sel) return;
+      sel.value = String(implied);
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    return;
+  }
+
+  const bits = [];
+  if(implied != null){
+    bits.push('Stage ' + implied + ' since ' + (implied === 3 ? d3 : implied === 2 ? d2 : d1) +
+              ' — matches the ECL Stage above.');
+  }
+  const days = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+  if(d1 && d2) bits.push(days(d1, d2) + ' days in Stage 1.');
+  if(d2 && d3) bits.push(days(d2, d3) + ' days in Stage 2.');
+  if(bits.length){
+    note.className = 'text-[10px] mt-2 text-gray-600';
+    note.textContent = bits.join(' · ');
+    note.classList.remove('hidden');
+  } else {
+    note.classList.add('hidden');
+    note.textContent = '';
+  }
+};
+
 function renderECLTrace(inst, summary){
   const ifrs = inst?.ifrs || {};
   const ccy = inst?.currency || 'GBP';
@@ -34789,12 +35245,15 @@ window.__refreshGLEventMap = async function(){
       map[k] = {
         drCode: m.dr_account_code, drName: m.dr_account_name,
         crCode: m.cr_account_code, crName: m.cr_account_name,
-        isCustom: !!m.is_custom
+        isCustom: !!m.is_custom,
+        isSuppressed: !!m.is_suppressed
       };
     });
     window.PCS_GL_EVENT_MAP = map;
     const nCustom = Object.values(map).filter(v => v.isCustom).length;
-    console.log('[GL] loaded ' + Object.keys(map).length + ' event mappings (' + nCustom + ' customised)');
+    const nOff    = Object.values(map).filter(v => v.isSuppressed).length;
+    console.log('[GL] loaded ' + Object.keys(map).length + ' event mappings (' +
+                nCustom + ' customised' + (nOff ? ', ' + nOff + ' not posted' : '') + ')');
     return map;
   } catch(err){ console.warn('[GL] event-map refresh failed:', err); return window.PCS_GL_EVENT_MAP; }
 };
@@ -34826,7 +35285,44 @@ window.__applyGLEventConfig = function(journals, framework){
     });
   });
   if(applied) console.log('[GL] event config applied to ' + applied + ' JE rows · framework=' + fw);
-  return out;
+
+  /* ── Suppressed events — drop the journal entirely ───────────────────────
+     An event marked "not posted" on the GL Mapping screen is one the client's
+     own ledger already books. NWF settle interest cash inside Investran, which
+     debits cash and clears the receivable in the same entry; PCS posting
+     Interest Receipt on top of that receipts the money twice.
+
+     Dropped by EVENT, never by account, so both legs always go together. A
+     one-sided drop would leave the batch unbalanced, and Investran would
+     reject it — or worse, accept it. The guard below checks exactly that
+     before letting the result out, because this is the one operation here
+     that can break a journal rather than merely re-label it. */
+  const suppressedKeys = new Set();
+  Object.keys(map).forEach(k => {
+    if(map[k] && map[k].isSuppressed && k.endsWith('|' + fw)) suppressedKeys.add(k.slice(0, k.lastIndexOf('|')));
+  });
+  if(!suppressedKeys.size) return out;
+
+  const kept = out.filter(j => {
+    const evKey = window.__glEventKeyForTransType(j.transactionType);
+    return !(evKey && suppressedKeys.has(evKey));
+  });
+  const dropped = out.length - kept.length;
+  if(!dropped) return out;
+
+  const netOf = arr => arr.reduce((s, j) =>
+    s + (j.isDebit ? 1 : -1) * (Math.round((+j.amount || 0) * 100) / 100), 0);
+  const netBefore = netOf(out), netAfter = netOf(kept);
+  if(Math.abs(netAfter) > 0.01 && Math.abs(netAfter) > Math.abs(netBefore) + 0.01){
+    console.error('[GL] SUPPRESSION ABORTED — dropping ' + Array.from(suppressedKeys).join(', ') +
+      ' would unbalance the batch by ' + netAfter.toFixed(2) +
+      ' (was ' + netBefore.toFixed(2) + '). Every row was kept. ' +
+      'This means an event maps to only one leg of a journal — fix the event pattern, not the config.');
+    return out;
+  }
+  console.log('[GL] ' + dropped + ' JE row(s) suppressed · events=' +
+              Array.from(suppressedKeys).join(', ') + ' · framework=' + fw);
+  return kept;
 };
 
 // Apply mapping to a journal-entry array. Returns a NEW array (originals untouched)
@@ -34895,7 +35391,15 @@ function pushToWorkdayImpl(){
       batchComments: `LMIL · ${inst.deal} · ${inst.position} · ${period}`,
       generatedAt: new Date().toISOString(),
       sourceModule: 'Loan Module Integration Layer',
-      pcsSourceVersion: 'PCS / Investran v2026'
+      pcsSourceVersion: 'PCS / Investran v2026',
+      /* The client's own identifier for this investment, so the receiving
+         ledger can match the batch to its record without a lookup table
+         maintained by hand. Omitted rather than sent null when the deal has
+         no Workday reference — an envelope key present and empty invites a
+         downstream match against "". */
+      ...( (inst.workdayInvestmentId || '').trim()
+             ? { workdayInvestmentId: String(inst.workdayInvestmentId).trim() }
+             : {} )
     },
     summary: {
       jeRows: journalsForBatch.length,
@@ -36918,7 +37422,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
     'opt-oid-treatment','opt-oid-method',
     'opt-ifrs9-class','opt-business-model','opt-sppi','opt-fv-level',
     // ECL primary
-    'opt-ecl-stage','opt-pd','opt-lgd','opt-compute-ecl',
+    'opt-ecl-stage','opt-stage1-date','opt-stage2-date','opt-stage3-date',
+    'opt-pd','opt-lgd','opt-compute-ecl',
     // Priority 1 — Credit Risk & ECL Detail
     'opt-poci','opt-stage3-int','opt-suspended','opt-ccf',
     'opt-dpd-stage2','opt-dpd-stage3','opt-dpd-current','opt-covenant-breach','opt-watchlist','opt-macro-weight',
@@ -37239,6 +37744,10 @@ try { window._applyAdvancedStagesVisibility(); } catch(_){}
     // Cashflow Configuration — same lazy-load-then-render-from-cache pattern.
     if(tabId === 'cfconfig' && typeof window.__cfcLoad === 'function'){
       try { window.__cfcLoad(); } catch(_){}
+    }
+    // Holiday Calendars — same pattern again.
+    if(tabId === 'holcal' && typeof window.__holLoad === 'function'){
+      try { window.__holLoad(); } catch(_){}
     }
     // PCS Sync — lazy-load the dataset registry, then re-render from cache.
     if(tabId === 'pcssync' && typeof window.__pcsLoad === 'function'){
@@ -41985,6 +42494,193 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       window.AutoSave.schedule();
     }
   }
+  /* ─── Maturity extension history ──────────────────────────────────────
+     B.deal.maturityExtensions is an ordered array, oldest first:
+       { maturityBefore, maturityAfter, agreedDate, effectiveDate,
+         basis: 'option'|'negotiated'|'standstill'|'other',
+         fee, documentRef, notes }
+
+     Three rules, and they are the whole design:
+
+     1. The array is the source of truth while it has rows. B.deal.maturity
+        and B.deal.originalMaturity are DERIVED from it, and the two inputs
+        go read-only. Letting both be editable would mean a deal could claim
+        a 2031 maturity while its extension history ends in 2030, and nothing
+        would ever object — the failure mode this table exists to remove.
+
+     2. Rows chain. Row n's "from" is row n-1's "to", filled automatically and
+        not editable, so a gap cannot open between legs. Only the first row's
+        "from" is typed, and only when it isn't already known from the
+        Maturity Date the deal had before the first extension was added.
+
+     3. Basis is an accounting fact, not a label. Exercising an extension
+        option that was in the original contract is not an IFRS 9
+        modification — those cash flows were always contractually possible.
+        Renegotiating the end date is, and belongs in Modification Events
+        too; the row says so rather than leaving the reviewer to guess. */
+  const MX_BASIS = [
+    ['option',     'Option exercised'],
+    ['negotiated', 'Renegotiated'],
+    ['standstill', 'Standstill / forbearance'],
+    ['other',      'Other']
+  ];
+  function _mxList(){
+    if(!Array.isArray(B.deal.maturityExtensions)) B.deal.maturityExtensions = [];
+    return B.deal.maturityExtensions;
+  }
+  /* Re-chain every row's "from" off the previous row's "to", then push the
+     endpoints onto the two date inputs. Called after any edit, add or remove,
+     and after a load. Returns nothing — it writes B.deal and the DOM. */
+  function __mxApply(){
+    const list = _mxList();
+    const omIn = $b('b-original-maturity'), mIn = $b('b-maturity');
+    const driven = list.length > 0;
+
+    if(driven){
+      for(let i = 1; i < list.length; i++) list[i].maturityBefore = list[i-1].maturityAfter || '';
+      B.deal.originalMaturity = list[0].maturityBefore || '';
+      const last = list[list.length - 1].maturityAfter || '';
+      if(last) B.deal.maturity = last;
+    }
+    if(omIn){
+      if(driven) omIn.value = B.deal.originalMaturity || '';
+      omIn.readOnly = driven;
+      omIn.classList.toggle('bg-gray-100', driven);
+    }
+    if(mIn){
+      if(driven && B.deal.maturity) mIn.value = B.deal.maturity;
+      mIn.readOnly = driven;
+      mIn.classList.toggle('bg-gray-100', driven);
+    }
+    const omHint = $b('b-original-maturity-hint');
+    if(omHint){
+      omHint.textContent = driven
+        ? 'Set by extension 1 below — edit it there.'
+        : 'Maturity before any extension. Leave blank if never extended.';
+    }
+  }
+  function __mxRender(){
+    const host = $b('b-mx-list'); if(!host) return;
+    const list = _mxList();
+    const chip = $b('b-mx-count');
+    const ccy  = B.deal.currency || 'USD';
+    if(chip){
+      chip.className = list.length ? 'chip green text-[10px]' : 'chip gray text-[10px]';
+      chip.textContent = list.length
+        ? list.length + (list.length === 1 ? ' extension' : ' extensions')
+        : 'No extensions';
+    }
+    if(!list.length){
+      host.innerHTML = '<div class="text-[11px] text-gray-500 italic mt-1">' +
+        'No extensions recorded. Add one for each time the maturity moved — the ' +
+        'Original and current Maturity Date above are then taken from this table.</div>';
+      __mxApply();
+      return;
+    }
+    const esc = s => String(s == null ? '' : s).replace(/"/g,'&quot;').replace(/</g,'&lt;');
+    host.innerHTML = '<table class="data" style="width:100%">' +
+      '<thead><tr>' +
+        '<th style="width:28px">#</th>' +
+        '<th class="left" style="width:130px">From</th>' +
+        '<th class="left" style="width:130px">Extended to</th>' +
+        '<th class="left" style="width:130px">Agreed on</th>' +
+        '<th class="left" style="width:150px">Basis</th>' +
+        '<th style="width:110px">Fee (' + ccy + ')</th>' +
+        '<th class="left">Document ref</th>' +
+        '<th style="width:70px">Length</th>' +
+        '<th style="width:32px"></th>' +
+      '</tr></thead><tbody>' +
+      list.map((x, i) => {
+        const chained = i > 0;                 // row 1 types its own "from"
+        const days = (x.maturityBefore && x.maturityAfter)
+          ? Math.round((new Date(x.maturityAfter) - new Date(x.maturityBefore)) / 86400000)
+          : null;
+        const span = days == null ? '—'
+          : (Math.abs(days) >= 365
+              ? (Math.round(Math.abs(days)/365*10)/10) + 'y'
+              : Math.abs(days) + 'd');
+        return '<tr>' +
+          '<td class="text-gray-500">' + (i + 1) + '</td>' +
+          '<td class="left"><input type="date" data-mx-f="maturityBefore" data-mx-i="' + i + '"' +
+            ' value="' + esc(x.maturityBefore) + '"' + (chained ? ' readonly' : '') +
+            ' class="border border-gray-300 rounded px-1 py-0.5 text-[11px] w-full ' +
+            (chained ? 'bg-gray-100 text-gray-500' : 'bg-white') + '"' +
+            (chained ? ' title="Chained from the previous extension"' : '') + '/></td>' +
+          '<td class="left"><input type="date" data-mx-f="maturityAfter" data-mx-i="' + i + '"' +
+            ' value="' + esc(x.maturityAfter) + '"' +
+            ' class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white w-full"/></td>' +
+          '<td class="left"><input type="date" data-mx-f="agreedDate" data-mx-i="' + i + '"' +
+            ' value="' + esc(x.agreedDate) + '"' +
+            ' class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white w-full"/></td>' +
+          '<td class="left"><select data-mx-f="basis" data-mx-i="' + i + '"' +
+            ' class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white w-full">' +
+            MX_BASIS.map(b => '<option value="' + b[0] + '"' +
+              ((x.basis || 'option') === b[0] ? ' selected' : '') + '>' + b[1] + '</option>').join('') +
+            '</select></td>' +
+          '<td><input type="number" step="any" data-mx-f="fee" data-mx-i="' + i + '"' +
+            ' value="' + (x.fee == null ? '' : x.fee) + '" placeholder="0"' +
+            ' class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white text-right w-full"/></td>' +
+          '<td class="left"><input type="text" data-mx-f="documentRef" data-mx-i="' + i + '"' +
+            ' value="' + esc(x.documentRef) + '" placeholder="e.g. Amendment &amp; Restatement No.2"' +
+            ' class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white w-full"/></td>' +
+          '<td class="text-[11px] ' + (days != null && days < 0 ? 'text-red-700' : 'text-gray-600') + '">' + span + '</td>' +
+          '<td><button type="button" class="mat-btn outline !py-0.5 !px-1.5 text-[10px]" data-mx-del="' + i + '"' +
+            ' title="Remove this extension"><span class="material-icons-outlined text-[12px]">close</span></button></td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>' +
+      '<div class="text-[10px] text-gray-500 mt-1">' +
+        'Rows chain: each extension starts where the previous one ended. The last ' +
+        '&ldquo;Extended to&rdquo; is the deal&rsquo;s current Maturity Date. ' +
+        '<strong>Renegotiated</strong> and <strong>standstill</strong> legs are IFRS 9 ' +
+        'modifications — record them in Modification Events too, so the gain/loss is booked. ' +
+        'An exercised <strong>option</strong> is not.' +
+      '</div>' +
+      (function(){
+        const bad = list.filter(x => x.maturityBefore && x.maturityAfter &&
+                                     new Date(x.maturityAfter) < new Date(x.maturityBefore)).length;
+        return bad ? '<div class="text-[10px] text-red-700 mt-1">' + bad +
+          ' row(s) end before they start — the maturity moves backwards. Check the dates.</div>' : '';
+      })();
+
+    host.querySelectorAll('[data-mx-f]').forEach(el => {
+      el.onchange = () => {
+        const i = parseInt(el.getAttribute('data-mx-i'), 10);
+        const f = el.getAttribute('data-mx-f');
+        const row = _mxList()[i]; if(!row) return;
+        row[f] = (f === 'fee')
+          ? (el.value === '' ? null : (parseFloat(el.value) || 0))
+          : el.value;
+        /* Only the two dates change anything outside their own cell — they
+           re-chain the next row's start and move the deal's maturity. Fee,
+           basis and document ref do not, so leave the table standing rather
+           than rebuilding it and throwing away where the user was. */
+        if(f === 'maturityBefore' || f === 'maturityAfter') __mxRender();
+        recompute();
+      };
+    });
+    host.querySelectorAll('[data-mx-del]').forEach(btn => {
+      btn.onclick = () => {
+        const i = parseInt(btn.getAttribute('data-mx-del'), 10);
+        const list = _mxList();
+        list.splice(i, 1);
+        /* Removing the last row hands control back to the date boxes. Leave
+           the dates they were showing in place rather than blanking them —
+           deleting a history row is not a statement that the loan never
+           matured on that date. */
+        __mxRender();
+        recompute();
+      };
+    });
+    __mxApply();
+    /* The rows were just rebuilt from scratch, so they are fresh, enabled
+       inputs. On a PortF-sourced deal the builder is read-only — re-apply the
+       gate, exactly as the tranche and fee renderers do. */
+    try { if(typeof window.__applyExternalReadOnly === 'function') window.__applyExternalReadOnly(); }
+    catch(e){ console.error('[V4] __mxRender: read-only re-apply failed:', e); }
+  }
+  window.__mxRender = __mxRender;
+
   function syncDealForm(){
     const _prevName = (B.deal && B.deal.name) || '';
     B.deal.name        = $b('b-deal-name')?.value || '';
@@ -41995,6 +42691,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       window.__updatePipelineNavState();
     }
     B.deal.dealId      = $b('b-deal-id')?.value || '';
+    B.deal.workdayId   = ($b('b-workday-id')?.value || '').trim();
     B.deal.counterparty= $b('b-counterparty')?.value || '';
     B.deal.le          = $b('b-le')?.value || '';
     B.deal.currency    = $b('b-currency')?.value || 'USD';
@@ -42004,6 +42701,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     B.deal.maturity    = $b('b-maturity')?.value || '';
     B.deal.originalMaturity = $b('b-original-maturity')?.value || '';
     B.deal.agentName   = ($b('b-agent-name')?.value || '').trim();
+
+    /* When the extension table has rows it owns both dates — re-derive them
+       AFTER the inputs have been read, so the derived value wins rather than
+       whatever happens to be sitting in a read-only box. */
+    __mxApply();
 
     /* Show the extension on the Maturity field itself rather than making
        someone compare two date boxes. Only when the two actually differ —
@@ -42947,7 +43649,15 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       /* Carried for display and disclosure. maturityDate stays the CURRENT
          maturity — every calculation that depends on a horizon reads that one
          and must keep reading it. This is the before picture. */
+      // Carried onto the instrument so the journal export and the DIU payload
+      // can stamp it without reaching back into the builder's form state.
+      workdayInvestmentId: (B.deal.workdayId || '').trim() || null,
       originalMaturityDate: B.deal.originalMaturity || null,
+      /* The full chain, for disclosure and for anything that needs to know a
+         maturity moved more than once. Nothing in the schedule reads it —
+         maturityDate above remains the only horizon the engine computes on. */
+      maturityExtensions: (Array.isArray(B.deal.maturityExtensions) ? B.deal.maturityExtensions : [])
+        .filter(x => x && x.maturityBefore && x.maturityAfter),
       availabilityEnd: B.facility.availEnd || B.deal.maturity,
       dayBasis: B.facility.dayBasis, holidayCalendar: B.facility.holiday,
       coupon: firstIC ? {
@@ -43264,6 +43974,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       // IFRS overrides land on inst.ifrs (engine reads inst.ifrs.*)
       inst.ifrs = inst.ifrs || {};
       if(ov.eclStage != null)  inst.ifrs.ecLStage = +ov.eclStage;
+      // Stage timeline. Carried onto the instrument so exports and the
+      // accounting run see it; it does not reach the ECL maths by design.
+      if(ov.stage1StartDate) inst.ifrs.stage1StartDate = ov.stage1StartDate;
+      if(ov.stage2StartDate) inst.ifrs.stage2StartDate = ov.stage2StartDate;
+      if(ov.stage3StartDate) inst.ifrs.stage3StartDate = ov.stage3StartDate;
       if(ov.pdAnnual != null)  inst.ifrs.pdAnnual = +ov.pdAnnual;
       if(ov.lgd != null)       inst.ifrs.lgd      = +ov.lgd;
       if(ov.qFactor != null)   inst.ifrs.qFactor  = +ov.qFactor;
@@ -45361,6 +46076,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   function populateDealForm(){
     $b('b-deal-name').value     = B.deal.name;
     $b('b-deal-id').value       = B.deal.dealId;
+    var _wd = $b('b-workday-id');
+    if(_wd) _wd.value = B.deal.workdayId || '';
     $b('b-counterparty').value  = B.deal.counterparty;
     $b('b-le').value            = B.deal.le;
     $b('b-currency').value      = B.deal.currency;
@@ -45369,6 +46086,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     $b('b-maturity').value      = B.deal.maturity;
     var _om = $b('b-original-maturity');
     if(_om) _om.value = B.deal.originalMaturity || '';
+    // Repaint the extension history for the deal just loaded. __mxRender ends
+    // in __mxApply, which re-derives both maturity dates from it.
+    if(typeof window.__mxRender === 'function') window.__mxRender();
     var _sg = $b('b-signing');
     if(_sg) _sg.value = B.deal.signingDate || '';
     var _ag = $b('b-agent-name');
@@ -45912,6 +46632,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     //                       origination/arrangement/capitalisedCost (Tier 1 #12)
     const facilityCommitment = ((window.B || {}).facility || {}).commitment || 0;
     let cumDraw = 0, cumIntAcc = 0, cumIntPaid = 0, cumCapCost = 0;
+    /* Last period's accretion-to-date, so this period's accretion is a
+       difference of two figures the engine produced rather than a second
+       calculation of the same thing. null until the first row with a schedule
+       match, which makes that row's accretion its full life-to-date amount —
+       correct, since nothing accreted before inception. */
+    let prevCumAmort = null;
     // ─── Interest paid — asserted, never derived ──────────────────────
     // This column used to be set equal to the period's accrual, which made
     // every period look settled and, at daily granularity, showed interest
@@ -45983,7 +46709,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           ecl: +s.eclAllowance || 0,
           net: (s.netCarryingValue != null)
                  ? +s.netCarryingValue
-                 : ((+s.carryingValue || 0) - (+s.eclAllowance || 0))
+                 : ((+s.carryingValue || 0) - (+s.eclAllowance || 0)),
+          /* Accretion to date, straight off the engine's own running total —
+             the same figure the Discount Accretion / Premium Amortization
+             journals are split from, so the column and the GL cannot drift.
+             Observed on this day like everything else in this row. */
+          cumAmort: +s.cumAmort || 0
         });
       }
       return m;
@@ -46027,7 +46758,20 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         return null;      // period lies outside the schedule — show a dash
       })(r.end);
 
+      /* Accretion — the amount that moved the carrying amount this period, and
+         the life-to-date total behind it. Both come from the engine's cumAmort,
+         so they tie to the Discount Accretion / Premium Amortization journals
+         by construction. Computed before the row is returned because the
+         period figure consumes prevCumAmort and then advances it. */
+      const accretedToDate = cvAt ? cvAt.cumAmort : null;
+      const accretionThisPeriod = (cvAt == null)
+        ? null
+        : (prevCumAmort == null ? cvAt.cumAmort : cvAt.cumAmort - prevCumAmort);
+      if(cvAt) prevCumAmort = cvAt.cumAmort;
+
       return Object.assign({}, r, {
+        accretion:       accretionThisPeriod,
+        accretionToDate: accretedToDate,
         commitmentToDate: facilityCommitment,
         drawdownToDate:   cumDraw,
         undrawnBalance:   Math.max(0, facilityCommitment - cumDraw),
@@ -46122,6 +46866,29 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           // Under a tenth of a currency unit is rounding, not a balance.
           if(Math.abs(v) < 0.1) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
           return `<td style="padding:6px 10px; text-align:right; color:${v < 0 ? '#B45309' : '#6D28D9'}; font-weight:500;">${v < 0 ? '(' + fmtCcy(Math.abs(v)) + ')' : fmtCcy(v)}</td>`;
+        } },
+      /* Accretion sits immediately after Unaccreted because the two are one
+         statement read in opposite directions: Unaccreted is what is left to
+         take to income, Accreted to date is what has already gone, and they sum
+         to the day-one discount or premium for the life of the deal. Both are
+         the engine's own running total, which is also what the journals are
+         split from — so a figure that disagrees with the GL is a real break,
+         not a difference in how the screen derived it. */
+      { key:'accretion', label:'Accretion', align:'right',
+        title:'Discount accretion or premium amortisation recognised THIS period — the non-cash part of interest income that moves the carrying amount toward par. Positive accretes a discount up to par, negative amortises a premium down. Same source as the Discount Accretion / Premium Amortization journals (the engine\'s own daily amortisation), so the totals agree; a single period ties to a single journal only when the Period selector matches the coupon frequency, since the journals are split on coupon dates and this table on whatever period you are viewing. The separate EIR Fee Accretion line (40100) is NOT included: it only arises on the legacy path where no effective yield could be solved.',
+        render:r => {
+          if(r.accretion == null) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          const v = +r.accretion || 0;
+          if(Math.abs(v) < 0.005) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          return `<td style="padding:6px 10px; text-align:right; color:${v < 0 ? '#B45309' : '#0F766E'}; font-weight:600;">${v < 0 ? '(' + fmtCcy(Math.abs(v)) + ')' : fmtCcy(v)}</td>`;
+        } },
+      { key:'accretion_to_date', label:'Accreted to date', align:'right',
+        title:'Cumulative discount accretion / premium amortisation since inception — the discount already taken to income. Runs to the full day-one figure by maturity, at which point Unaccreted is zero and the carrying amount equals par. Quick integrity check on a bullet loan with no PIK: discount still to take plus discount already taken equals the original discount, every period. Taking the Unaccreted column at face value that is Unaccreted MINUS this column (both signed), which on a 40m discount reads as (39,990,895) − 9,105 = (40,000,000). Where principal moves — amortising repayments, PIK capitalisation — Unaccreted tracks the balance as well, so the two only reconcile that cleanly at inception and at maturity.',
+        render:r => {
+          if(r.accretionToDate == null) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          const v = +r.accretionToDate || 0;
+          if(Math.abs(v) < 0.005) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          return `<td style="padding:6px 10px; text-align:right; color:${v < 0 ? '#B45309' : '#0F766E'}; font-weight:400; opacity:0.85;">${v < 0 ? '(' + fmtCcy(Math.abs(v)) + ')' : fmtCcy(v)}</td>`;
         } },
       { key:'drawdowns', label:'Drawdowns', align:'right', title:'Cash disbursed to borrower this period',
         render:r => `<td style="padding:6px 10px; text-align:right; color:${r.drawdowns>0?'#B91C1C':'var(--n-400)'}; font-weight:${r.drawdowns>0?'600':'400'};">${r.drawdowns>0 ? '−'+fmtCcy(r.drawdowns) : '—'}</td>` },
@@ -46385,7 +47152,23 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   // ─── Cashflow column visibility — per-user preferences ─────────────────
   // Storage key includes the current user email so different sign-ins on the
   // same browser don't clobber each other. Falls back to a generic key for
-  // anonymous sessions. Preference format: JSON array of column keys.
+  // anonymous sessions.
+  //
+  // Preference format: { v: 2, visible: [keys], known: [keys] }.
+  //
+  // `known` is the point. The previous format stored only the visible list,
+  // and the reader merged in every column of the current build that the list
+  // did not mention — so that a column added to the app after someone saved a
+  // preference would still appear for them. That merge cannot tell "this
+  // column did not exist when you saved" from "you unchecked this column":
+  // both are a key in defs that is missing from the saved list. Unchecking
+  // therefore wrote the column out and the very next read put it straight
+  // back, and the checkbox looked dead.
+  //
+  // Recording what the user could SEE at save time separates the two. A
+  // column is new, and merged in, only if it is absent from `known`. A column
+  // the user unchecked is in `known`, so it stays hidden until they say
+  // otherwise. v1 arrays are migrated on first read.
   function __cfPrefsKey(){
     const email = (window.SB && window.SB.userEmail) ||
                   (window.SB && window.SB.session && window.SB.session.user && window.SB.session.user.email) ||
@@ -46396,41 +47179,67 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     try {
       const raw = localStorage.getItem(__cfPrefsKey());
       if(raw){
-        const arr = JSON.parse(raw);
-        if(Array.isArray(arr) && arr.length){
-          // Keep only known column keys — drop stale entries silently
-          const validKeys = new Set(defs.map(c => c.key));
-          const kept = arr.filter(k => validKeys.has(k));
-          if(kept.length){
-            /* Merge in columns added since the preference was saved.
-               The comment here has always claimed this merge; the code did not
-               do it — it returned the saved list verbatim, so every column
-               added after a user first touched the picker was invisible to
-               that user and to nobody else. Gross and Net carrying amount
-               would have shipped looking broken for exactly the people who had
-               customised their columns, and fine for everyone else, which is
-               the hardest kind of report to act on.
+        const parsed = JSON.parse(raw);
+        const isV2 = parsed && !Array.isArray(parsed) && Array.isArray(parsed.visible);
+        const savedVisible = isV2 ? parsed.visible : (Array.isArray(parsed) ? parsed : null);
 
-               Appended in definition order so a new column lands next to the
-               ones it belongs with rather than at the end. */
-            const saved = new Set(kept);
-            const merged = kept.slice();
-            let addedAny = false;
-            defs.forEach(c => { if(!saved.has(c.key)){ merged.push(c.key); addedAny = true; } });
-            if(addedAny){
-              merged.sort((a, b) =>
-                defs.findIndex(c => c.key === a) - defs.findIndex(c => c.key === b));
-            }
-            return merged;
+        if(Array.isArray(savedVisible)){
+          const validKeys = new Set(defs.map(c => c.key));
+          // Drop stale keys from builds where a column was removed.
+          const kept = savedVisible.filter(k => validKeys.has(k));
+
+          /* What the user could see when they saved. v2 records it. A v1 array
+             doesn't, so we fall back to the old assumption — everything it
+             listed was everything there was — which keeps the one-time merge
+             those users were promised. They are migrated to v2 below, so this
+             guess is made once per user and never again. */
+          const known = new Set(isV2 && Array.isArray(parsed.known) ? parsed.known : savedVisible);
+
+          /* Columns that did not exist at save time. Appended in definition
+             order so a new column lands next to the ones it belongs with
+             rather than at the end. An unchecked column is in `known` and is
+             NOT picked up here — that is the whole fix. */
+          const added = defs.map(c => c.key).filter(k => !known.has(k));
+          const merged = added.length
+            ? kept.concat(added).sort((a, b) =>
+                defs.findIndex(c => c.key === a) - defs.findIndex(c => c.key === b))
+            : kept;
+
+          /* Migrate v1 in place, and refresh `known` when the build has grown.
+             Without this the next uncheck would be read against a stale
+             `known` and silently undone again. */
+          if(!isV2 || added.length){
+            try {
+              localStorage.setItem(__cfPrefsKey(), JSON.stringify({
+                v: 2, visible: merged, known: defs.map(c => c.key)
+              }));
+            } catch(_){}
           }
+
+          /* An empty list is a real choice only in the sense that the picker
+             refuses to produce one — it always keeps the two date columns. So
+             an empty result here means a corrupt or fully-stale preference,
+             and falling through to "show everything" is right. */
+          if(merged.length) return merged;
         }
       }
     } catch(_){}
     // Default: everything visible
     return defs.map(c => c.key);
   }
-  function __cfSetVisibleCols(keys){
-    try { localStorage.setItem(__cfPrefsKey(), JSON.stringify(keys)); } catch(_){}
+  function __cfSetVisibleCols(keys, defs){
+    /* `known` must be the full column set of THIS build, not the visible
+       subset — it is the record of what the user was shown and therefore
+       chose between. Passing only `keys` here would re-create the original
+       bug exactly. */
+    const all = (defs || window.__cfColDefs || []).map(c => c.key);
+    try {
+      localStorage.setItem(__cfPrefsKey(), JSON.stringify({
+        v: 2,
+        visible: keys,
+        known: all.length ? all : keys
+      }));
+    } catch(_){}
   }
   // Expose so the XLSX exporter can honour the same visibility set
   window.__cfGetVisibleCols = () => (window.__cfColDefs ? __cfGetVisibleCols(window.__cfColDefs) : []);
@@ -46470,7 +47279,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const keys = Array.from(panel.querySelectorAll('input[data-cf-col]:checked')).map(el => el.getAttribute('data-cf-col'));
       // Guard against 0 columns — always keep at least the two date columns.
       const finalKeys = keys.length ? keys : ['period_start', 'period_end'];
-      __cfSetVisibleCols(finalKeys);
+      __cfSetVisibleCols(finalKeys, defs);
       try {
         const rows = (typeof computeCashflows === 'function') ? computeCashflows() : [];
         renderStage1Cashflows(rows);
@@ -46616,6 +47425,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       ecl_allowance:            { label: 'ECL allowance',               v: r => r.eclAllowance     == null ? '' : +r.eclAllowance },
       net_carrying_value:       { label: 'Net carrying amount',         v: r => r.netCarryingValue == null ? '' : +r.netCarryingValue },
       carrying_vs_balance:      { label: 'Unaccreted',                  v: r => r.carryingVsBalance == null ? '' : +r.carryingVsBalance },
+      /* Both accretion figures go out too — reconciling the GL in a
+         spreadsheet is the whole reason they exist, and a column that is on
+         screen but missing from the export sends people back to the screen. */
+      accretion:                { label: 'Accretion (this period)',     v: r => r.accretion       == null ? '' : +r.accretion },
+      accretion_to_date:        { label: 'Accreted to date',            v: r => r.accretionToDate == null ? '' : +r.accretionToDate },
       drawdowns:                { label: 'Drawdown (this period)',     v: r => +r.drawdowns || 0 },
       interest_accrued:         { label: 'Interest accrued (this period)', v: r => +r.interest || 0 },
       interest_accrued_to_date: { label: 'Interest accrued to date',    v: r => +r.interestAccruedToDate || 0 },
@@ -46702,7 +47516,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   function init(){
     if(!$b('builder')){ return; }   // safety — v1 doesn't have this section
     // Wire top-level deal/facility inputs
-    ['b-deal-name','b-deal-id','b-counterparty','b-le','b-currency','b-framework',
+    ['b-deal-name','b-deal-id','b-workday-id','b-counterparty','b-le','b-currency','b-framework',
      'b-signing','b-settle','b-maturity','b-original-maturity','b-agent-name',
      'b-facility-name','b-commitment','b-avail-end','b-day-basis','b-holiday',
      'b-repayment','b-facility-type',
@@ -46712,6 +47526,21 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       $b(id)?.addEventListener('input', recompute);
       $b(id)?.addEventListener('change', recompute);
     });
+    /* Add a maturity extension. The first row starts from whatever the deal
+       currently matures on — that date IS the pre-extension maturity, and
+       making someone retype it invites them to type something else. */
+    $b('b-mx-add')?.addEventListener('click', () => {
+      const list = _mxList();
+      const from = list.length
+        ? (list[list.length - 1].maturityAfter || '')
+        : (B.deal.originalMaturity || B.deal.maturity || '');
+      list.push({ maturityBefore: from, maturityAfter: '', agreedDate: '',
+                  effectiveDate: '', basis: 'option', fee: null,
+                  documentRef: '', notes: '' });
+      __mxRender();
+      recompute();
+    });
+    __mxRender();
     $b('btn-add-tranche')?.addEventListener('click', () => { B.tranches.push(newTranche()); renderTranches(); recompute(); });
     // btn-add-fee now routes to Lifecycle Events via inline onclick — the
     // legacy addEventListener wire is left disabled so it doesn't double-fire
@@ -46821,6 +47650,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     if(tab === 'cfconfig'){
       setTimeout(() => { window.__cfcLoad && window.__cfcLoad(); }, 30);
+    }
+    if(tab === 'holcal'){
+      setTimeout(() => { window.__holLoad && window.__holLoad(); }, 30);
     }
     if(tab === 'pcssync'){
       setTimeout(() => { window.__pcsLoad && window.__pcsLoad(); }, 30);
@@ -51241,6 +52073,335 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     if(typeof toast === 'function') toast('All columns returned to the shipped defaults.', 3500);
   };
 
+  /* ═══ Holiday Calendars ════════════════════════════════════════════════
+     State mirrors the two tables; _holState.sel is the calendar on screen. */
+  const _holState = { calendars: [], dates: [], sel: null, loaded: false };
+  const _holEsc = s => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  /* Push the loaded calendars into the engine. Without this the config screen
+     would edit a table nobody reads — the engine keeps its own in-memory sets
+     and would go on using the hardcoded fallbacks, so a calendar could be
+     edited here and have no effect on a single payment date. */
+  window.__holApplyToEngine = function(){
+    if(typeof window.registerHolidayCalendar !== 'function'){
+      console.warn('[CAL] engine has no registerHolidayCalendar — holiday config will NOT reach the schedule. Engine file is out of date.');
+      return 0;
+    }
+    const byCal = {};
+    _holState.dates.forEach(d => { (byCal[d.calendar_code] = byCal[d.calendar_code] || []).push(d.holiday_date); });
+    let n = 0;
+    _holState.calendars.forEach(c => {
+      // Register even when empty: an empty calendar the user created on
+      // purpose must override a stale hardcoded set of the same name.
+      window.registerHolidayCalendar(c.code, byCal[c.code] || []);
+      n++;
+    });
+    console.log('[CAL] ' + n + ' calendar(s) registered with the engine · ' + _holState.dates.length + ' dates');
+    return n;
+  };
+
+  /* Repopulate the Deal Setup dropdown from the configured calendars, keeping
+     whatever the open deal had selected. A deal pointing at a calendar that no
+     longer exists keeps its option, flagged — silently snapping it to "None"
+     would change how its dates roll without saying so. */
+  window.__holFillPicker = function(){
+    const sel = document.getElementById('b-holiday');
+    if(!sel || !_holState.calendars.length) return;
+    const current = sel.value || (window.B && window.B.facility && window.B.facility.holiday) || 'none';
+    const codes = new Set(_holState.calendars.map(c => c.code));
+    let html = '<option value="none">None</option>' +
+      _holState.calendars.map(c =>
+        '<option value="' + _holEsc(c.code) + '">' + _holEsc(c.label) + '</option>').join('');
+    if(current && current !== 'none' && !codes.has(current)){
+      html += '<option value="' + _holEsc(current) + '">' + _holEsc(current) + ' — not configured</option>';
+      console.warn('[CAL] deal uses calendar "' + current + '" which is not configured.');
+    }
+    sel.innerHTML = html;
+    sel.value = current;
+  };
+
+  window.__holLoad = async function(force){
+    if(_holState.loaded && !force){ window.__holRender(); return; }
+    if(!window.SB || !window.SB.connected){
+      const host = document.getElementById('hol-cal-list');
+      if(host) host.innerHTML = '<div style="padding:14px; font-size:11.5px; color:var(--n-500);">Not connected — showing the engine&rsquo;s built-in calendars only.</div>';
+      return;
+    }
+    const res = await window.SB.fetchHolidayCalendars();
+    _holState.calendars = res.calendars || [];
+    _holState.dates     = res.dates || [];
+    _holState.loaded    = true;
+    if(!_holState.sel && _holState.calendars.length) _holState.sel = _holState.calendars[0].code;
+    window.__holApplyToEngine();
+    window.__holFillPicker();
+    window.__holRender();
+  };
+
+  window.__holSelect = function(code){ _holState.sel = code; window.__holRender(); };
+
+  window.__holRender = function(){
+    const listEl = document.getElementById('hol-cal-list');
+    const dateEl = document.getElementById('hol-date-list');
+    if(!listEl || !dateEl) return;
+    const counts = {};
+    _holState.dates.forEach(d => { counts[d.calendar_code] = (counts[d.calendar_code] || 0) + 1; });
+
+    const kC = document.getElementById('hol-kpi-cals');
+    const kD = document.getElementById('hol-kpi-dates');
+    if(kC) kC.textContent = _holState.calendars.length;
+    if(kD) kD.textContent = _holState.dates.length.toLocaleString();
+
+    /* Coverage check. The single most useful thing this screen can tell you
+       is which calendars stop before your deals do — that is the failure the
+       old hardcoded sets had, and it is invisible from a payment schedule. */
+    const warn = document.getElementById('hol-coverage-warn');
+    if(warn){
+      const thisYear = new Date().getFullYear();
+      const short = _holState.calendars.map(c => {
+        const ds = _holState.dates.filter(d => d.calendar_code === c.code);
+        if(!ds.length) return { label: c.label, last: null };
+        const last = ds.reduce((m, d) => d.holiday_date > m ? d.holiday_date : m, ds[0].holiday_date);
+        return { label: c.label, last: +last.slice(0,4) };
+      }).filter(x => x.last == null || x.last < thisYear + 5);
+      if(short.length){
+        warn.style.display = 'block';
+        warn.innerHTML = '<b>Coverage runs out before some deals will.</b> ' +
+          short.map(s => _holEsc(s.label) + (s.last == null ? ' has no dates at all' : ' ends ' + s.last)).join('; ') +
+          '. Payment dates beyond a calendar&rsquo;s last year roll against nothing and the schedule looks normal doing it &mdash; add the missing years.';
+      } else {
+        warn.style.display = 'none';
+      }
+    }
+
+    listEl.innerHTML = _holState.calendars.map(c => {
+      const on = c.code === _holState.sel;
+      return '<div onclick="window.__holSelect(\'' + _holEsc(c.code) + '\')"' +
+        ' style="padding:8px 12px; cursor:pointer; border-bottom:0.5px solid var(--n-100);' +
+        (on ? 'background:#EEF2FF; border-left:3px solid #4338CA;' : 'border-left:3px solid transparent;') + '">' +
+        '<div style="font-size:12px; font-weight:' + (on ? '700' : '500') + '; color:var(--n-900);">' +
+          _holEsc(c.label) +
+          (c.is_builtin ? '' : '<span style="font-size:9px; color:#4338CA; margin-left:5px;">CUSTOM</span>') +
+        '</div>' +
+        '<div style="font-size:10px; color:var(--n-500); margin-top:1px;">' +
+          _holEsc(c.code) + (c.country_code ? ' · ' + _holEsc(c.country_code) : '') +
+          ' · ' + (counts[c.code] || 0) + ' date' + ((counts[c.code] || 0) === 1 ? '' : 's') +
+        '</div>' +
+      '</div>';
+    }).join('') || '<div style="padding:14px; font-size:11.5px; color:var(--n-500);">No calendars configured.</div>';
+
+    const cal = _holState.calendars.find(c => c.code === _holState.sel);
+    const title = document.getElementById('hol-sel-title');
+    const chip  = document.getElementById('hol-sel-chip');
+    const notes = document.getElementById('hol-sel-notes');
+    if(!cal){
+      if(title) title.textContent = 'Select a calendar';
+      if(chip) chip.textContent = '';
+      if(notes) notes.style.display = 'none';
+      dateEl.innerHTML = '';
+      return;
+    }
+    if(title) title.textContent = cal.label;
+    if(notes){
+      notes.style.display = cal.notes ? 'block' : 'none';
+      notes.textContent = cal.notes || '';
+    }
+
+    const mine = _holState.dates.filter(d => d.calendar_code === cal.code)
+      .sort((a,b) => a.holiday_date.localeCompare(b.holiday_date));
+    if(chip){
+      chip.className = mine.length ? 'chip green text-[10px]' : 'chip amber text-[10px]';
+      chip.textContent = mine.length ? mine.length + ' dates' : 'empty — nothing will roll';
+    }
+
+    // Year filter, rebuilt from the dates actually present.
+    const yf = document.getElementById('hol-year-filter');
+    const years = Array.from(new Set(mine.map(d => d.holiday_date.slice(0,4)))).sort();
+    if(yf){
+      const keep = yf.value;
+      yf.innerHTML = '<option value="">All years</option>' +
+        years.map(y => '<option value="' + y + '">' + y + '</option>').join('');
+      yf.value = years.indexOf(keep) >= 0 ? keep : '';
+    }
+    const yr = yf ? yf.value : '';
+    const shown = yr ? mine.filter(d => d.holiday_date.slice(0,4) === yr) : mine;
+
+    const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    dateEl.innerHTML = shown.length
+      ? '<table class="data" style="width:100%">' +
+        '<thead><tr><th class="left" style="width:120px">Date</th><th class="left" style="width:60px">Day</th>' +
+        '<th class="left">Name</th><th style="width:36px"></th></tr></thead><tbody>' +
+        shown.map(d => {
+          const dow = DOW[new Date(d.holiday_date + 'T12:00:00Z').getUTCDay()];
+          const wknd = dow === 'Sat' || dow === 'Sun';
+          return '<tr>' +
+            '<td class="left" style="font-variant-numeric:tabular-nums;">' + d.holiday_date + '</td>' +
+            /* A holiday that falls at a weekend changes nothing — the day was
+               already a non-business day. Greyed rather than hidden: it is
+               still a correct row, just an inert one, and hiding it would make
+               a calendar look short. */
+            '<td class="left" style="color:' + (wknd ? 'var(--n-400)' : 'var(--n-700)') + ';">' + dow +
+              (wknd ? ' <span style="font-size:9px;">(weekend)</span>' : '') + '</td>' +
+            '<td class="left" style="color:var(--n-700);">' + _holEsc(d.holiday_name || '') + '</td>' +
+            '<td><button class="mat-btn outline !py-0.5 !px-1.5 text-[10px]" title="Remove this date"' +
+              ' onclick="window.__holDeleteDate(\'' + _holEsc(cal.code) + '\',\'' + d.holiday_date + '\')">' +
+              '<span class="material-icons-outlined text-[12px]">close</span></button></td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>'
+      : '<div style="padding:14px; font-size:11.5px; color:var(--n-500);">No dates' + (yr ? ' in ' + yr : '') +
+        '. Use <b>Add dates</b> to paste them in.</div>';
+  };
+
+  window.__holOpenAdd = function(){
+    const p = document.getElementById('hol-add-panel');
+    if(p) p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  };
+
+  window.__holAddCalendar = async function(){
+    const code  = (document.getElementById('hol-new-code')  || {}).value || '';
+    const label = (document.getElementById('hol-new-label') || {}).value || '';
+    const cc    = (document.getElementById('hol-new-country')|| {}).value || '';
+    if(!/^[A-Za-z][A-Za-z0-9_]{1,31}$/.test(code.trim())){
+      if(typeof toast === 'function') toast('Code must start with a letter and contain only letters, digits and underscores.', 5000, { kind:'error' });
+      return;
+    }
+    if(!label.trim()){
+      if(typeof toast === 'function') toast('Give the calendar a label — it is what appears in the Deal Setup dropdown.', 4000, { kind:'error' });
+      return;
+    }
+    const res = await window.SB.upsertHolidayCalendar({
+      code: code.trim(), label: label.trim(), country_code: cc.trim().toUpperCase() || null
+    });
+    if(res && res.ok){
+      document.getElementById('hol-add-panel').style.display = 'none';
+      ['hol-new-code','hol-new-label','hol-new-country'].forEach(id => {
+        const el = document.getElementById(id); if(el) el.value = '';
+      });
+      _holState.sel = code.trim();
+      await window.__holLoad(true);
+      if(typeof toast === 'function') toast('Created "' + label.trim() + '". It has no dates yet — nothing will roll until you add some.', 6000, { kind:'info' });
+    } else if(typeof toast === 'function'){
+      toast('Could not create: ' + ((res && res.reason) || 'unknown'), 5000, { kind:'error' });
+    }
+  };
+
+  window.__holOpenPaste = function(){
+    const p = document.getElementById('hol-paste-panel');
+    if(!p) return;
+    p.style.display = p.style.display === 'block' ? 'none' : 'block';
+    if(p.style.display === 'block'){
+      const box = document.getElementById('hol-paste-box');
+      if(box){ box.focus(); box.oninput = window.__holPreviewPasted; }
+      window.__holPreviewPasted();
+    }
+  };
+
+  /* Parse pasted lines into { date, name }. Accepts ISO and DD/MM/YYYY.
+     DD/MM is assumed over MM/DD because every jurisdiction this screen exists
+     for writes dates that way — and the preview shows the weekday, so a
+     misread 03/04 lands as "Tue" instead of "Sat" and is visible before it is
+     saved rather than after. */
+  function _holParsePaste(text){
+    const ok = [], bad = [];
+    String(text || '').split(/\r?\n/).forEach(raw => {
+      const line = raw.trim();
+      if(!line) return;
+      const parts = line.split(/[,;\t]/);
+      const dTok = (parts[0] || '').trim();
+      const name = parts.slice(1).join(',').trim();
+      let iso = null;
+      let m = dTok.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(m) iso = dTok;
+      if(!iso){
+        m = dTok.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})$/);
+        if(m) iso = m[3] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[1]).padStart(2,'0');
+      }
+      // Reject what Date would happily accept and silently shift, e.g. 2027-02-30.
+      if(iso){
+        const d = new Date(iso + 'T12:00:00Z');
+        if(isNaN(d.getTime()) || d.toISOString().slice(0,10) !== iso) iso = null;
+      }
+      if(iso) ok.push({ date: iso, name });
+      else bad.push(line);
+    });
+    return { ok, bad };
+  }
+
+  window.__holPreviewPasted = function(){
+    const box = document.getElementById('hol-paste-box');
+    const out = document.getElementById('hol-paste-preview');
+    if(!box || !out) return;
+    const { ok, bad } = _holParsePaste(box.value);
+    const existing = new Set(_holState.dates
+      .filter(d => d.calendar_code === _holState.sel).map(d => d.holiday_date));
+    const dup = ok.filter(r => existing.has(r.date)).length;
+    const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const wknd = ok.filter(r => { const w = new Date(r.date + 'T12:00:00Z').getUTCDay(); return w === 0 || w === 6; }).length;
+    const bits = [];
+    bits.push('<b>' + (ok.length - dup) + '</b> to add');
+    if(dup)  bits.push(dup + ' already present (skipped)');
+    if(wknd) bits.push(wknd + ' fall at a weekend (no effect — already non-business days)');
+    if(bad.length) bits.push('<span style="color:#B91C1C;"><b>' + bad.length + ' unreadable</b>: ' +
+      _holEsc(bad.slice(0,3).join(' · ')) + (bad.length > 3 ? ' …' : '') + '</span>');
+    // Show the weekday of the first few, so a DD/MM vs MM/DD misread is caught
+    // before saving rather than after a schedule is built on it.
+    if(ok.length){
+      bits.push('first: ' + ok.slice(0,3).map(r =>
+        r.date + ' (' + DOW[new Date(r.date + 'T12:00:00Z').getUTCDay()] + ')').join(', '));
+    }
+    out.innerHTML = bits.join(' · ');
+  };
+
+  window.__holAddPasted = async function(){
+    if(!_holState.sel) return;
+    const box = document.getElementById('hol-paste-box');
+    const { ok, bad } = _holParsePaste(box ? box.value : '');
+    if(!ok.length){
+      if(typeof toast === 'function') toast('Nothing readable to add.', 4000, { kind:'error' });
+      return;
+    }
+    if(bad.length && !window.confirm(
+        bad.length + ' line(s) could not be read as a date and will be skipped:\n\n' +
+        bad.slice(0,8).join('\n') + (bad.length > 8 ? '\n…' : '') +
+        '\n\nAdd the ' + ok.length + ' that parsed?')) return;
+    const res = await window.SB.addHolidayDates(_holState.sel, ok);
+    if(res && res.ok){
+      if(box) box.value = '';
+      document.getElementById('hol-paste-panel').style.display = 'none';
+      await window.__holLoad(true);
+      if(typeof toast === 'function') toast('Added to ' + _holState.sel + '.', 3000, { kind:'success' });
+    } else if(typeof toast === 'function'){
+      toast('Could not add: ' + ((res && res.reason) || 'unknown'), 5000, { kind:'error' });
+    }
+  };
+
+  window.__holDeleteDate = async function(code, iso){
+    const res = await window.SB.deleteHolidayDate(code, iso);
+    if(res && res.ok) await window.__holLoad(true);
+    else if(typeof toast === 'function') toast('Could not remove: ' + ((res && res.reason) || 'unknown'), 5000, { kind:'error' });
+  };
+
+  window.__holExportCsv = function(){
+    const cal = _holState.calendars.find(c => c.code === _holState.sel);
+    if(!cal) return;
+    const mine = _holState.dates.filter(d => d.calendar_code === cal.code)
+      .sort((a,b) => a.holiday_date.localeCompare(b.holiday_date));
+    const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+    const lines = ['Calendar,Code,Date,Name'];
+    mine.forEach(d => lines.push([cal.label, cal.code, d.holiday_date, d.holiday_name || ''].map(esc).join(',')));
+    const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'holiday-calendar-' + cal.code + '.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  // Load early, not only when the tab is opened: the engine needs the real
+  // calendars before the first schedule is built, and the Deal Setup dropdown
+  // needs its options before anyone picks one.
+  setTimeout(() => { if(window.SB && window.SB.connected) window.__holLoad(true); }, 2600);
+
   window.__glcRender = function(){
     const table  = document.getElementById('glc-table');
     const thead  = document.getElementById('glc-thead');
@@ -51366,6 +52527,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
                 '<i class="ti ti-x"></i></button>') +
           '</th>'
         )).join('') +
+        /* Posting switch. Sits before Reset because it answers a question
+           asked about the whole row — does PCS book this at all — whereas
+           every column to its left answers "and to which account". */
+        '<th class="glc-sub-head" rowspan="2" style="vertical-align:bottom; text-align:center; border-left:0.5px solid var(--n-200);"' +
+          ' title="Untick to stop PCS posting this event. Both legs are dropped, so the batch stays balanced. Use it where another system already books the entry.">Post</th>' +
         '<th class="glc-sub-head" rowspan="2" style="vertical-align:bottom; text-align:center; border-left:0.5px solid var(--n-200);">Reset</th>' +
       '</tr>' +
       '<tr>' +
@@ -51389,20 +52555,38 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       '</td>';
     };
 
+    /* Suppressed if ANY framework says so. The toggle writes every framework
+       at once, so the two only diverge if someone edited the table directly —
+       and in that case the safe reading of "posted under IFRS but not US GAAP"
+       is that this row is not a plain always-post row, which is what the
+       unticked box and the strike-through say. */
+    const isRowSuppressed = (ev) => fws.some(f => {
+      const m = _glcResolve(ev.event_key, f.code);
+      return m && m.is_suppressed;
+    });
+
     tbody.innerHTML = events.map(ev => {
       const custom = isRowCustom(ev);
-      return '<tr>' +
+      const off    = isRowSuppressed(ev);
+      return '<tr' + (off ? ' style="background:var(--n-50,#FAFAFA);"' : '') + '>' +
         '<td class="glc-event-cell">' +
           '<div style="display:flex; align-items:flex-start;">' +
             (custom ? '<span class="glc-custom-dot" title="Customised by client" style="margin-top:5px;"></span>'
                     : '<span style="width:7px; margin-right:7px; flex-shrink:0;"></span>') +
-            '<div>' +
+            '<div' + (off ? ' style="opacity:0.55;"' : '') + '>' +
               _glcEsc(ev.event_label) +
               (ev.system_trigger ? '<div class="glc-event-trigger">' + _glcEsc(ev.system_trigger) + '</div>' : '') +
+              (off ? '<div style="font-size:9.5px; font-weight:700; color:#B45309; letter-spacing:0.3px; margin-top:3px;">NOT POSTED BY PCS</div>' : '') +
             '</div>' +
           '</div>' +
         '</td>' +
         fws.map(f => cell(ev, f, 'dr') + cell(ev, f, 'cr')).join('') +
+        '<td class="glc-cell" style="text-align:center; border-left:0.5px solid var(--n-200);">' +
+          '<input type="checkbox" data-glc-post="' + _glcEsc(ev.event_key) + '"' + (off ? '' : ' checked') +
+            ' style="accent-color:#4F46E5; cursor:pointer;"' +
+            ' title="' + (off ? 'PCS posts no journal for this event. Tick to resume posting.'
+                              : 'PCS posts this event. Untick to stop — both legs are dropped together.') + '"/>' +
+        '</td>' +
         '<td class="glc-cell" style="text-align:center; border-left:0.5px solid var(--n-200);">' +
           (custom
             ? '<button class="glc-reset-btn" title="Reset this event back to the system defaults" ' +
@@ -51422,6 +52606,90 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         await window.__glcSaveCell(this);
       });
     });
+
+    // Posting switch — one write per framework, then a re-render.
+    tbody.querySelectorAll('input[data-glc-post]').forEach(cb => {
+      cb.addEventListener('change', async function(){
+        const key = this.getAttribute('data-glc-post');
+        const ev  = _glcState.events.find(e => e.event_key === key);
+        await window.__glcSetEventPosting(key, (ev && ev.event_label) || key, this.checked);
+      });
+    });
+  };
+
+  /* Turn PCS posting on or off for one business event, across every
+     framework. Framework-by-framework suppression is storable but not
+     offered: "we book interest cash ourselves" is a statement about the
+     client's operating model, not about IFRS, and a grid of 4+ checkboxes per
+     row would invite a half-configured state nobody could read off the
+     screen. */
+  window.__glcSetEventPosting = async function(eventKey, label, post){
+    const suppress = !post;
+    const fws = _glcState.frameworks.slice();
+    if(!fws.length) return;
+
+    /* Say what stops happening before it stops happening. Switching off a
+       settlement event leaves its accrual in place, so the receivable keeps
+       being raised and is never cleared from PCS's side — correct when the
+       other system clears it, a growing phantom balance when it doesn't.
+       That is the whole risk of this feature and it belongs in front of the
+       user, not in a release note. */
+    if(suppress){
+      const msg = 'Stop PCS posting "' + label + '"?\n\n' +
+        'Both legs of this journal will be dropped from every accounting run and from ' +
+        'the Investran batch, under all ' + fws.length + ' frameworks.\n\n' +
+        'Anything that precedes it still posts. For a settlement event that means ' +
+        'the receivable keeps being raised here and must be cleared by whichever ' +
+        'system books the cash — otherwise it will accumulate.\n\n' +
+        'You can switch it back on at any time.';
+      if(!window.confirm(msg)){
+        window.__glcRender();          // put the checkbox back
+        return;
+      }
+    }
+
+    let failed = 0;
+    for(const f of fws){
+      const m = _glcResolve(eventKey, f.code) || {};
+      const res = await window.SB.upsertGLEventMapping({
+        event_key:       eventKey,
+        framework_code:  f.code,
+        // Carry the existing accounts through — this is a posting switch, not
+        // an account edit, and blanking them here would lose the mapping.
+        dr_account_code: m.dr_account_code || '',
+        dr_account_name: m.dr_account_name || '',
+        cr_account_code: m.cr_account_code || '',
+        cr_account_name: m.cr_account_name || '',
+        is_suppressed:   suppress,
+        team_id:         _glcState.teamId || null
+      });
+      if(!(res && res.ok)){
+        failed++;
+        console.error('[GLC] posting switch failed for ' + eventKey + '/' + f.code + ':', res && res.reason);
+      }
+    }
+
+    if(failed){
+      if(typeof toast === 'function'){
+        toast('Could not save the posting switch for ' + failed + ' of ' + fws.length +
+              ' frameworks — the screen may not match the database. Reload before relying on it.',
+              7000, { kind:'error' });
+      }
+    } else if(typeof toast === 'function'){
+      toast(suppress ? '"' + label + '" will no longer be posted by PCS.'
+                     : '"' + label + '" will be posted again.', 4000, { kind:'info' });
+    }
+
+    /* Refetch rather than patch the cache. The write touched one row per
+       framework and the dot, the KPI and the strike-through all read from
+       that cache — reconstructing it by hand is how a screen comes to
+       disagree with the database. */
+    // force=true — the plain call renders from the cache this write just made
+    // stale, which would show the switch snapping back to where it was.
+    if(typeof window.__glcLoad === 'function') await window.__glcLoad(true);
+    else window.__glcRender();
+    // The engine reads PCS_GL_EVENT_MAP, not _glcState, so it needs telling too.
+    if(typeof window.__refreshGLEventMap === 'function') await window.__refreshGLEventMap();
   };
 
   // Persist a single edited cell. Reads BOTH inputs of the pair (code+name)
@@ -51435,6 +52703,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       const el = tbody.querySelector('input[data-glc-ev="' + ev + '"][data-glc-fw="' + fw + '"][data-glc-side="' + side + '"][data-glc-field="' + field + '"]');
       return el ? el.value.trim() : '';
     };
+    /* Carry the posting switch through. The upsert replaces the whole row, so
+       leaving this out would silently re-enable a suppressed event the moment
+       anyone corrected one of its account codes — the edit and the damage
+       being in different columns is what would have made it hard to spot. */
+    const existing = _glcResolve(ev, fw) || {};
     const payload = {
       event_key: ev,
       framework_code: fw,
@@ -51442,6 +52715,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       dr_account_name: pick('dr', 'name'),
       cr_account_code: pick('cr', 'code'),
       cr_account_name: pick('cr', 'name'),
+      is_suppressed: !!existing.is_suppressed,
       team_id: _glcState.teamId || null
     };
     try {
@@ -51459,8 +52733,13 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
              .forEach(el => el.classList.remove('dirty'));
         window.__glcRender();
         if(typeof toast === 'function') toast('GL mapping saved', 2000, { kind:'success', id:'glc:save' });
-        // Downstream: refresh the runtime map used by the DIU push.
+        // Downstream: refresh the runtime maps used by the accounting run and
+        // the DIU push. Both, not just the account-level one — the event map
+        // is what carries the posting switch and the per-event account
+        // overrides, so leaving it stale means the edit is saved and invisible
+        // until the next page load.
         try { if(typeof window.__refreshGLMappings === 'function') window.__refreshGLMappings(); } catch(_){}
+        try { if(typeof window.__refreshGLEventMap === 'function') window.__refreshGLEventMap(); } catch(_){}
       } else {
         if(typeof toast === 'function') toast('Save failed: ' + ((res && res.reason) || 'unknown'), 5000, { kind:'error' });
       }
@@ -51558,7 +52837,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     fws.forEach(f => {
       hdr.push(f.label + ' DR code', f.label + ' DR name', f.label + ' CR code', f.label + ' CR name');
     });
-    hdr.push('Customised');
+    /* "Posted by PCS" goes in the export because this CSV is what gets handed
+       to an auditor or a counterpart as the statement of how the ledger is
+       configured. A row showing a debit and a credit account, with nothing to
+       say the entry is never actually made, reads as a posting that happens. */
+    hdr.push('Posted by PCS', 'Customised');
     const esc = v => {
       const s = String(v == null ? '' : v);
       return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -51566,13 +52849,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     const lines = [hdr.map(esc).join(',')];
     _glcState.events.forEach(ev => {
       const row = [ev.event_label, ev.category || '', ev.system_trigger || ''];
-      let anyCustom = false;
+      let anyCustom = false, anySuppressed = false;
       fws.forEach(f => {
         const m = _glcResolve(ev.event_key, f.code) || {};
         if(m.is_custom) anyCustom = true;
+        if(m.is_suppressed) anySuppressed = true;
         row.push(m.dr_account_code || '', m.dr_account_name || '', m.cr_account_code || '', m.cr_account_name || '');
       });
-      row.push(anyCustom ? 'yes' : '');
+      row.push(anySuppressed ? 'NO — not posted' : 'yes', anyCustom ? 'yes' : '');
       lines.push(row.map(esc).join(','));
     });
     const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
