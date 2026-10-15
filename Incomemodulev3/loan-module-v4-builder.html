@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 66; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 67; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -775,7 +775,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.66"></script>
+<script src="portf-excel-parser.js?v=4.67"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -3287,37 +3287,46 @@
             <div id="b-signing-hint" class="text-[10px] text-gray-500 mt-1">Execution date. Interest accrues from Settlement.</div>
           </div>
           <div><label class="b-label required">Settlement Date</label><input id="b-settle" type="date" class="b-input"/></div>
-          <div><label class="b-label required">Maturity Date</label><input id="b-maturity" type="date" class="b-input"/>
-            <div id="b-maturity-hint" class="text-[10px] text-gray-500 mt-1 hidden"></div>
-          </div>
-          <!-- Original Maturity Date — what the loan was contracted to mature on
-               before any extension. Maturity Date always holds the CURRENT
-               position, because that is what every downstream calculation needs:
-               the schedule, the EIR horizon, the ECL life. But once a
-               restructuring extends a loan, "2030" on its own hides the fact
-               that it was a 2028 deal — and an extension is exactly the kind of
-               concession a reviewer wants to see, not read about in a note.
-               Blank means never extended. -->
-          <div><label class="b-label">Original Maturity Date</label>
+          <!-- Agent Name — the facility agent / administrative agent. Sits
+               beside Settlement Date now that there is one maturity field
+               rather than two. -->
+          <div><label class="b-label">Agent Name</label><input id="b-agent-name" type="text" placeholder="e.g. HSBC Bank plc" class="b-input"/></div>
+          <!-- Maturity Date is now DERIVED, not typed.
+               One date is entered — the contractual maturity below — and the
+               extension table carries it forward from there. Two editable
+               maturity fields meant the deal could assert a maturity its own
+               extension history contradicted, which is exactly what happened:
+               an extension to 2030-12-30 sat beside a Maturity Date still
+               reading 2029-12-31 and nothing objected.
+
+               The input survives as a hidden field because nine places read
+               #b-maturity — the validator, the error-to-field map, the engine
+               payload. Same approach as #b-le. It is written by __mxApply and
+               never by a user. -->
+          <input id="b-maturity" type="hidden" value=""/>
+          <!-- The ONE maturity a user types: what the loan was contracted to
+               mature on, before any extension. Everything downstream — the
+               schedule, the EIR horizon, the ECL life — runs to the CURRENT
+               maturity, which is this date carried forward by the extension
+               table below and shown in the hint. Required, because a loan
+               without a maturity has no horizon to compute over. -->
+          <div><label class="b-label required">Original Maturity Date</label>
             <input id="b-original-maturity" type="date" class="b-input"/>
-            <div id="b-original-maturity-hint" class="text-[10px] text-gray-500 mt-1">Maturity before any extension. Leave blank if never extended.</div>
+            <div id="b-original-maturity-hint" class="text-[10px] text-gray-500 mt-1">Contractual maturity before any extension.</div>
           </div>
           <!-- Maturity extension history.
-               Two date boxes can describe exactly one extension. A facility with
-               a 1+1+1 mechanic has three, and the middle one used to vanish: the
-               deal read as a single jump from the original date to the final one,
-               with no record of when each leg was agreed, on what basis, or for
-               what fee. This table is that record.
-
-               One source of truth, in one direction: while the table has rows it
-               drives the two date boxes above (first row's "from" is the original
-               maturity, last row's "to" is the current one) and they go read-only.
-               Empty table, and the boxes behave exactly as they always have —
-               nothing about existing single-extension deals changes. -->
+               One date box can describe no extension at all; two could describe
+               exactly one. A facility with a 1+1+1 mechanic has three, and the
+               middle one used to vanish — the deal read as a single jump from
+               the original date to the final one, with no record of when each
+               leg was agreed or on what basis. This table is that record, and
+               it is also what produces the deal's current maturity: the last
+               "Extended to", or the contractual date when there are none. -->
           <div style="grid-column:1/-1" class="mt-1">
             <div class="flex items-center justify-between">
               <label class="b-label" style="margin-bottom:0">Maturity extension history</label>
               <div class="flex items-center gap-2">
+                <span id="b-mx-current" class="chip blue text-[10px]"></span>
                 <span id="b-mx-count" class="chip gray text-[10px]">No extensions</span>
                 <button type="button" id="b-mx-add" class="mat-btn outline !py-0.5 !px-2 text-[10px]">
                   <span class="material-icons-outlined text-[12px]">add</span> Add extension
@@ -3326,11 +3335,10 @@
             </div>
             <div id="b-mx-list" class="mt-1"></div>
           </div>
-          <!-- Agent Name — the facility agent / administrative agent. Populated
-               on most NWF deals, so it sits in the core Deal Setup grid rather
-               than in the syndication panel further down. Column already exists
-               on public.deals as agent_name. -->
-          <div><label class="b-label">Agent Name</label><input id="b-agent-name" type="text" placeholder="e.g. HSBC Bank plc" class="b-input"/></div>
+          <!-- Agent Name moved up beside Settlement Date. A duplicate #id here
+               would have meant two inputs answering to the same selector, and
+               every reader would have taken whichever came first in the DOM —
+               silently the wrong one once this grid is reordered again. -->
         </div>
       </div>
     </details>
@@ -9530,21 +9538,21 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.66"></script>
-<script src="loan-module-instruments.js?v=4.66"></script>
-<script src="loan-module-analytics.js?v=4.66"></script>
+<script src="loan-module-engine.js?v=4.67"></script>
+<script src="loan-module-instruments.js?v=4.67"></script>
+<script src="loan-module-analytics.js?v=4.67"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.66"></script>
+<script src="demo-assistant-kb.js?v=4.67"></script>
 <!-- IFRS answer book, generated from PCS-IFRS-Demo-Answers.md. Loaded AFTER the
      curated KB above because it APPENDS to window.FAQ_KB; loading it first would
      have nothing to append to and the 256 IFRS entries would be dropped on the
      floor without an error. Regenerate with tools/build-ifrs-kb.py — never edit
      by hand, or the PDF the presenter reads and the answers the assistant gives
      will drift apart. -->
-<script src="demo-assistant-kb-ifrs.js?v=4.66"></script>
-<script src="demo-assistant-system-prompt.js?v=4.66"></script>
+<script src="demo-assistant-kb-ifrs.js?v=4.67"></script>
+<script src="demo-assistant-system-prompt.js?v=4.67"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -12111,6 +12119,31 @@ window.SB = (function(){
     }
   }
 
+  /* Write ONE fee's IFRS treatment, by deal + fee_no.
+     Exists because "Save to DB" is disabled on a PortF-sourced deal, and must
+     stay disabled — it writes PCS's whole version of the deal over the one the
+     feed sent. But the IFRS treatment is not the feed's to own: it is the
+     fund's accounting policy judgement (§B5.4.1), and without a way to persist
+     it the editable dropdown would reset on every reload and be worse than a
+     locked one.
+
+     So: a single column on a single row, matched on the fee's position in the
+     deal. Nothing else about the fee is touched, which is what makes this safe
+     to allow where a full save is not. */
+  async function updateFeeIFRSTreatment(dealId, feeNo, ifrsValue){
+    if(!_client || !_connected) return { ok:false, reason:'not connected' };
+    if(!dealId || feeNo == null) return { ok:false, reason:'deal id + fee_no required' };
+    const { data, error } = await _client.from('fees')
+      .update({ ifrs_treatment_value: ifrsValue || null, updated_at: new Date().toISOString() })
+      .eq('deal_id', dealId).eq('fee_no', feeNo)
+      .select('id, fee_no, ifrs_treatment_value');
+    if(error) return { ok:false, reason: error.message };
+    // An update that matched nothing is not a success. Without this the UI
+    // would report "saved" for a fee_no that does not exist on the deal.
+    if(!data || !data.length) return { ok:false, reason:'no fee row matched fee_no ' + feeNo };
+    return { ok:true, row: data[0] };
+  }
+
   // Upsert one cell. Always writes a team-scoped row so the workspace
   // defaults stay pristine and "Reset to default" can simply delete.
   async function upsertGLEventMapping(row){
@@ -13792,7 +13825,12 @@ window.SB = (function(){
     repayment:       { allowed: ['AtMaturity','Periodic','BulletWithAmort'], default: 'AtMaturity', alias: { atMaturity:'AtMaturity', bullet:'AtMaturity', amortising:'Periodic', amortizing:'Periodic' } },
     facility_type:   { allowed: ['termLoan','revolver','delayedDraw','bridgeLoan','revolvingBorrowingBase'], default: 'termLoan', alias: { 'borrowing_base':'revolvingBorrowingBase', borrowingBase:'revolvingBorrowingBase' } },
     base_index:      { allowed: ['FIXED','SONIA','SOFR','TermSOFR','BBSW','BBSY','EURIBOR','ESTR'], default: 'FIXED', alias: { fixed:'FIXED', bbsy:'BBSY' } },
-    fee_kind:        { allowed: ['arrangement','commitment','utilisation','agency','other','exitFeeIrrHurdle','origination','management','performance'], default: 'other', alias: { upfront:'arrangement', undrawn:'commitment', utilization:'utilisation', exitFee:'exitFeeIrrHurdle', arranger:'origination', mgmt:'management', perf:'performance' } },
+    /* `legal` added to the allowed set, with the spellings a feed actually
+       uses aliased onto it. Without the aliases a column saying "Legal costs"
+       falls through to the `other` default — and because that default is
+       silent, a legal fee arrives tagged as something it is not and nobody
+       sees a reason to question its IFRS treatment. */
+    fee_kind:        { allowed: ['arrangement','commitment','utilisation','agency','other','exitFeeIrrHurdle','origination','management','performance','legal'], default: 'other', alias: { upfront:'arrangement', undrawn:'commitment', utilization:'utilisation', exitFee:'exitFeeIrrHurdle', arranger:'origination', mgmt:'management', perf:'performance', legals:'legal', 'legal fees':'legal', 'legal costs':'legal', counsel:'legal', 'legal expenses':'legal' } },
     fee_mode:        { allowed: ['fixPct','fixAmount','floatBps','overFunded','overUnfunded','overInterestComponent','irrHurdleTiers','cashCoupon','undrawnRamp'], default: 'fixPct', alias: { percent:'fixPct', amount:'fixAmount', bps:'floatBps', hurdle:'irrHurdleTiers', cash:'cashCoupon', ramp:'undrawnRamp' } },
     fee_base:        { allowed: ['commitment','funded','unfunded','tranche-face'], default: 'commitment', alias: { undrawn:'unfunded', drawn:'funded', face:'tranche-face' } },
     fee_freq:        { allowed: ['oneOff','monthly','quarterly','semi','annual'], default: 'oneOff', alias: { 'semi-annual':'semi', 'semiAnnual':'semi', 'semiannual':'semi', yearly:'annual' } },
@@ -14513,8 +14551,14 @@ window.SB = (function(){
           // takes effect when the old maturity would have fallen due.
           effective_date:  x.effectiveDate || x.maturityBefore || null,
           basis:           x.basis || 'option',
-          extension_fee:   (x.fee != null && x.fee !== '' ? +x.fee : null),
-          document_ref:    x.documentRef || null,
+          /* extension_fee and document_ref are no longer collected — an
+             extension fee belongs in Business Events, where it gets a
+             calculation method, an IFRS treatment and a route into the
+             accounting run. Written as null rather than left out so a row
+             edited after this change clears whatever it held, instead of
+             keeping a figure the screen no longer shows. */
+          extension_fee:   null,
+          document_ref:    null,
           notes:           x.notes || null,
           created_by:      _uid
         }));
@@ -14890,9 +14934,13 @@ window.SB = (function(){
                 agreedDate:     x.agreed_date    || '',
                 effectiveDate:  x.effective_date || '',
                 basis:          x.basis || 'option',
-                fee:            x.extension_fee != null ? +x.extension_fee : null,
-                documentRef:    x.document_ref || '',
-                notes:          x.notes || ''
+                /* Legacy fee / document ref folded into Notes rather than
+                   dropped. Four rows carried one of each before the columns
+                   were retired; silently discarding them on the next save
+                   would have been data loss nobody saw. */
+                notes: [x.notes, x.document_ref,
+                        (x.extension_fee != null ? 'Fee ' + (+x.extension_fee).toLocaleString('en-GB') : '')]
+                       .filter(Boolean).join(' · ')
               })),
             signingDate:  row.signing_date || '',
             agentName:    row.agent_name || '',
@@ -15813,6 +15861,8 @@ window.SB = (function(){
     // Holiday calendars — business-day rolling, configured not coded
     fetchHolidayCalendars, upsertHolidayCalendar, addHolidayDates,
     deleteHolidayDate, deleteHolidayCalendar,
+    // Single-column fee write — the one edit allowed on an external deal
+    updateFeeIFRSTreatment,
     // Cashflow Configuration — column × business-event composition
     fetchCashflowColumnConfig, upsertCashflowColumnConfig, resetCashflowColumnConfig,
     loadCurrentTeamId, currentTeamId,
@@ -16696,6 +16746,20 @@ function defaultIFRSTreatment(kind){
   if(kind === 'arrangement')              return 'IFRS9-EIR';
   if(kind === 'commitment' || kind === 'guarantee' || kind === 'management') return 'IFRS15-overTime';
   if(kind === 'dividend')                 return 'IFRS15-pointInTime';
+  /* Legal fees default to point-in-time, i.e. expensed, NOT capitalised into
+     the EIR. Only costs that are incremental and directly attributable to
+     originating the instrument form part of its initial measurement
+     (§B5.4.1) — and much of what arrives on a legal invoice is neither:
+     general advice, negotiation that would have been incurred anyway, work on
+     a deal that did not complete. Defaulting to EIR would quietly capitalise
+     all of it and overstate the carrying amount.
+
+     Defaulting to expense makes the opposite error, and it is the better one
+     to make: a fee that should have been capitalised is visible as a lumpy
+     charge in the period, where a fee that should not have been is invisible,
+     spread across the life at a rate nobody examines. The operator re-tags on
+     the fee card where the judgement goes the other way. */
+  if(kind === 'legal')                    return 'IFRS15-pointInTime';
   return 'IFRS9-EIR';
 }
 
@@ -20046,7 +20110,11 @@ function validateBuilderForSave(){
   check(B.deal && B.deal.currency,   'Currency (Stage 0 → Deal Setup)',                  'b-currency');
   check(B.deal && B.deal.framework,  'Accounting Framework (Stage 0 → Deal Setup)',      'b-framework');
   check(B.deal && B.deal.settle,     'Settlement Date (Stage 0 → Deal Setup)',           'b-settle');
-  check(B.deal && B.deal.maturity,   'Maturity Date (Stage 0 → Deal Setup)',             'b-maturity');
+  /* Points at b-original-maturity, not b-maturity. b-maturity is a hidden
+     derived field now — highlighting it would flag an input nobody can see
+     and nobody can fix. The contractual date is what the user actually
+     enters, and filling it in is what resolves this. */
+  check(B.deal && B.deal.maturity,   'Maturity Date (Stage 0 → Deal Setup → Original Maturity Date)', 'b-original-maturity');
   // Facility
   check(B.facility && B.facility.commitment, 'Total Commitment (Stage 0 → Facility Setup)', 'b-commitment');
   // Tranches — at least one tranche must exist with a positive Face Value.
@@ -20080,7 +20148,7 @@ function interpretSaveError(rawMsg){
     'currency':         { where:'Stage 0 → Deal Setup → Currency',  fieldId:'b-currency',   hint:'Pick a currency (USD / GBP / EUR / …).' },
     'framework':        { where:'Stage 0 → Deal Setup → Framework', fieldId:'b-framework',  hint:'Pick an accounting framework (IFRS9 / USGAAP / AASB / ASPE).' },
     'settlement_date':  { where:'Stage 0 → Deal Setup → Settlement',fieldId:'b-settle',     hint:'Settlement date must be a valid date and earlier than maturity.' },
-    'maturity_date':    { where:'Stage 0 → Deal Setup → Maturity',  fieldId:'b-maturity',   hint:'Maturity date must be later than settlement date.' },
+    'maturity_date':    { where:'Stage 0 → Deal Setup → Original Maturity Date', fieldId:'b-original-maturity', hint:'Maturity must be later than settlement. The deal\'s current maturity is the contractual date carried forward by the extension table.' },
     'commitment':       { where:'Stage 0 → Facility Setup → Commitment', fieldId:'b-commitment', hint:'Facility commitment must be > 0.' },
     'face_value':       { where:'Stage 0 → Tranches → Face Value',  fieldId:null,           hint:'Each tranche needs a positive face value.' },
     'day_basis':        { where:'Stage 0 → Facility Setup → Day Basis', fieldId:null,       hint:'Pick a day-count convention (ACT/360, ACT/365, 30/360).' },
@@ -24175,9 +24243,21 @@ window.__renderInlineJETable = function(){
           const va = keyOf(a), vb = keyOf(b);
           if(va < vb) return jeSort.dir === 'desc' ? 1 : -1;
           if(va > vb) return jeSort.dir === 'desc' ? -1 : 1;
-          // Stable tie-break on the entry number so equal keys keep a
-          // predictable order instead of shuffling between renders.
-          return (+a.jeIndex || 0) - (+b.jeIndex || 0);
+          /* Tie-break: entry number, then line number within the entry.
+             This is what keeps a journal readable once it is date-sorted —
+             every row on 2026-04-01 would otherwise be free to interleave,
+             and the two legs of one entry could end up separated by a dozen
+             unrelated lines. jeIndex holds the pair together; txIndex keeps
+             the legs in the order the engine wrote them, which is the order
+             an accountant expects to read them in.
+
+             Note the tie-break is NOT reversed when dir is 'desc'. Descending
+             by date should put the newest day first and still read each
+             entry top-to-bottom within that day; reversing it would turn
+             every entry upside down and show the credit leg first. */
+          const je = (+a.jeIndex || 0) - (+b.jeIndex || 0);
+          if(je) return je;
+          return (+a.txIndex || 0) - (+b.txIndex || 0);
         });
       }
     }
@@ -24267,13 +24347,29 @@ window.__renderInlineJETable = function(){
 /* Three-state column sort for the flat register view. Held on window rather
    than in the DOM so it survives the re-render that a filter keystroke or a
    fresh accounting run triggers. Switching back to the grouped journal-entry
-   view leaves the choice intact — it simply does not apply there. */
-window.__inlineJESort = null;
+   view leaves the choice intact — it simply does not apply there.
+
+   DEFAULT: date ascending. A register is a chronological document; that is
+   what the word means. It is also not what engine emission order gives you,
+   and the difference is not cosmetic: splitInterestJEsByCouponPeriod appends
+   the amortisation rows it derives to the END of the array
+   (`finalKept.concat(...)`), so every Discount Accretion row for the whole
+   life of the deal lands after the last ordinary row and the dates restart
+   from settlement partway down the register. The first screenful looks
+   perfectly chronological, which is why this survived.
+
+   Sorting here is display-only — M.acctJournals is untouched, so the DIU push
+   and the Excel export still read the engine's own order. */
+window.__inlineJESort = { key:'date', dir:'asc' };
 window.__inlineJESortBy = function(key){
   const s = window.__inlineJESort;
   if(!s || s.key !== key)      window.__inlineJESort = { key, dir:'asc' };
   else if(s.dir === 'asc')     window.__inlineJESort = { key, dir:'desc' };
-  else                         window.__inlineJESort = null;   // third click — engine order
+  /* Third click returns to the DEFAULT, not to null. Null meant raw emission
+     order, which for the reason above is a register whose dates jump
+     backwards partway down — a state worth being able to reach deliberately,
+     but not one to drop someone into by clicking a header twice too often. */
+  else                         window.__inlineJESort = { key:'date', dir:'asc' };
   if(typeof window.__renderInlineJETable === 'function') window.__renderInlineJETable();
 };
 
@@ -37712,10 +37808,21 @@ document.addEventListener('DOMContentLoaded', window._applyAdvancedStagesVisibil
 try { window._applyAdvancedStagesVisibility(); } catch(_){}
 
 (function(){
-  const TAB_IDS = ['builder','lifecycle','glconfig','cfconfig','pcssync','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
+  /* Every routable tab. A tab missing from this list does not fail — it
+     silently becomes stage-1, so a new screen appears to "open the Cashflow
+     page" with no error anywhere. Adding a section, a sidebar button and a
+     hidden .tab-btn is not enough on its own; the id has to be here too. */
+  const TAB_IDS = ['builder','lifecycle','glconfig','cfconfig','holcal','pcssync','stage-1','stage-2','stage-3','stage-4','stage-5','dashboard'];
 
   function switchTab(tabId){
-    if(!TAB_IDS.includes(tabId)) tabId = 'stage-1';
+    /* Unknown ids fall back rather than throw, which is right for a stale
+       deep link but hides a wiring mistake. Say so in the console: the
+       fallback is indistinguishable from a working tab otherwise. */
+    if(!TAB_IDS.includes(tabId)){
+      console.warn('[nav] unknown tab "' + tabId + '" — falling back to stage-1. ' +
+                   'If this is a real screen, add its id to TAB_IDS.');
+      tabId = 'stage-1';
+    }
     // Use 'tab-visible' for the panel visibility class so it doesn't collide with
     // the .active class that setStage() applies to the same elements for pipeline
     // status styling (blue border / shadow). Tab buttons keep .active because
@@ -41153,7 +41260,16 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             ${[
               'arrangement','commitment','utilisation','agency','other',
               // Mezz support: extended fee kinds
-              'origination','management','performance','exitFeeIrrHurdle'
+              'origination','management','performance','exitFeeIrrHurdle',
+              /* Legal fees. Added as their own kind rather than left under
+                 "other" because their IFRS 9 treatment is the one clients
+                 most often need to argue about, and "other" gives a reviewer
+                 nothing to argue from. Whether a legal fee is an incremental
+                 transaction cost that forms part of the EIR (§B5.4.1) or a
+                 period expense depends on what the invoice was actually for —
+                 a judgement the fund makes, not one PCS can infer. The
+                 default below is deliberately the expense treatment. */
+              'legal'
             ].map(x => `<option ${f.kind===x?'selected':''} value="${x}">${x}</option>`).join('')}
           </select>
           <select data-f-field="mode" data-fidx="${idx}" class="border border-gray-300 rounded px-1 py-0.5 bg-white">
@@ -41335,7 +41451,25 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
                             : fw.code === 'AASB'   ? 'AASB'
                             :                        'Standard';
               return `<div><label class="text-[10px] uppercase text-gray-600 block">${colLabel}</label>
-                <select data-f-field="ifrs" data-fidx="${idx}" class="w-full border rounded px-1 py-0.5 text-[11px] bg-white">
+                <!-- data-ext-always-editable: the one fee field that stays
+                     live on a PortF-sourced deal.
+
+                     The read-only gate exists so PCS cannot overwrite what
+                     the feed supplied. This field is not that. PortF sends
+                     the fee — its name, kind, amount and date, all facts
+                     about the loan. Whether that fee is capitalised into the
+                     EIR or recognised in the period is an ACCOUNTING POLICY
+                     JUDGEMENT the fund makes under IFRS 9 §B5.4.1, and no
+                     feed can make it for them: the same 250k legal invoice is
+                     a transaction cost on one deal and an expense on another
+                     depending on what the work was for.
+
+                     Locking it meant an external deal was stuck with
+                     whatever default the kind implied, with no way to record
+                     the judgement short of rebuilding the deal by hand. The
+                     amount, name, kind and date all stay locked. -->
+                <select data-f-field="ifrs" data-fidx="${idx}" data-ext-always-editable="1"
+                        class="w-full border rounded px-1 py-0.5 text-[11px] bg-white">
                   <option ${currentBucket==='eir'        ?'selected':''} value="${fwFees.eir.value}">${fwFees.eir.label}</option>
                   <option ${currentBucket==='overTime'   ?'selected':''} value="${fwFees.overTime.value}">${fwFees.overTime.label}</option>
                   <option ${currentBucket==='pointInTime'?'selected':''} value="${fwFees.pointInTime.value}">${fwFees.pointInTime.label}</option>
@@ -41436,6 +41570,30 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         // Linked Component / IRR-hurdle tier editor), kind reveals hurdle
         // section for exit-fee kind, frequency toggles Payment Date.
         if(fld === 'mode' || fld === 'kind' || fld === 'frequency') renderFees();
+        /* On a PortF-sourced deal, "Save to DB" is disabled by design, so the
+           ordinary persistence path does not exist for this field. Write it
+           straight through instead — one column, one row. Without this the
+           dropdown would accept the change, recompute happily, and lose it on
+           the next reload, which is a worse state than being locked. */
+        if(fld === 'ifrs' && window.B && B.deal && B.deal.source === 'external'){
+          (async () => {
+            // Synchronous resolver — no await, it returns the id or null.
+            const dealId = (typeof window.__resolveActiveDealDbId === 'function')
+              ? window.__resolveActiveDealDbId() : null;
+            if(!dealId){
+              if(typeof toast === 'function') toast('IFRS treatment changed for this session, but the deal could not be identified in the database — it will not persist.', 7000, { kind:'error' });
+              return;
+            }
+            // fee_no is 1-based in the DB; B.fees is 0-based in memory.
+            const res = await window.SB.updateFeeIFRSTreatment(dealId, idx + 1, val);
+            if(res && res.ok){
+              if(typeof toast === 'function') toast('IFRS treatment saved for "' + (f.label || 'fee') + '".', 3000, { kind:'success', id:'fee:ifrs' });
+            } else if(typeof toast === 'function'){
+              toast('Could not save the IFRS treatment: ' + ((res && res.reason) || 'unknown') +
+                    '. The change applies to this session only.', 8000, { kind:'error' });
+            }
+          })();
+        }
         recompute();
       };
     });
@@ -42498,7 +42656,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
      B.deal.maturityExtensions is an ordered array, oldest first:
        { maturityBefore, maturityAfter, agreedDate, effectiveDate,
          basis: 'option'|'negotiated'|'standstill'|'other',
-         fee, documentRef, notes }
+         notes }
 
      Three rules, and they are the whole design:
 
@@ -42531,39 +42689,86 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
   /* Re-chain every row's "from" off the previous row's "to", then push the
      endpoints onto the two date inputs. Called after any edit, add or remove,
      and after a load. Returns nothing — it writes B.deal and the DOM. */
+  /* Derive the deal's CURRENT maturity from the contractual date plus the
+     extension chain, and write it to the hidden #b-maturity that nine other
+     places read.
+
+     There is now exactly one maturity a user types — the contractual one.
+     Everything else is computed here, which removes the state the previous
+     design allowed: an extension to 2030-12-30 sitting beside a Maturity Date
+     still reading 2029-12-31, with nothing objecting because both were
+     editable and each believed itself authoritative. */
   function __mxApply(){
     const list = _mxList();
     const omIn = $b('b-original-maturity'), mIn = $b('b-maturity');
-    const driven = list.length > 0;
 
-    if(driven){
-      for(let i = 1; i < list.length; i++) list[i].maturityBefore = list[i-1].maturityAfter || '';
-      B.deal.originalMaturity = list[0].maturityBefore || '';
-      const last = list[list.length - 1].maturityAfter || '';
-      if(last) B.deal.maturity = last;
+    /* Chain each row off the previous row's end. Rows the user has added but
+       not filled in yet are normal — somebody clicks "Add extension" three
+       times and fills them top-down — so a blank row must not break the
+       chain for the rows above it. */
+    for(let i = 1; i < list.length; i++){
+      list[i].maturityBefore = list[i-1].maturityAfter || '';
     }
+
+    // Row 1's start IS the contractual maturity, when a row exists to say so.
+    if(list.length && list[0].maturityBefore){
+      B.deal.originalMaturity = list[0].maturityBefore;
+    } else if(omIn){
+      B.deal.originalMaturity = omIn.value || B.deal.originalMaturity || '';
+    }
+
+    /* Current maturity = the LAST row that actually has an end date, not the
+       last row. Three blank rows appended after a completed one used to make
+       `list[list.length-1].maturityAfter` empty, the guard skip the write, and
+       the deal keep a maturity its own history contradicted. */
+    let current = '';
+    for(let i = list.length - 1; i >= 0; i--){
+      if(list[i].maturityAfter){ current = list[i].maturityAfter; break; }
+    }
+    if(!current) current = B.deal.originalMaturity || '';
+    B.deal.maturity = current;
+
+    // Row 1's start is only editable while no row has been added.
+    const firstRowOwnsIt = list.length > 0 && !!list[0].maturityBefore;
     if(omIn){
-      if(driven) omIn.value = B.deal.originalMaturity || '';
-      omIn.readOnly = driven;
-      omIn.classList.toggle('bg-gray-100', driven);
+      if(firstRowOwnsIt) omIn.value = B.deal.originalMaturity || '';
+      omIn.readOnly = firstRowOwnsIt;
+      omIn.classList.toggle('bg-gray-100', firstRowOwnsIt);
     }
-    if(mIn){
-      if(driven && B.deal.maturity) mIn.value = B.deal.maturity;
-      mIn.readOnly = driven;
-      mIn.classList.toggle('bg-gray-100', driven);
-    }
+    if(mIn) mIn.value = current;      // hidden field — the engine reads this
+
     const omHint = $b('b-original-maturity-hint');
     if(omHint){
-      omHint.textContent = driven
+      omHint.textContent = firstRowOwnsIt
         ? 'Set by extension 1 below — edit it there.'
-        : 'Maturity before any extension. Leave blank if never extended.';
+        : 'Contractual maturity before any extension.';
+    }
+
+    /* Show the derived maturity. Removing the Maturity Date box must not mean
+       nobody can see what the deal now matures on — that would trade one
+       problem for a worse one. */
+    const cur = $b('b-mx-current');
+    if(cur){
+      const extended = current && B.deal.originalMaturity && current !== B.deal.originalMaturity;
+      cur.textContent = current ? ('Matures ' + current) : 'No maturity set';
+      cur.className = current
+        ? (extended ? 'chip amber text-[10px]' : 'chip blue text-[10px]')
+        : 'chip red text-[10px]';
+      cur.title = extended
+        ? 'Current maturity, after ' + list.filter(x => x.maturityAfter).length +
+          ' extension(s). Contractual maturity was ' + B.deal.originalMaturity + '.'
+        : 'Current maturity. No extensions recorded.';
     }
   }
   function __mxRender(){
     const host = $b('b-mx-list'); if(!host) return;
+    /* Chain and derive BEFORE building the HTML. __mxApply used to run at the
+       end, so the row it had just chained still showed the stale blank until
+       something else triggered a second render — a "From" box that filled
+       itself in one render late. */
+    __mxApply();
     const list = _mxList();
     const chip = $b('b-mx-count');
-    const ccy  = B.deal.currency || 'USD';
     if(chip){
       chip.className = list.length ? 'chip green text-[10px]' : 'chip gray text-[10px]';
       chip.textContent = list.length
@@ -42585,8 +42790,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         '<th class="left" style="width:130px">Extended to</th>' +
         '<th class="left" style="width:130px">Agreed on</th>' +
         '<th class="left" style="width:150px">Basis</th>' +
-        '<th style="width:110px">Fee (' + ccy + ')</th>' +
-        '<th class="left">Document ref</th>' +
+        /* One free-text Notes column replaces the Fee and Document ref boxes.
+           A fee entered here would have been a second place to record fees,
+           with no calculation method, no IFRS treatment and no route into the
+           accounting run — a number that looks like it books and does not.
+           Fees belong in Business Events, where those things exist. */
+        '<th class="left">Notes</th>' +
         '<th style="width:70px">Length</th>' +
         '<th style="width:32px"></th>' +
       '</tr></thead><tbody>' +
@@ -42617,11 +42826,8 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             MX_BASIS.map(b => '<option value="' + b[0] + '"' +
               ((x.basis || 'option') === b[0] ? ' selected' : '') + '>' + b[1] + '</option>').join('') +
             '</select></td>' +
-          '<td><input type="number" step="any" data-mx-f="fee" data-mx-i="' + i + '"' +
-            ' value="' + (x.fee == null ? '' : x.fee) + '" placeholder="0"' +
-            ' class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white text-right w-full"/></td>' +
-          '<td class="left"><input type="text" data-mx-f="documentRef" data-mx-i="' + i + '"' +
-            ' value="' + esc(x.documentRef) + '" placeholder="e.g. Amendment &amp; Restatement No.2"' +
+          '<td class="left"><input type="text" data-mx-f="notes" data-mx-i="' + i + '"' +
+            ' value="' + esc(x.notes) + '" placeholder="e.g. Amendment &amp; Restatement No.2 — 100k fee booked as a business event"' +
             ' class="border border-gray-300 rounded px-1 py-0.5 text-[11px] bg-white w-full"/></td>' +
           '<td class="text-[11px] ' + (days != null && days < 0 ? 'text-red-700' : 'text-gray-600') + '">' + span + '</td>' +
           '<td><button type="button" class="mat-btn outline !py-0.5 !px-1.5 text-[10px]" data-mx-del="' + i + '"' +
@@ -42631,7 +42837,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       '</tbody></table>' +
       '<div class="text-[10px] text-gray-500 mt-1">' +
         'Rows chain: each extension starts where the previous one ended. The last ' +
-        '&ldquo;Extended to&rdquo; is the deal&rsquo;s current Maturity Date. ' +
+        '&ldquo;Extended to&rdquo; IS the deal&rsquo;s maturity — there is no separate ' +
+        'Maturity Date field to keep in step. Record any extension fee as a ' +
+        '<strong>business event</strong>, where it gets a calculation method and an ' +
+        'IFRS treatment; a figure typed here would book nothing. ' +
         '<strong>Renegotiated</strong> and <strong>standstill</strong> legs are IFRS 9 ' +
         'modifications — record them in Modification Events too, so the gain/loss is booked. ' +
         'An exercised <strong>option</strong> is not.' +
@@ -42648,9 +42857,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         const i = parseInt(el.getAttribute('data-mx-i'), 10);
         const f = el.getAttribute('data-mx-f');
         const row = _mxList()[i]; if(!row) return;
-        row[f] = (f === 'fee')
-          ? (el.value === '' ? null : (parseFloat(el.value) || 0))
-          : el.value;
+        // Every field on this row is now text or a date — the numeric fee
+        // column is gone, so there is nothing left to parse.
+        row[f] = el.value;
         /* Only the two dates change anything outside their own cell — they
            re-chain the next row's start and move the deal's maturity. Fee,
            basis and document ref do not, so leave the table standing rather
@@ -42707,28 +42916,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
        whatever happens to be sitting in a read-only box. */
     __mxApply();
 
-    /* Show the extension on the Maturity field itself rather than making
-       someone compare two date boxes. Only when the two actually differ —
-       a hint that is always on screen is one nobody reads. */
-    (function(){
-      const hint = $b('b-maturity-hint');
-      if(!hint) return;
-      const om = B.deal.originalMaturity, m = B.deal.maturity;
-      if(om && m && om !== m){
-        const days = Math.round((new Date(m) - new Date(om)) / 86400000);
-        const yrs  = Math.round((Math.abs(days) / 365) * 10) / 10;
-        const dir  = days > 0 ? 'Extended' : 'Shortened';
-        const span = yrs >= 1
-          ? yrs + (yrs === 1 ? ' year' : ' years')
-          : Math.abs(days) + (Math.abs(days) === 1 ? ' day' : ' days');
-        hint.textContent = dir + ' from ' + om + ' — ' + span;
-        hint.className = 'text-[10px] mt-1 ' + (days > 0 ? 'text-amber-700' : 'text-red-700');
-        hint.classList.remove('hidden');
-      } else {
-        hint.textContent = '';
-        hint.classList.add('hidden');
-      }
-    })();
+    /* The #b-maturity-hint block that used to live here is gone with the
+       Maturity Date box it annotated. The "Matures …" chip above the
+       extension table says the same thing in one place, and __mxApply paints
+       it. Left as a comment rather than dead code guarded by a null check:
+       a block that silently does nothing is the harder thing to notice. */
 
     // Signing after settlement is almost always a mistyped year, and it would
     // pass silently — nothing computes on signing date, so nothing else would
@@ -42879,6 +43071,173 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     });
   }
 
+  /* ─── Accretion and ECL derivations for the row-detail panel ─────────────
+     Interest accrual is a sum of per-component accruals, so listing the
+     components explains it. Accretion and the ECL allowance are not sums of
+     anything visible — they are formulas over inputs that live elsewhere on
+     the deal, which is exactly why opening a row told you nothing about them.
+
+     Both panels render ONLY from values the engine put on the row. Nothing
+     here recalculates: a second implementation would drift from the first,
+     and the explanation would go on describing the old formula after the
+     engine changed. Where an input is missing the panel says so rather than
+     showing a plausible number. */
+  function _accretionPanel(r){
+    const t = r.accretionTrace;
+    if(!t) return '';
+    const sign = v => (v < 0 ? '(' + fmtCcy(Math.abs(v)) + ')' : fmtCcy(v));
+    const yieldCell = (t.effectiveYield != null)
+      ? (t.effectiveYield * 100).toFixed(4) + '%'
+      : '<span class="text-gray-500 italic">no effective yield in force</span>';
+    /* The identity, stated as the engine computes it:
+         effective income = carrying amount x EIR x day-count
+         accretion        = effective income − cash accrued
+       Showing both lines matters because the question behind this panel is
+       almost always "why is income not the coupon". */
+    return `
+      <div>
+        <div class="font-bold text-[11px] mb-1 text-teal-900">Accretion · how this period's ${sign(t.accretion)} was derived</div>
+        <table class="w-full text-[10px]">
+          <tbody>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">Gross carrying amount, opening</td>
+              <td class="px-2 py-1 text-right font-mono">${t.openingCarrying == null ? '—' : fmtCcy(t.openingCarrying)}</td>
+            </tr>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">x Effective interest rate (EIR)</td>
+              <td class="px-2 py-1 text-right font-mono">${yieldCell}</td>
+            </tr>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">= Effective interest income for the period</td>
+              <td class="px-2 py-1 text-right font-mono font-semibold">${fmtCcy(t.effectiveIncome)}</td>
+            </tr>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">− Cash interest accrued at the coupon rate</td>
+              <td class="px-2 py-1 text-right font-mono">${fmtCcy(t.cashAccrued)}</td>
+            </tr>
+            <tr class="border-t-2 border-teal-700 bg-teal-50">
+              <td class="px-2 py-1 font-bold">= Accretion</td>
+              <td class="px-2 py-1 text-right font-mono font-bold text-teal-800">${sign(t.accretion)}</td>
+            </tr>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">Gross carrying amount, closing</td>
+              <td class="px-2 py-1 text-right font-mono">${fmtCcy(t.closingCarrying)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="text-[9px] text-gray-500 mt-1">
+          Accretion is the part of interest income the coupon does not explain — the pull of the
+          carrying amount towards what is expected to be collected. Negative means a premium
+          amortising down rather than a discount accreting up.
+          ${t.principalMoved ? '<br/><span class="text-amber-700 font-semibold">Principal moved in this period, so opening + accretion will not equal closing — a drawdown or repayment also moved the carrying amount.</span>' : ''}
+          ${t.effectiveYield == null ? '<br/><span class="text-amber-700">No effective yield was in force, so this period accreted on the straight-line or deferred-fee path instead.</span>' : ''}
+        </div>
+      </div>`;
+  }
+
+  function _eclPanel(r){
+    const t = r.eclTrace;
+    const level = (r.eclAllowance != null) ? +r.eclAllowance : null;
+    const neg = v => (v < 0 ? '(' + fmtCcy(Math.abs(v)) + ')' : fmtCcy(v));
+    if(!t){
+      // Distinguish "no allowance because none was computed" from "zero".
+      if(level == null || Math.abs(level) < 0.005) return '';
+      return `
+      <div>
+        <div class="font-bold text-[11px] mb-1 text-rose-900">ECL allowance</div>
+        <div class="text-[10px] text-gray-600 px-2 py-2 bg-gray-50 rounded">
+          Allowance on the balance sheet: <b>${neg(level)}</b>. No calculation trace is attached to this
+          period — the figure came from a restored run or an event-driven movement (write-off, cure,
+          release) rather than from the daily PD x LGD model.
+        </div>
+      </div>`;
+    }
+    const mv = r.eclMovement;
+    const movementRow = (mv == null) ? '' : `
+      <tr class="border-t border-gray-200">
+        <td class="px-2 py-1">Movement this period ${mv < 0 ? '(release — credit to P&amp;L)' : '(charge to P&amp;L)'}</td>
+        <td class="px-2 py-1 text-right font-mono ${mv < 0 ? 'text-emerald-700' : 'text-rose-700'}">${neg(mv)}</td>
+      </tr>`;
+
+    if(t.basis === 'poci'){
+      /* POCI has no stages and no PD x LGD. The allowance IS the movement in
+         expectations since acquisition — negative is a gain, and that is not
+         an error, so the panel says it in words. */
+      return `
+      <div>
+        <div class="font-bold text-[11px] mb-1 text-rose-900">ECL allowance · POCI (IFRS 9 §5.5.13–14)</div>
+        <table class="w-full text-[10px]">
+          <tbody>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">Lifetime ECL expected at acquisition</td>
+              <td class="px-2 py-1 text-right font-mono">${fmtCcy(t.lifetimeECLAtAcquisition)}</td>
+            </tr>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">Lifetime ECL expected now${t.revisionsApplied ? ' (' + t.revisionsApplied + ' revision' + (t.revisionsApplied === 1 ? '' : 's') + ' applied)' : ' (no revisions)'}</td>
+              <td class="px-2 py-1 text-right font-mono">${fmtCcy(t.currentExpected)}</td>
+            </tr>
+            <tr class="border-t-2 border-rose-700 bg-rose-50">
+              <td class="px-2 py-1 font-bold">= Allowance carried (cumulative change since acquisition)</td>
+              <td class="px-2 py-1 text-right font-mono font-bold">${neg(t.target)}</td>
+            </tr>
+            ${movementRow}
+          </tbody>
+        </table>
+        <div class="text-[9px] text-gray-500 mt-1">
+          A POCI asset carries <b>no day-one allowance</b> — the expected losses are already in the price paid.
+          What is carried here is the change in expectations since acquisition. A <b>negative</b> figure is an
+          impairment <b>gain</b>, recognised even where it takes the allowance below nil (§5.5.14).
+          POCI assets sit outside the Stage 1/2/3 model entirely.
+        </div>
+      </div>`;
+    }
+
+    const pct = v => (v * 100).toFixed(4) + '%';
+    return `
+      <div>
+        <div class="font-bold text-[11px] mb-1 text-rose-900">ECL allowance · Stage ${t.stage} (IFRS 9 §5.5)</div>
+        <table class="w-full text-[10px]">
+          <tbody>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">Exposure (outstanding balance)</td>
+              <td class="px-2 py-1 text-right font-mono">${fmtCcy(t.balance)}</td>
+            </tr>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">x Probability of default — annual</td>
+              <td class="px-2 py-1 text-right font-mono">${pct(t.pdAnnual)}</td>
+            </tr>
+            ${t.stage === 1 ? '' : `
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">x Years remaining to maturity</td>
+              <td class="px-2 py-1 text-right font-mono">${t.yearsRemaining.toFixed(4)}</td>
+            </tr>
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">= Lifetime PD${t.pdCapped ? ' <span class="text-amber-700">(capped at 100%)</span>' : ''}</td>
+              <td class="px-2 py-1 text-right font-mono">${pct(t.lifetimePD)}</td>
+            </tr>`}
+            <tr class="border-t border-gray-200">
+              <td class="px-2 py-1">x Loss given default</td>
+              <td class="px-2 py-1 text-right font-mono">${pct(t.lgd)}</td>
+            </tr>
+            <tr class="border-t-2 border-rose-700 bg-rose-50">
+              <td class="px-2 py-1 font-bold">= Target allowance${t.capped ? ' <span class="text-amber-700 font-normal">(capped at the outstanding balance)</span>' : ''}</td>
+              <td class="px-2 py-1 text-right font-mono font-bold">${neg(t.target)}</td>
+            </tr>
+            ${movementRow}
+          </tbody>
+        </table>
+        <div class="text-[9px] text-gray-500 mt-1 font-mono">${escapeHtml(t.formula)}</div>
+        <div class="text-[9px] text-gray-500 mt-1">
+          ${t.stage === 1
+            ? 'Stage 1 — 12-month ECL: only defaults expected within the next twelve months are provided for.'
+            : t.stage === 2
+              ? 'Stage 2 — lifetime ECL following a significant increase in credit risk. The measurement runs over the remaining life, not twelve months.'
+              : 'Stage 3 — credit-impaired. The measurement is the same lifetime ECL as Stage 2; what changes at Stage 3 is that interest is recognised on the NET carrying amount (§5.4.1(b)), handled separately from this panel.'}
+          ${t.stageEscalatedByCovenant ? '<br/><span class="text-amber-700 font-semibold">Stage escalated automatically to 2 by a covenant breach (§B5.5.17(k)) — the deal\'s own setting is Stage 1.</span>' : ''}
+        </div>
+      </div>`;
+  }
+
   function renderRowDetail(r){
     const intRows = r.interestBreakdown.map((ic, ii) => `
       <tr class="border-t border-gray-200">
@@ -42956,6 +43315,17 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
             </table>
           </div>
         </div>
+        ${(() => {
+          /* The two derived figures, side by side beneath the sums. Rendered
+             only where the engine attached a trace — on the Loan Builder's own
+             preview table the rows are unenriched and there is nothing to
+             show, and an empty panel claiming to explain a number is worse
+             than no panel. */
+          const acc = _accretionPanel(r);
+          const ecl = _eclPanel(r);
+          if(!acc && !ecl) return '';
+          return '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' + acc + ecl + '</div>';
+        })()}
       </div>`;
   }
 
@@ -46638,6 +47008,9 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
        match, which makes that row's accretion its full life-to-date amount —
        correct, since nothing accreted before inception. */
     let prevCumAmort = null;
+    // Previous period's allowance level, so the panel can show the MOVEMENT
+    // (what hit P&L this period) next to the balance-sheet level.
+    let prevECL = null;
     // ─── Interest paid — asserted, never derived ──────────────────────
     // This column used to be set equal to the period's accrual, which made
     // every period look settled and, at daily granularity, showed interest
@@ -46714,7 +47087,14 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
              the same figure the Discount Accretion / Premium Amortization
              journals are split from, so the column and the GL cannot drift.
              Observed on this day like everything else in this row. */
-          cumAmort: +s.cumAmort || 0
+          cumAmort: +s.cumAmort || 0,
+          /* The inputs behind the two derived columns, for the row-detail
+             panel. Carried from the engine rather than recomputed here: a
+             second implementation of either formula would drift from the
+             first and the screen would keep explaining the old one. */
+          eirYieldUsed: (s.eirYieldUsed != null ? +s.eirYieldUsed : null),
+          eclTrace:     s.eclTrace || null,
+          eclAllowanceAt: +s.eclAllowance || 0
         });
       }
       return m;
@@ -46769,9 +47149,32 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         : (prevCumAmort == null ? cvAt.cumAmort : cvAt.cumAmort - prevCumAmort);
       if(cvAt) prevCumAmort = cvAt.cumAmort;
 
+      /* Everything the row-detail panel needs to SHOW the two derivations.
+         Opening carrying amount is the closing one less what accreted — on a
+         period with no principal movement that is exact, and where principal
+         did move the panel says so rather than quietly presenting a figure
+         that will not tie. */
+      const eclTraceHere = cvAt ? cvAt.eclTrace : null;
+      const _eclMove = (cvAt && prevECL != null) ? (cvAt.ecl - prevECL) : null;
+      if(cvAt) prevECL = cvAt.ecl;
+      const _openCV = (cvAt && accretionThisPeriod != null)
+        ? (cvAt.cv - accretionThisPeriod) : null;
+      const accretionTrace = (cvAt == null || accretionThisPeriod == null) ? null : {
+        openingCarrying: _openCV,
+        closingCarrying: cvAt.cv,
+        effectiveYield:  cvAt.eirYieldUsed,
+        effectiveIncome: (+r.interest || 0) + accretionThisPeriod,
+        cashAccrued:     (+r.interest || 0),
+        accretion:       accretionThisPeriod,
+        principalMoved:  ((+r.drawdowns || 0) > 0.005 || (+r.repayments || 0) > 0.005)
+      };
+
       return Object.assign({}, r, {
         accretion:       accretionThisPeriod,
         accretionToDate: accretedToDate,
+        accretionTrace,
+        eclTrace:        eclTraceHere,
+        eclMovement:     _eclMove,
         commitmentToDate: facilityCommitment,
         drawdownToDate:   cumDraw,
         undrawnBalance:   Math.max(0, facilityCommitment - cumDraw),
@@ -47535,8 +47938,7 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         ? (list[list.length - 1].maturityAfter || '')
         : (B.deal.originalMaturity || B.deal.maturity || '');
       list.push({ maturityBefore: from, maturityAfter: '', agreedDate: '',
-                  effectiveDate: '', basis: 'option', fee: null,
-                  documentRef: '', notes: '' });
+                  effectiveDate: '', basis: 'option', notes: '' });
       __mxRender();
       recompute();
     });
@@ -47761,6 +48163,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     }
     return null;
   }
+  /* Exposed because the fee card lives in a different IIFE and needs the same
+     answer. One resolver, four fallbacks, in one place — two copies of this
+     would disagree about which deal is active, and the one that disagreed
+     would be the one writing to the database. */
+  window.__resolveActiveDealDbId = _resolveActiveDealDbId;
 
   // Cache the user + team lookups so we can render the dropdowns quickly
   // and enrich the assignment list with real names (rather than sliced UUIDs).
@@ -53108,12 +53515,16 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
     },
     fee: {
       title: 'Add fee',
-      hint: 'Arrangement, commitment, utilisation, performance, or exit fee.',
+      hint: 'Arrangement, commitment, utilisation, legal, performance, or exit fee.',
       icon: 'ti-receipt',
       fields: [
         { name:'label', label:'Fee name', type:'text', required:true, placeholder:'e.g. Arrangement fee' },
+        // Kept in step with the fee-card list in feeCardHTML and the fee_kind
+        // enum in Postgres. Three places, one vocabulary — a kind offered here
+        // but missing from the enum fails on save, which reads as a broken
+        // form rather than a missing migration.
         { name:'kind',  label:'Kind', type:'select', required:true, options: () => [
-          'arrangement','commitment','utilisation','agency','origination','management','performance','exitFeeIrrHurdle','other'
+          'arrangement','commitment','utilisation','agency','origination','management','performance','exitFeeIrrHurdle','legal','other'
         ].map(x => ({ value:x, label:x })), default: () => 'arrangement' },
         { name:'mode',  label:'Mode', type:'select', required:true, options: () => [
           { value:'fixPct',        label:'Fix % over base' },

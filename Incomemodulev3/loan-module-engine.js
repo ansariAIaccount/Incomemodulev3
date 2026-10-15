@@ -2793,6 +2793,13 @@ function lookupMarginBps(dateISO){
     //   Stage 3: lifetime ECL on net carrying (= gross - existing allowance)
     // Daily change = target - allowance (positive grows allowance, negative reverses).
     let dailyECLChange = 0;
+    /* The inputs that produced today's allowance, carried on the row so the
+       Cashflow row-detail panel can SHOW the derivation rather than
+       reconstruct it. Reconstructing it in the UI means two implementations
+       of one formula, and the screen would go on explaining the old one long
+       after this block changed — which is precisely how the Stage 3 ratchet
+       survived as long as it did. Null when no ECL was computed today. */
+    let eclTrace = null;
     /* ─── POCI — IFRS 9 §5.5.13 / §5.5.14 ──────────────────────────────────
        A purchased or originated credit-impaired asset is measured differently
        from everything else, and the differences are absolute rather than
@@ -2828,6 +2835,15 @@ function lookupMarginBps(dateISO){
         }
         // Allowance = cumulative change since acquisition. Negative is a gain.
         const targetAllowance = currentExpected - baseECL;
+        eclTrace = {
+          basis: 'poci',
+          lifetimeECLAtAcquisition: baseECL,
+          currentExpected,
+          revisionsApplied: revisions.filter(rv => rv && rv.date && rv.date <= todayISO).length,
+          target: targetAllowance,
+          formula: 'allowance = expected lifetime ECL now (' + Math.round(currentExpected).toLocaleString('en-GB') +
+                   ') − expected at acquisition (' + Math.round(baseECL).toLocaleString('en-GB') + ')'
+        };
         dailyECLChange = targetAllowance - eclAllowance;
         eclAllowance += dailyECLChange;
         cumECLChange += dailyECLChange;
@@ -2861,6 +2877,24 @@ function lookupMarginBps(dateISO){
       if(pdAnn > 0 && lgd > 0 && balance > 0){
         const yrsRemaining = Math.max(0, (maturity - d) / (365 * ONE_DAY));
         let lifetimePD = Math.min(1, pdAnn * yrsRemaining);
+        /* Built here, from the same locals the calculation uses, so the trace
+           cannot describe a formula the code did not run. `capped` records
+           whether the Stage 3 clamp bound — without it, a figure sitting at
+           exactly the balance looks like a coincidence rather than a limit. */
+        eclTrace = {
+          basis: 'staged',
+          stage,
+          stageEscalatedByCovenant: (covenantSICRActive && (instr.ifrs.ecLStage || 1) < 2),
+          balance,
+          pdAnnual: pdAnn,
+          lgd,
+          yearsRemaining: yrsRemaining,
+          lifetimePD,
+          pdCapped: (pdAnn * yrsRemaining) > 1,
+          capped: false,
+          target: 0,
+          formula: ''
+        };
         if(stage === 1){
           targetECL = balance * pdAnn * lgd;
         } else if(stage === 2){
@@ -2881,7 +2915,15 @@ function lookupMarginBps(dateISO){
              answer at all — the clamp decided it. */
           targetECL = balance * lifetimePD * lgd;
           // Never provide for more than is outstanding.
+          const uncapped = targetECL;
           targetECL = Math.min(balance, targetECL);
+          if(eclTrace) eclTrace.capped = (targetECL < uncapped - 0.005);
+        }
+        if(eclTrace){
+          eclTrace.target = targetECL;
+          eclTrace.formula = (stage === 1)
+            ? 'balance x PD(12m) x LGD'
+            : 'balance x lifetime PD x LGD' + (eclTrace.capped ? ', capped at the outstanding balance' : '');
         }
       }
       /* Move toward the target, including when the target is nil. Guarded on
@@ -3280,6 +3322,7 @@ function lookupMarginBps(dateISO){
       // ECL provisioning (IFRS 9 §5.5)
       dailyECLChange,
       eclAllowance,
+      eclTrace,
       cumECLChange,
       // Modification accounting (IFRS 9 §5.4.3)
       dailyModGain,
