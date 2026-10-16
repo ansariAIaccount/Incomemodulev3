@@ -1,6 +1,12 @@
 # PCS Loan Module — Developer Handover
 
-**V4.65 · 12 October 2026**
+**V4.67 · 16 October 2026**
+
+> **Start at [INDEX.md](INDEX.md)** if you want to be routed to the right
+> document. This one is the overview. Three companions go deeper:
+> **[ENGINE-GUIDE.md](ENGINE-GUIDE.md)** (the calculations),
+> **[FRONTEND-GUIDE.md](FRONTEND-GUIDE.md)** (the 3.2 MB builder file),
+> **[TESTING.md](TESTING.md)** (the 50-case harness that already exists).
 
 A private-credit loan accounting sub-ledger. It takes loan terms and cashflows — built in the module or imported from a servicing system — applies IFRS 9 (and US GAAP CECL, Canadian ASPE, AASB), and produces balanced journal entries for FIS Investran.
 
@@ -10,7 +16,9 @@ A private-credit loan accounting sub-ledger. It takes loan terms and cashflows �
 
 Three things a developer needs to know before touching anything.
 
-**The application is eight files.** There is no build step, no bundler, no framework. The browser loads nine files from our own origin and nothing else. If you are looking for a `src/` directory and a `package.json` for the front end, there isn't one — that is a deliberate property of the thing, not an omission.
+**The application is nine files.** There is no build step, no bundler, no framework. The browser loads those nine from our own origin, plus three CDN libraries (Tailwind, SheetJS, jsPDF). If you are looking for a `src/` directory and a `package.json` for the front end, there isn't one — that is a deliberate property of the thing, not an omission.
+
+**There is a test harness, and it passes.** 50 cases across two files in `tests/`. Nothing advertises it — no `npm test`, no mention in the README — so it is routinely missed. `node tests/engine-harness.js && node tests/regression-harness.js`. See TESTING.md.
 
 **There are credentials in the working repo that must be rotated.** See §9. Do this before anything else.
 
@@ -123,9 +131,11 @@ For your own environment, change `DEFAULT_URL` and `DEFAULT_ANON` in the HTML, o
 
 ## 5 · The database
 
-**PostgreSQL 17 · 77 tables · 227 RLS policies · 57 enum types · 101 migrations.**
+**PostgreSQL 17 · 80 tables · 7 views · 57 enum types · 112 migrations · 236 RLS policies · 28 functions · 24 triggers · 244 indexes · 139 foreign keys.**
 
-Row-level security is enabled on **all 77 tables**. Three tables were missing it as of 12 October and were corrected — if you fork from an earlier snapshot, check `pg_tables.rowsecurity` before exposing the anon key anywhere.
+Row-level security is enabled on **all 80 tables**. Three tables were missing it as of 12 October and were corrected — if you fork from an earlier snapshot, check `pg_tables.rowsecurity` before exposing the anon key anywhere.
+
+Added since 12 October: `maturity_extensions` (the ordered extension history behind a deal's maturity), `holiday_calendars` + `holiday_dates` (business-day calendars, moved out of engine code). One type change worth knowing: `facilities.holiday_calendar` **was an enum and is now text with a foreign key** onto `holiday_calendars(code)`, so adding a jurisdiction no longer needs a migration.
 
 Access control model:
 - `is_admin()` — admin override
@@ -136,7 +146,15 @@ Some early policies grant `{anon, authenticated}` with `using (true)` — a hang
 
 ### Getting a database
 
-The authoritative route is the Supabase CLI against the existing project:
+**If you need to stand this up on your own PostgreSQL, use `db/`** — see
+[`../../db/README.md`](../../db/README.md). It contains a generator that reads
+the catalog and emits portable DDL, a seed generator for the eleven reference
+tables, and an auth shim that replaces `auth.users` / `auth.uid()` with a
+local equivalent. That last part is not optional: **73 foreign keys point at
+`auth.users` and 34 RLS policies call `auth.uid()`**, so a plain `pg_dump`
+will not restore onto vanilla Postgres without it.
+
+The authoritative route, if you have Supabase project credentials, is the CLI:
 
 ```bash
 supabase link --project-ref prljhhyfgzipjnfpztfu
@@ -146,11 +164,11 @@ supabase db dump --schema public --data-only > seed.sql # reference data
 
 Use the CLI rather than a hand-assembled script. It captures functions, triggers, grants, sequences and extensions — the things a reconstructed `CREATE TABLE` dump silently omits, producing a file that looks complete and does not rebuild.
 
-`SCHEMA-REFERENCE.md` accompanies this document: all 57 enums, every table with column and policy counts and current row counts, and the full migration history. It is a **reference for understanding the model**, not a rebuild script.
+`SCHEMA-REFERENCE.md` accompanies this document: all 57 enums, every table with column and policy counts and current row counts, and the full migration history. It is a **reference for understanding the model**, not a rebuild script — for that see **`db/`** (§5a).
 
 ### What is reference data and what is demo data
 
-Reference data to keep: `accounting_frameworks`, `gl_accounts`, `gl_business_events`, `gl_event_mappings`, `gl_frameworks`, `gl_transtype_mappings`, `cashflow_column_config`, `preset_catalog`.
+Reference data to keep: `accounting_frameworks`, `gl_accounts`, `gl_business_events`, `gl_event_mappings`, `gl_frameworks`, `gl_transtype_mappings`, `cashflow_column_config`, `preset_catalog`, **`holiday_calendars` + `holiday_dates`** (611 seeded dates, 2024–2035, six jurisdictions).
 
 Demo data to drop for a clean environment: `deals` and everything hanging off it, `accounting_runs`, `journal_entries` (18,477 rows), `cashflow_schedules` (222,072 rows), `external_*`, `loan_notices` (2,921 rows).
 
@@ -267,6 +285,23 @@ Carried forward honestly. None blocks the demo; several would block production.
 
 #1 (unhelpful SOFR timeout message), #16, #18, #39.
 
+**None of the above were fixed between 12 and 16 October.** The work in that
+window added capability rather than closing these. #71 in particular now has
+two more deals exposing it (`DEMO-POCI-MID`, `DEMO-POCI-PAR`), which makes it
+easier to reproduce and more likely to be noticed in a demo.
+
+### Behavioural change to be aware of
+
+`auFederal` was offered in the holiday-calendar dropdown and **did not exist in
+the engine**, so seven Australian deals rolled against a calendar of no
+holidays and looked entirely normal doing it. They were repointed at the real
+Australian calendar on 14 October, which **changes their payment dates**. If
+you are comparing output against anything produced before that date, these
+seven will differ by design:
+
+`BRJ_RE_MEZZ_MRXI1YQP` · `FIRSTAG_MS3JS9F0` · `MDM-2023-AU02` ·
+`NBP-2022-AU01` · `PIL-2026-AU01` · `RAC-2020-AU03` · `TRN-2023-AU04`
+
 ### The pattern worth knowing
 
 Most defects found in this codebase share one shape: **a value that is read, stored, displayed, and never consulted.** A fee frequency parsed and ignored. A GL mapping screen nothing read. Rate conventions discarded and replaced by zero. A `?v=` tag that stopped matching its version. When something behaves oddly, check whether the value reaching the calculation is the one on screen — that has been the answer more often than any other.
@@ -278,6 +313,30 @@ Most defects found in this codebase share one shape: **a value that is read, sto
 1. Rotate credentials (§9).
 2. `./package-for-handover.sh ~/handover` and read what comes out.
 3. Serve `app/` on any static host; open `loan-module-v4-builder.html`.
+4. `node tests/engine-harness.js && node tests/regression-harness.js` — confirm 50/50 before you change anything, so you have a baseline.
+5. Read **ENGINE-GUIDE.md** before touching a calculation and **FRONTEND-GUIDE.md** before touching the UI. Both exist to save you the specific day each of their three traps costs.
+
+---
+
+## 13 · Workspace configuration
+
+Three screens let an operator change behaviour without a deploy. They matter
+for handover because a developer looking for these values **in code will not
+find them**.
+
+| Screen | Table | Controls |
+|---|---|---|
+| General ledger mapping | `gl_business_events`, `gl_event_mappings` | the DR/CR account per business event per framework, and a **Post** switch that stops PCS emitting an event's journal at all |
+| Cashflow configuration | `cashflow_column_config` | which business events compose each cashflow column |
+| Holiday calendars | `holiday_calendars`, `holiday_dates` | business-day calendars; six seeded 2024–2035 |
+
+The **Post** switch deserves a note. NWF settle interest cash inside Investran,
+so PCS posting Interest Receipt as well double-counts the receipt. Unticking
+Post drops *both legs* of that event from the accounting run and the DIU batch,
+with a guard that refuses any suppression that would unbalance the batch. The
+accrual is untouched — which means the receivable is still raised and must be
+cleared by whichever system books the cash. If it is not, account 113000 grows
+indefinitely.
 4. Point it at your own database via the gear icon, or edit the defaults.
 5. Load a demo deal, run accounting, inspect the journals. That exercises the whole path.
 6. Read `docs/PortF-feed-contract-v0.3.md` — the external feed is the main unbuilt piece.

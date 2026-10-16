@@ -1,7 +1,18 @@
 # PCS Loan Module — Database Schema Reference
 
-**Read from the live database, 12 October 2026.**
-PostgreSQL 17 · 77 tables · 227 RLS policies · 57 enum types · 101 migrations.
+**Read from the live database, 16 October 2026.**
+PostgreSQL 17 · 80 tables · 7 views · 236 RLS policies · **57 enum types** · 112 migrations
+· 28 functions · 24 triggers · 244 indexes · 139 foreign keys · 49 check constraints.
+
+> **Changed since the 12 October reading.** Three tables added —
+> `maturity_extensions`, `holiday_calendars`, `holiday_dates`. Six columns
+> added — `deals.workday_investment_id`, `gl_event_mappings.is_suppressed`,
+> `treatment_overrides.stage1/2/3_start_date`, plus the extension table's own.
+> One enum gained a value (`fee_kind` → `legal`) and **one enum was retired**:
+> `facilities.holiday_calendar` is now `text` with a foreign key onto
+> `holiday_calendars(code)`. The table inventory and enum list below have been
+> spot-corrected; the per-table row counts are from 12 October and will have
+> drifted.
 
 > **This is a reference, not a rebuild script.** To recreate the database use the
 > Supabase CLI, which captures functions, triggers, grants, sequences and
@@ -114,7 +125,7 @@ user_teams                            4    4        3   access control
 
 ## Access control
 
-Row-level security on **all 77 tables**, enforced through three helpers:
+Row-level security on **all 80 tables**, enforced through three helpers:
 
 | Helper | Grants |
 |---|---|
@@ -180,14 +191,19 @@ create type public.extraction_type as enum ('notice', 'credit_agreement', 'borro
 create type public.facility_type as enum ('termLoan', 'revolver', 'delayedDraw', 'bridgeLoan', 'revolvingBorrowingBase');
 create type public.fee_base_kind as enum ('commitment', 'funded', 'unfunded', 'tranche-face');
 create type public.fee_frequency as enum ('oneOff', 'monthly', 'quarterly', 'semi', 'annual');
-create type public.fee_kind as enum ('arrangement', 'commitment', 'utilisation', 'agency', 'other', 'exitFeeIrrHurdle', 'origination', 'management', 'performance');
+create type public.fee_kind as enum ('arrangement', 'commitment', 'utilisation', 'agency', 'other', 'exitFeeIrrHurdle', 'origination', 'management', 'performance', 'legal');
 create type public.fee_mode as enum ('fixPct', 'fixAmount', 'floatBps', 'overFunded', 'overUnfunded', 'overInterestComponent', 'irrHurdleTiers', 'cashCoupon', 'undrawnRamp');
 create type public.financial_period_type as enum ('monthly', 'quarterly', 'semi_annual', 'annual', 'ttm', 'ytd', 'custom');
 create type public.franking_treatment_kind as enum ('none', 'fullyFranked', 'partiallyFranked', 'unfranked');
 create type public.fund_domicile as enum ('US', 'EU', 'UK', 'AU', 'Cayman', 'Luxembourg', 'Ireland', 'Other');
 create type public.gst_treatment_kind as enum ('financialSupply', 'taxable', 'gstFree', 'mixed');
 create type public.hedge_designation_type as enum ('cfh', 'fvh', 'fx_hedge', 'none');
-create type public.holiday_calendar as enum ('none', 'usFederal', 'ukBank', 'target', 'auFederal');
+-- RETIRED 14 October 2026. The type still exists but nothing uses it:
+-- facilities.holiday_calendar is now text with a foreign key onto
+-- holiday_calendars(code), so adding a jurisdiction is a row rather than a
+-- migration. Note 'auFederal' never existed in the engine — deals carrying it
+-- rolled against no holidays at all, and were repointed at 'auNational'.
+-- create type public.holiday_calendar as enum ('none', 'usFederal', 'ukBank', 'target', 'auFederal');
 create type public.ifrs9_classification as enum ('AmortisedCost', 'FVOCI', 'FVTPL');
 create type public.je_source as enum ('engine', 'aasb-overlay-gst', 'aasb-overlay-apra', 'aasb-overlay-franking', 'participation-scaled', 'cash-leg', 'manual');
 create type public.lifecycle_event_type as enum ('loanSale', 'participation', 'debtEquitySwap', 'recovery', 'writeOff', 'cure', 'forbearance', 'capitalisedCost');
@@ -212,9 +228,34 @@ create type public.view_mode as enum ('syndication', 'participation');
 
 ---
 
-## Migration history (101)
+## Migration history (112)
 
 The schema was built incrementally. The names read as a development log.
+
+The eleven applied on 14–15 October, newest last:
+
+```
+20261014144324  add_maturity_extensions_table
+20261014144340  backfill_maturity_extensions_from_deals
+20261014153531  gl_event_mappings_add_is_suppressed
+20261014194835  deals_add_workday_investment_id
+20261014195404  holiday_calendars_config_tables
+20261014195431  holiday_dates_uniq_nulls_not_distinct
+20261014195512  seed_holiday_dates_2024_2035
+20261014200013  facilities_holiday_calendar_enum_to_fk_v2
+20261014204343  treatment_overrides_stage_start_dates
+20261014205152  create_poci_demo_deals_2_and_3_v2
+20261015184447  fee_kind_add_legal
+```
+
+Two of those are worth reading before you rely on the schema.
+`holiday_dates_uniq_nulls_not_distinct` exists because Postgres treats NULLs as
+distinct in a unique constraint by default, and every seeded row has
+`team_id IS NULL` — the original constraint would have allowed the 611 seed
+rows to be inserted any number of times, silently.
+`facilities_holiday_calendar_enum_to_fk_v2` is the type change described at the
+top of this document, and it also repoints seven deals from `auFederal` to
+`auNational`, which changes their payment dates.
 
 ```
 20260613132449  pe_income_schema
