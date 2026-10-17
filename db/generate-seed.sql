@@ -6,7 +6,7 @@
 --
 -- REFERENCE DATA, NOT DEMO DATA.
 --
--- The eleven tables below are configuration the application needs in order to
+-- The ten tables below are configuration the application needs in order to
 -- work at all. Without them the GL mapping screen is empty, every business
 -- event posts nowhere, and no payment date rolls for a holiday. A restored
 -- schema with no seed looks fine and produces wrong journals.
@@ -20,12 +20,18 @@
 -- loan-module-instruments.js and the preset catalogue — a cleaner route than
 -- copying rows, because it exercises the save path you are shipping.
 --
--- ON `created_by` AND `team_id`
+-- ON `created_by`, `updated_by` AND `team_id`
 --
--- Both are nulled below. They point at auth.users and teams rows that do not
--- exist in a fresh database, and a foreign key violation partway through a
--- seed leaves you with half the reference data and a transaction to unpick.
--- Null is honest: nobody in the new database created these.
+-- All three are nulled, by the p_null argument to pg_temp.emit. They point at
+-- auth.users and teams rows that do not exist in a fresh database, and a
+-- foreign key violation partway through a seed leaves you with half the
+-- reference data and a transaction to unpick. Null is honest: nobody in the
+-- new database created these.
+--
+-- NOT `gl_source_accounts`. It is a VIEW over journal_entries, so it has no
+-- rows of its own and cannot be inserted into. An earlier version of this
+-- file emitted it; `insert into public.gl_source_accounts` fails outright
+-- against a fresh schema, which at least fails loudly rather than quietly.
 -- ═══════════════════════════════════════════════════════════════════════
 
 \set ON_ERROR_STOP on
@@ -51,7 +57,13 @@ select '-- Reference data generated ' || now()::date
 -- and the string 'US' into `updated_at`. Postgres rejects the obviously
 -- impossible ones, which means you get a seed that half-restores and half
 -- fails — and any pair of same-typed columns swaps silently.
-create or replace function pg_temp.emit(p_table text, p_order text default '1')
+-- p_null: columns forced to NULL regardless of their stored value. These are
+-- the FKs into auth.users and teams; see the header note.
+create or replace function pg_temp.emit(
+  p_table text,
+  p_order text default '1',
+  p_null  text[] default array['created_by','updated_by','team_id','last_sync_by']
+)
 returns setof text language plpgsql as $$
 declare
   cols text;
@@ -61,10 +73,16 @@ begin
   from information_schema.columns
   where table_schema = 'public' and table_name = p_table;
 
+  if cols is null then
+    raise exception 'pg_temp.emit: public.% has no columns — is it a view, or misspelt?', p_table;
+  end if;
+
   return query execute format($f$
     select 'insert into public.%1$I (%2$s) values (' ||
            (select string_agg(
-              case when to_jsonb(t) -> c.column_name is null
+              case when c.column_name = any (%4$L::text[])
+                   then 'null'
+                   when to_jsonb(t) -> c.column_name is null
                      or jsonb_typeof(to_jsonb(t) -> c.column_name) = 'null'
                    then 'null'
                    when jsonb_typeof(to_jsonb(t) -> c.column_name) in ('number','boolean')
@@ -75,7 +93,7 @@ begin
             where c.table_schema = 'public' and c.table_name = %1$L)
            || ') on conflict do nothing;'
     from public.%1$I t order by %3$s
-  $f$, p_table, cols, p_order);
+  $f$, p_table, cols, p_order, p_null);
 end $$;
 
 select E'\n-- ═══ accounting frameworks ═══';
@@ -83,8 +101,7 @@ select pg_temp.emit('accounting_frameworks', 'code');
 
 select E'\n-- ═══ GL chart + mapping ═══';
 select pg_temp.emit('gl_frameworks', 'sort_order');
-select pg_temp.emit('gl_accounts', 'code');
-select pg_temp.emit('gl_source_accounts', '1');
+select pg_temp.emit('gl_accounts', 'account_code');
 select pg_temp.emit('gl_business_events', 'sort_order');
 select pg_temp.emit('gl_event_mappings', 'event_key, framework_code');
 select pg_temp.emit('gl_transtype_mappings', '1');
@@ -111,7 +128,6 @@ from (
   select 'accounting_frameworks' t, count(*) n from accounting_frameworks
   union all select 'gl_frameworks', count(*) from gl_frameworks
   union all select 'gl_accounts', count(*) from gl_accounts
-  union all select 'gl_source_accounts', count(*) from gl_source_accounts
   union all select 'gl_business_events', count(*) from gl_business_events
   union all select 'gl_event_mappings', count(*) from gl_event_mappings
   union all select 'gl_transtype_mappings', count(*) from gl_transtype_mappings

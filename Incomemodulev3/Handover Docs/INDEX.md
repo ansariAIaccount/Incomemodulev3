@@ -57,6 +57,8 @@ because they are not discoverable by reading the code.
 | File | What it is |
 |---|---|
 | `HANDOVER.md` | The overview. Architecture, deploy, config, security, defects, workspace configuration |
+| `HANDOVER.pdf` · `SCHEMA-REFERENCE.pdf` | The same two documents, for sending on. **Generated — never edit.** Run `./build-pdfs.sh` after changing either `.md`, or the PDF goes stale and contradicts the source. |
+| `build-pdfs.sh` · `pdf-header.tex` | Regenerate the two PDFs (pandoc + xelatex), with a layout check that fails loudly on a line running off the page |
 | `ENGINE-GUIDE.md` | `loan-module-engine.js` — the daily loop, the row contract, three structural traps, recipes |
 | `FRONTEND-GUIDE.md` | `loan-module-v4-builder.html` — state, IIFE scoping, the four-step nav registration, the read-only gate |
 | `TESTING.md` | The 50-case harness, how to add a case, what is **not** covered |

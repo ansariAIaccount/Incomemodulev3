@@ -182,6 +182,7 @@ of the affected demo deals.
 ## 6 · Recipes
 
 **Add a field to the daily row**
+
 1. Compute it in the right loop phase (order matters — §3).
 2. Add it to the row object at the push.
 3. If it is numeric and should aggregate across tranches, add it to
@@ -190,6 +191,7 @@ of the affected demo deals.
 4. Add a trace if it is derived (§4).
 
 **Add a journal entry type**
+
 1. Emit it in `generateDIU` (internal) or `generateDIUFromExternalFeed`.
 2. Route it through `applyInvestranGLMapping` — this is the step that is
    easiest to forget, and skipping it leaves clone rows carrying the template's

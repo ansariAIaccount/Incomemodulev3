@@ -1,0 +1,21 @@
+\usepackage{fontspec}
+\setmainfont{DejaVu Serif}
+\setsansfont{DejaVu Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.80]
+
+% Wrap long lines inside code blocks instead of letting them run off the page.
+% pandoc emits fancyvrb Highlighting environments; fvextra adds breaking to them.
+% breakanywhere is needed because the long lines here are SQL enum lists with no
+% spaces to break at.
+\usepackage{fvextra}
+\fvset{breaklines=true,breakanywhere=true,breaksymbolleft=\hbox{}}
+\usepackage{newunicodechar}
+\newunicodechar{✅}{\textbf{[yes]}}
+\newunicodechar{❌}{\textbf{[no]}}
+\newunicodechar{⚠}{\textbf{[!]}}
+\newunicodechar{✔}{\textbf{[yes]}}
+\newunicodechar{→}{$\rightarrow$}
+\newunicodechar{←}{$\leftarrow$}
+\newunicodechar{≥}{$\geq$}
+\newunicodechar{≤}{$\leq$}
+\newunicodechar{≈}{$\approx$}

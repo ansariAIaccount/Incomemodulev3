@@ -138,6 +138,7 @@ Row-level security is enabled on **all 80 tables**. Three tables were missing it
 Added since 12 October: `maturity_extensions` (the ordered extension history behind a deal's maturity), `holiday_calendars` + `holiday_dates` (business-day calendars, moved out of engine code). One type change worth knowing: `facilities.holiday_calendar` **was an enum and is now text with a foreign key** onto `holiday_calendars(code)`, so adding a jurisdiction no longer needs a migration.
 
 Access control model:
+
 - `is_admin()` — admin override
 - `in_team(team_id)` — team-scoped workspace configuration
 - `owns_deal(deal_id)` — per-deal access via `deal_user_assignments`
@@ -147,28 +148,53 @@ Some early policies grant `{anon, authenticated}` with `using (true)` — a hang
 ### Getting a database
 
 **If you need to stand this up on your own PostgreSQL, use `db/`** — see
-[`../../db/README.md`](../../db/README.md). It contains a generator that reads
-the catalog and emits portable DDL, a seed generator for the eleven reference
-tables, and an auth shim that replaces `auth.users` / `auth.uid()` with a
-local equivalent. That last part is not optional: **73 foreign keys point at
-`auth.users` and 34 RLS policies call `auth.uid()`**, so a plain `pg_dump`
-will not restore onto vanilla Postgres without it.
+[`../../db/README.md`](../../db/README.md). Three files, no Supabase, no
+generation step:
 
-The authoritative route, if you have Supabase project credentials, is the CLI:
+```bash
+psql "$DST" -v ON_ERROR_STOP=1 -f db/00-auth-shim.sql       # roles, auth.users, auth.uid()
+psql "$DST" -v ON_ERROR_STOP=1 -f db/schema.sql             # everything in public
+psql "$DST" -v ON_ERROR_STOP=1 -f db/seed-reference.sql     # GL mappings, calendars, …
+```
+
+`schema.sql` is complete and content-verified: 80 tables, 57 enums, 28
+functions, 139 foreign keys, 119 indexes, 7 views, 24 triggers, RLS on all 80
+tables and all 236 policies. All 80 tables are proven identical to the source
+on every column's name, type with precision, default and NOT NULL — run
+`db/verify-schema.py` to re-prove it. `seed-reference.sql` holds the ten
+reference tables, 865 rows, with its own two verifiers (`db/verify-seed.py`
+and `db/verify-presets.py`).
+
+**The auth shim is not optional.** 73 foreign keys point at `auth.users` and
+34 RLS policies call `auth.uid()`, so a plain `pg_dump` will not restore onto
+vanilla Postgres without it. Run it first or the very first FK fails and you
+are left with a partial schema.
+
+Neither file has been *restored* yet — that needs a Postgres instance, and
+`db/README.md` has the ten-minute procedure. Do that before trusting either.
+
+If you have Supabase project credentials, the CLI is worth running once to
+**diff** against `db/schema.sql` rather than instead of it:
 
 ```bash
 supabase link --project-ref prljhhyfgzipjnfpztfu
-supabase db dump --schema public       > schema.sql     # structure
-supabase db dump --schema public --data-only > seed.sql # reference data
+supabase db dump --schema public > /tmp/cli-schema.sql
 ```
 
-Use the CLI rather than a hand-assembled script. It captures functions, triggers, grants, sequences and extensions — the things a reconstructed `CREATE TABLE` dump silently omits, producing a file that looks complete and does not rebuild.
+A CLI dump also captures grants and comments, which the generators do not;
+`db/README.md` §*What the generators do not capture* lists the full gap.
 
 `SCHEMA-REFERENCE.md` accompanies this document: all 57 enums, every table with column and policy counts and current row counts, and the full migration history. It is a **reference for understanding the model**, not a rebuild script — for that see **`db/`** (§5a).
 
 ### What is reference data and what is demo data
 
-Reference data to keep: `accounting_frameworks`, `gl_accounts`, `gl_business_events`, `gl_event_mappings`, `gl_frameworks`, `gl_transtype_mappings`, `cashflow_column_config`, `preset_catalog`, **`holiday_calendars` + `holiday_dates`** (611 seeded dates, 2024–2035, six jurisdictions).
+Reference data to keep: `accounting_frameworks`, `gl_accounts`, `gl_business_events`, `gl_event_mappings`, `gl_frameworks`, `gl_transtype_mappings`, `cashflow_column_config`, `preset_catalog`, **`holiday_calendars` + `holiday_dates`** (611 seeded dates, 2024–2035, six jurisdictions). All ten are in `db/seed-reference.sql`.
+
+Two things about that data you will hit:
+
+**The calendars stop at 2035-12-26, and nine deals mature later** — latest **2063-03-01** (`SP032N`, `SPMARIJA0002`, `SPMARIJA0007`). Past the last seeded date every payment date rolls for weekends only, with **no warning**: the engine warns once per unknown calendar *code*, and these codes exist, they just have no dates in range. The derivable calendars can be extended using the `_easter_sunday` / `_nth_dow` / `_last_dow` / `_us_obs` / `_wknd_fwd` functions already in the schema.
+
+**All five `-au` presets still name the retired `auFederal`** in their `build_definition`, so they cannot be materialised — the FK onto `holiday_calendars(code)` rejects them. `materialize_preset()` separately still casts to the dropped `::holiday_calendar` enum, which breaks any preset naming `nlNational` or `luNational`. Both fixes and the standing check are in `db/README.md` §*Latent issues*.
 
 Demo data to drop for a clean environment: `deals` and everything hanging off it, `accounting_runs`, `journal_entries` (18,477 rows), `cashflow_schedules` (222,072 rows), `external_*`, `loan_notices` (2,921 rows).
 

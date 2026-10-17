@@ -72,16 +72,36 @@ end $$;
 create schema if not exists auth;
 grant usage on schema auth to anon, authenticated, service_role;
 
--- The users table. Only `id` is referenced by the 73 foreign keys — verified
--- against the source database, not assumed — so the rest of these columns are
--- for your convenience and can be changed freely.
+-- The users table.
+--
+-- Only `id` is referenced by the 73 foreign keys — verified against the source
+-- database, not assumed. But three application functions READ further columns,
+-- and they are not optional:
+--
+--   handle_new_user()  → NEW.raw_user_meta_data   (seeds user_profiles.full_name)
+--   list_all_users()   → u.raw_user_meta_data, u.deleted_at
+--   resolve_user_by_email() → u.email
+--
+-- Omit raw_user_meta_data and creating a user raises "record new has no field
+-- raw_user_meta_data" — no profile row is written, and the user then
+-- authenticates successfully and can see nothing, with nothing explaining
+-- why. Omit deleted_at and the user-list screen fails outright.
+--
+-- deleted_at also gives you soft delete, which matters here: a hard DELETE
+-- would cascade or block across 73 foreign keys.
 create table if not exists auth.users (
-  id            uuid primary key default gen_random_uuid(),
-  email         text unique,
-  display_name  text,
-  is_active     boolean not null default true,
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+  id                 uuid primary key default gen_random_uuid(),
+  email              text unique,
+  -- Supabase stores sign-up metadata here. handle_new_user() reads
+  -- ->>'full_name' and ->>'name'. Populate it when you create a user:
+  --   insert into auth.users (email, raw_user_meta_data)
+  --   values ('a@b.com', '{"full_name":"A B"}'::jsonb);
+  raw_user_meta_data jsonb not null default '{}'::jsonb,
+  deleted_at         timestamptz,
+  display_name       text,
+  is_active          boolean not null default true,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
 );
 
 comment on table auth.users is
