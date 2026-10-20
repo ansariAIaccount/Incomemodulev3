@@ -1605,7 +1605,52 @@ function buildSchedule(instr){
       for(let y = 1; y <= whole; y++) cfs.push({ t: y, amount: annualCoupon });
       const stub = yrs - whole;
       cfs.push({ t: yrs, amount: expectedPrincipal + (stub > 0 ? annualCoupon * stub : 0) });
-      const solved = solveYield(considerationPOCI, cfs);
+      const seedPOCI = solveYield(considerationPOCI, cfs);
+
+      /* The annual vector above is a SEED, not the answer. It discounts one
+         payment a year at an annual effective rate, while the schedule accrues
+         daily and simple:  carrying += (carrying×y − face×coupon) × 1/daysPerYear.
+         Two different conventions, so the seed does not make the walk land on
+         the expected recovery — and landing there is the entire purpose of a
+         credit-adjusted rate (§B5.4.7). Left unrefined it also ignores coupon
+         frequency: a quarterly payer was solved as if it paid annually in
+         arrears, which understated the rate by about 100bp on the DEMO-POCI
+         deals, while the ACT/360 daily accrual more than gave it back, so
+         carrying OVERSHOT the expected recovery by 3.05% on DEMO-POCI-MID.
+
+         So refine the seed against the real walk, exactly as the non-POCI
+         effectiveInterestPrice branch below does, and for the same reason —
+         that branch was given this treatment after it left carrying £716,697
+         short at maturity. The target here is the expected recovery rather
+         than the outstanding balance, because that is what a POCI asset
+         accretes towards. */
+      const runCarryingPOCI = (y) => {
+        let cv = considerationPOCI;
+        const horizonDaysPOCI = Math.max(1, Math.round((horizonD - settle)/ONE_DAY));
+        /* `k <= horizonDays`, not `<`. The schedule accrues on the settlement
+           date itself AND on the horizon date, so a 2026-01-01 → 2031-12-31
+           deal has 2191 accruals, not 2190. Walking one step short left the
+           carrying amount exactly one day's accretion high — 12,934.15 on
+           DEMO-POCI-MID, which is 78m×y/360 less the 100m×8%/360 coupon. The
+           non-POCI branch below uses the same inclusive bound. */
+        for(let k = 0; k <= horizonDaysPOCI; k++){
+          cv += (cv * y - face * (couponRateNominal || 0)) * (1/daysPerYear);
+        }
+        return cv - expectedPrincipal;          // root at 0 → converges exactly
+      };
+      let solved = seedPOCI;
+      if(seedPOCI != null && isFinite(seedPOCI)){
+        let y0 = seedPOCI, y1 = seedPOCI * 1.001;
+        let f0 = runCarryingPOCI(y0), f1 = runCarryingPOCI(y1);
+        for(let i = 0; i < 24 && Math.abs(f1) > 1e-4; i++){
+          if(f1 === f0) break;                  // flat secant — no further progress
+          const y2 = y1 - f1 * (y1 - y0) / (f1 - f0);
+          if(!isFinite(y2)) break;
+          y0 = y1; f0 = f1; y1 = y2; f1 = runCarryingPOCI(y1);
+        }
+        if(isFinite(y1)) solved = y1;
+      }
+
       if(solved == null || !isFinite(solved)){
         eirRefusal = 'Credit-impaired at acquisition. The credit-adjusted rate '
                    + 'did not converge on the expected cash flows supplied — check '
@@ -1624,6 +1669,10 @@ function buildSchedule(instr){
           horizon:              toISO(horizonD),
           yearsToHorizon:       yrs,
           creditAdjustedEIR:    solved,
+          /* The annual-vector seed, kept so the trace can show that the rate
+             was refined against the daily walk rather than read off an
+             annual approximation. */
+          seedFromAnnualVector: seedPOCI,
           // What the ordinary method would have produced, for contrast. The
           // gap between the two is the overstatement POCI treatment avoids.
           ordinaryEIRWouldBe:   solveYield(considerationPOCI, (function(){

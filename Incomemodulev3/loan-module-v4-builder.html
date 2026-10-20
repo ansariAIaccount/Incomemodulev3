@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 67; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 70; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -263,29 +263,46 @@
       } catch(e){ return { sha: '(' + (e.message || 'unreachable') + ')', bytes: null }; }
     };
 
-    /* Every file the browser loads from our own origin — the <script src>
-       tags, not just this page. A deploy that copies some of them leaves the
-       app looking current while behaving like an older build, because the
-       version label lives in the HTML and reads exactly as expected. */
-    const DEPLOYABLES = [
-      'loan-module-v4-builder.html',
-      'portf-excel-parser.js',
-      'loan-module-engine.js',
-      'loan-module-instruments.js',
-      'loan-module-analytics.js',
-      'demo-assistant-kb.js',
-      'demo-assistant-system-prompt.js'
-    ];
-
     /* build-manifest.json is written at commit time and carries the sha of
        each file as it was committed. Comparing against it turns "one of these
        is stale" into "THIS file is stale" without anyone holding a reference
-       copy to diff against. */
+       copy to diff against. Fetched FIRST, because the list of files to check
+       comes out of it — see below. */
     let manifest = null;
     try {
       manifest = await fetch(dir + 'build-manifest.json?v=' + Date.now(), { cache:'no-store' })
                         .then(r => r.ok ? r.json() : null);
     } catch(_){ manifest = null; }
+
+    /* Every file the browser loads from our own origin — the <script src>
+       tags, not just this page. A deploy that copies some of them leaves the
+       app looking current while behaving like an older build, because the
+       version label lives in the HTML and reads exactly as expected.
+
+       The list is taken from the manifest rather than written out here. It
+       used to be a hardcoded array, and it drifted: the manifest and
+       deploy.sh carried eight files, this array carried seven, and
+       demo-assistant-kb-ifrs.js — loaded at the bottom of this page and
+       shipped by deploy.sh — was never hashed. The page reported "All 7
+       deployed files match the manifest" and was telling the truth about
+       seven of eight, which is the exact failure this whole mechanism exists
+       to prevent. Deriving the list removes the chance to drift again.
+
+       The literal below is only a fallback for when the manifest cannot be
+       fetched; keep it in step with .githooks/pre-commit if you ever add a
+       file AND the manifest is unavailable. */
+    const DEPLOYABLES = (manifest && manifest.files && Object.keys(manifest.files).length)
+      ? Object.keys(manifest.files)
+      : [
+          'loan-module-v4-builder.html',
+          'portf-excel-parser.js',
+          'loan-module-engine.js',
+          'loan-module-instruments.js',
+          'loan-module-analytics.js',
+          'demo-assistant-kb.js',
+          'demo-assistant-kb-ifrs.js',
+          'demo-assistant-system-prompt.js'
+        ];
 
     const files = {};
     for(const name of DEPLOYABLES){
@@ -775,7 +792,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.67"></script>
+<script src="portf-excel-parser.js?v=4.70"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9538,21 +9555,21 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.67"></script>
-<script src="loan-module-instruments.js?v=4.67"></script>
-<script src="loan-module-analytics.js?v=4.67"></script>
+<script src="loan-module-engine.js?v=4.70"></script>
+<script src="loan-module-instruments.js?v=4.70"></script>
+<script src="loan-module-analytics.js?v=4.70"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.67"></script>
+<script src="demo-assistant-kb.js?v=4.70"></script>
 <!-- IFRS answer book, generated from PCS-IFRS-Demo-Answers.md. Loaded AFTER the
      curated KB above because it APPENDS to window.FAQ_KB; loading it first would
      have nothing to append to and the 256 IFRS entries would be dropped on the
      floor without an error. Regenerate with tools/build-ifrs-kb.py — never edit
      by hand, or the PDF the presenter reads and the answers the assistant gives
      will drift apart. -->
-<script src="demo-assistant-kb-ifrs.js?v=4.67"></script>
-<script src="demo-assistant-system-prompt.js?v=4.67"></script>
+<script src="demo-assistant-kb-ifrs.js?v=4.70"></script>
+<script src="demo-assistant-system-prompt.js?v=4.70"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
