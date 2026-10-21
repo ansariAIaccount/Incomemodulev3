@@ -123,7 +123,7 @@
      which is why the login card shows the file's modified time beside it, so
      a stalled version number is visible rather than quietly misleading. */
   window.PCS_VERSION_MAJOR = 4;
-  window.PCS_VERSION_MINOR = 70; // PCS_AUTO_MINOR
+  window.PCS_VERSION_MINOR = 74; // PCS_AUTO_MINOR
   window.PCS_VERSION = 'V' + window.PCS_VERSION_MAJOR + '.' + window.PCS_VERSION_MINOR;
   // ─── Versioning — matches Real Estate module pattern ─────────────────
   // Format: V{N} · YYYY.MM.DD[.N]
@@ -792,7 +792,7 @@
      deployment was fine — because it was. The stale copy was in the browser.
      Changing the URL on each version is what makes a deploy actually take
      effect without anyone having to know about Cmd+Shift+R. -->
-<script src="portf-excel-parser.js?v=4.70"></script>
+<script src="portf-excel-parser.js?v=4.74"></script>
 <!-- jsPDF for Notice PDF templating (Tier 1 #3 Phase 2) -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <!-- ─── V4 UI ─── Modern font + icon set. Kept Material Icons alongside
@@ -9555,21 +9555,21 @@
 </div>
 
 <!-- ===== Engine + Pipeline scripts (loaded from external files generated below) ===== -->
-<script src="loan-module-engine.js?v=4.70"></script>
-<script src="loan-module-instruments.js?v=4.70"></script>
-<script src="loan-module-analytics.js?v=4.70"></script>
+<script src="loan-module-engine.js?v=4.74"></script>
+<script src="loan-module-instruments.js?v=4.74"></script>
+<script src="loan-module-analytics.js?v=4.74"></script>
 <!-- v=v4-2026-07 cache-bust: assistant KB + system prompt updated with v4 features
      (CA extraction, Financials, Notices, Watchlist, Portfolio, Loan status preset,
      floor/ceiling, ⌘K, fetch watchdog). Bump this when you edit either file. -->
-<script src="demo-assistant-kb.js?v=4.70"></script>
+<script src="demo-assistant-kb.js?v=4.74"></script>
 <!-- IFRS answer book, generated from PCS-IFRS-Demo-Answers.md. Loaded AFTER the
      curated KB above because it APPENDS to window.FAQ_KB; loading it first would
      have nothing to append to and the 256 IFRS entries would be dropped on the
      floor without an error. Regenerate with tools/build-ifrs-kb.py — never edit
      by hand, or the PDF the presenter reads and the answers the assistant gives
      will drift apart. -->
-<script src="demo-assistant-kb-ifrs.js?v=4.70"></script>
-<script src="demo-assistant-system-prompt.js?v=4.70"></script>
+<script src="demo-assistant-kb-ifrs.js?v=4.74"></script>
+<script src="demo-assistant-system-prompt.js?v=4.74"></script>
 <!-- ===== V3 ADDITION — Supabase JS client (browser bundle, ES module) ===== -->
 <script type="module">
   // We use the UMD-style import via ESM so the rest of v3's classic <script>
@@ -24314,7 +24314,34 @@ window.__renderInlineJETable = function(){
     groups.get(k).push(r);
   });
   const parts = [];
-  [...groups.entries()].sort((a, b) => a[0] - b[0]).forEach(([jeIdx, grpRowsRaw]) => {
+  /* Order the cards by DATE, then by jeIndex — not by jeIndex alone.
+     jeIndex is emission order, not chronological order: generateDIU appends
+     the post-processed rows (splitInterestJEsByCouponPeriod ends
+     `finalKept.concat(newRows)`), so a whole life's accretion entries are
+     numbered after entries dated years earlier. Sorting on the number put
+     JE 0002 dated 2030-12-30 above JE 0003 dated 2026-01-01 — the flat
+     register was already date-ordered, so the two views disagreed about the
+     same batch.
+
+     The key is the EARLIEST effective date in the entry. Rows inside one JE
+     normally share a date; min() is the safe reading if they ever do not,
+     and it keeps a split entry next to the period it belongs to. Rows with
+     no date sort last rather than first, because an empty string would
+     otherwise win every comparison. jeIndex breaks ties so entries on the
+     same day keep their emission order, which is what the register does. */
+  const grpDate = rowsOfGroup => {
+    let min = null;
+    for(const r of rowsOfGroup){
+      const d = r && r.effectiveDate;
+      if(!d) continue;
+      if(min === null || d < min) min = d;
+    }
+    return min || '9999-12-31';
+  };
+  [...groups.entries()]
+    .map(([jeIdx, grpRowsRaw]) => [jeIdx, grpRowsRaw, grpDate(grpRowsRaw)])
+    .sort((a, b) => (a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : a[0] - b[0]))
+    .forEach(([jeIdx, grpRowsRaw]) => {
     // Debits first, then credits — the way a JE is written on paper
     const grpRows = grpRowsRaw.slice().sort((a, b) => (a.isDebit === b.isDebit) ? 0 : (a.isDebit ? -1 : 1));
     const dr = grpRows.filter(r => r.isDebit).reduce((s, r) => s + (+r.amountLE || 0), 0);
@@ -47205,6 +47232,21 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         // against the balance observed on the SAME day, not the period row's.
         carryingVsBalance:  cvAt ? (cvAt.cv - cvAt.bal) : null,
         interestAccruedToDate: cumIntAcc,
+        /* Interest income at the EFFECTIVE rate, not the coupon.
+             EIR interest = coupon accrued + accretion
+           which is the same identity the accretion column states in reverse:
+           accretion is the gap between what the investment earns and what the
+           borrower pays. Nothing new is computed here — accretionTrace already
+           carries it as `effectiveIncome` for the row-detail panel; it just had
+           no column, so the number existed and could not be read off the table.
+
+           Null when accretion is null. That happens where no effective yield
+           was solved, and in that case the honest answer is "not asserted"
+           rather than quietly showing the coupon under an EIR heading. */
+        eirInterest:       (accretionThisPeriod == null) ? null
+                             : (+r.interest || 0) + accretionThisPeriod,
+        eirInterestToDate: (accretedToDate == null) ? null
+                             : (+cumIntAcc || 0) + accretedToDate,
         interestPaidThisPeriod: paidThisPeriod,
         interestPaidToDate:    cumIntPaid,
         capCostThisPeriod:     capThisPeriod,
@@ -47316,6 +47358,31 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         render:r => `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:500;">${fmtCcy(r.interest)}</td>` },
       { key:'interest_accrued_to_date', label:'Interest accrued to date', align:'right', title:'Cumulative interest accrued',
         render:r => `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:400; opacity:0.8;">${fmtCcy(r.interestAccruedToDate)}</td>` },
+      /* EIR interest sits immediately after the coupon figures because the
+         pair is the point: the coupon is what the borrower pays, the EIR
+         interest is what the investment earns, and on a discounted or
+         premium-priced asset they are different numbers answering different
+         questions. The difference between the two columns is exactly the
+         Accretion column.
+
+         This is the figure IFRS 9 §5.4.1 calls interest revenue — effective
+         interest on the gross carrying amount — and it is what the Investment
+         Interest Income journal (421000) is built from. The coupon column is
+         the cash entitlement, not the income. */
+      { key:'eir_interest', label:'EIR interest', align:'right',
+        title:'Interest income at the EFFECTIVE interest rate for this period — coupon accrued PLUS accretion. This is the IFRS 9 §5.4.1 interest revenue figure and the basis of the Investment Interest Income journal; the "Interest accrued" column beside it is the contractual coupon, which is the cash entitlement rather than the income. On a par asset with no discount, premium or capitalised fee the two agree. Where they differ, the difference is the Accretion column exactly. Shown as — where no effective yield could be solved, since there is then no EIR figure to assert. On the legacy path the separate EIR Fee Accretion line (40100) is excluded, matching the Accretion column.',
+        render:r => {
+          if(r.eirInterest == null) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          const v = +r.eirInterest || 0;
+          return `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:700;">${v < 0 ? '(' + fmtCcy(Math.abs(v)) + ')' : fmtCcy(v)}</td>`;
+        } },
+      { key:'eir_interest_to_date', label:'EIR interest to date', align:'right',
+        title:'Cumulative interest income at the effective rate since inception — interest accrued to date plus accreted to date. Over the life of the deal this reaches the total return on the investment: every coupon collected plus the whole day-one discount (or less the premium). Comparing it with "Interest accrued to date" beside it shows how much of the return the coupon alone accounts for.',
+        render:r => {
+          if(r.eirInterestToDate == null) return `<td style="padding:6px 10px; text-align:right; color:var(--n-400);">—</td>`;
+          const v = +r.eirInterestToDate || 0;
+          return `<td style="padding:6px 10px; text-align:right; color:#4338CA; font-weight:400; opacity:0.85;">${v < 0 ? '(' + fmtCcy(Math.abs(v)) + ')' : fmtCcy(v)}</td>`;
+        } },
       { key:'interest_paid', label:'Interest paid', align:'right',
         title:'Cash interest actually paid — from booked Interest paid events, or from cash management actuals. Never derived from accrual, so a blank means nothing has been booked or received yet.',
         render:r => {
@@ -47853,6 +47920,10 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
       drawdowns:                { label: 'Drawdown (this period)',     v: r => +r.drawdowns || 0 },
       interest_accrued:         { label: 'Interest accrued (this period)', v: r => +r.interest || 0 },
       interest_accrued_to_date: { label: 'Interest accrued to date',    v: r => +r.interestAccruedToDate || 0 },
+      /* Blank, not 0, where no effective yield was solved — a spreadsheet
+         zero would be summed and averaged as if it were an asserted figure. */
+      eir_interest:             { label: 'EIR interest (this period)',  v: r => r.eirInterest       == null ? '' : +r.eirInterest },
+      eir_interest_to_date:     { label: 'EIR interest to date',        v: r => r.eirInterestToDate == null ? '' : +r.eirInterestToDate },
       interest_paid:            { label: 'Interest paid (this period)', v: r => +r.interestPaidThisPeriod || 0 },
       fees:                     { label: 'Fees (this period)',          v: r => +r.fees || 0 },
       cap_cost_to_date:         { label: 'Capitalised cost to date',    v: r => +r.capCostToDate || 0 },
@@ -53562,7 +53633,34 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           'oneOff','monthly','quarterly','semi','annual'
         ].map(x => ({ value:x, label:x })), default: () => 'oneOff' },
         { name:'trancheRef', label:'Applies to tranche', type:'select', options: () => [{ value:'', label:'Facility-wide' }].concat(_leTrancheOptions()) },
-        { name:'paymentDate', label:'Payment date',      type:'date' }
+        { name:'paymentDate', label:'Payment date',      type:'date' },
+        /* IFRS treatment — the accounting-policy judgement, asked at the point
+           the fee is created rather than only on the Builder's fee card.
+
+           It used to live only on that card, so a fee added here was stuck
+           with whatever defaultIFRSTreatment() inferred from its kind until
+           somebody opened the Loan Builder and changed it. For a legal fee —
+           the same 250k invoice being a transaction cost on one deal and an
+           expense on another (§B5.4.1) — that is the whole decision, and the
+           screen that creates the fee was silent about it.
+
+           The options come from the ACTIVE FRAMEWORK, not a literal list.
+           FRAMEWORKS[*].fees already carries the three buckets with the right
+           citations per framework (IFRS 9 / ASC 310-20 / ASPE 3856 / AASB 9),
+           and the Builder's fee card reads the same map. Hardcoding the IFRS
+           labels here would have made this the second place the vocabulary
+           lives and the first place it drifts. */
+        { name:'ifrs', label:'IFRS treatment', type:'select',
+          options: () => {
+            const fw = (typeof FRAMEWORKS !== 'undefined' &&
+                        FRAMEWORKS[(window.B && window.B.deal && window.B.deal.framework)]) ||
+                       (typeof FRAMEWORKS !== 'undefined' ? FRAMEWORKS.IFRS : null);
+            const ff = (fw && fw.fees) || null;
+            return ff ? [ff.eir, ff.overTime, ff.pointInTime]
+                      : [{ value:'IFRS9-EIR', label:'Capitalised into EIR' }];
+          },
+          default: () => (typeof defaultIFRSTreatment === 'function'
+                            ? defaultIFRSTreatment('arrangement') : 'IFRS9-EIR') }
       ],
       submit: function(v){
         const B_ = window.B; if(!B_) throw new Error('No deal loaded');
@@ -53572,7 +53670,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
           label: v.label, kind: v.kind, mode: v.mode,
           pct: v.pct ? +v.pct : 0, flatAmount: v.flatAmount ? +v.flatAmount : 0, bps: v.bps ? +v.bps : 0,
           base: v.base || 'commitment', frequency: v.frequency || 'oneOff',
-          trancheRef: v.trancheRef || null, paymentDate: v.paymentDate || null
+          trancheRef: v.trancheRef || null, paymentDate: v.paymentDate || null,
+          /* Save what the form showed. Falling back to defaultIFRSTreatment()
+             only when the field is genuinely absent — never overriding a
+             visible choice with an inferred one. */
+          ifrs: v.ifrs || (typeof defaultIFRSTreatment === 'function'
+                             ? defaultIFRSTreatment(v.kind) : 'IFRS9-EIR')
         });
       },
       update: function(v, target){
@@ -53587,6 +53690,11 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         f.frequency = v.frequency || 'oneOff';
         f.trancheRef = v.trancheRef || null;
         f.paymentDate = v.paymentDate || null;
+        /* Only write `ifrs` when the form actually carried one. A blank here
+           means the control was absent, not that the user chose nothing, and
+           overwriting a stored treatment with an inferred default would throw
+           away a judgement somebody made on the Builder's fee card. */
+        if(v.ifrs) f.ifrs = v.ifrs;
       }
     },
     // ─── Tier 1 transtypes ───
@@ -53868,6 +53976,29 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         this.value = digits === '' ? '' : Number(digits).toLocaleString('en-US');
       });
     });
+    /* Fee form: let the IFRS treatment follow Kind, the way the Builder's fee
+       card does through defaultIFRSTreatment(). Picking "legal" should move
+       the suggestion to point-in-time without the user hunting for it.
+
+       It stops the moment the user touches the IFRS control. A suggestion that
+       keeps overwriting a deliberate choice is worse than no suggestion: this
+       field IS the accounting judgement, and silently reverting it on an
+       unrelated edit is the kind of quiet data loss that is hard to notice and
+       hard to explain afterwards. */
+    (function(){
+      const kindEl = fields.querySelector('[data-le-fld="kind"]');
+      const ifrsEl = fields.querySelector('[data-le-fld="ifrs"]');
+      if(!kindEl || !ifrsEl || typeof defaultIFRSTreatment !== 'function') return;
+      // Editing an existing fee starts dirty — the stored value is a choice
+      // already made, not a suggestion waiting to be refined.
+      let userTouched = !!edit;
+      ifrsEl.addEventListener('change', () => { userTouched = true; });
+      kindEl.addEventListener('change', () => {
+        if(userTouched) return;
+        const want = defaultIFRSTreatment(kindEl.value);
+        if([...ifrsEl.options].some(o => o.value === want)) ifrsEl.value = want;
+      });
+    })();
     // Prefill from the record being edited. Done after render (rather than via
     // each field's `default`) so the same schema serves both add and edit.
     if(edit){
@@ -54281,7 +54412,12 @@ EIR<sub>t</sub> = rfr.baseRate<sub>t</sub> + marginSchedule[t].marginBps / 10000
         label: f.label || '', kind: f.kind || 'arrangement', mode: f.mode || 'fixPct',
         pct: f.pct || '', flatAmount: f.flatAmount || '', bps: f.bps || '',
         base: f.base || 'commitment', frequency: f.frequency || 'oneOff',
-        trancheRef: f.trancheRef || '', paymentDate: f.paymentDate || ''
+        trancheRef: f.trancheRef || '', paymentDate: f.paymentDate || '',
+        /* Must be supplied, or opening a fee for edit would show the default
+           instead of the stored treatment and saving would quietly replace a
+           judgement made on the Builder's fee card with an inferred one. */
+        ifrs: f.ifrs || (typeof defaultIFRSTreatment === 'function'
+                           ? defaultIFRSTreatment(f.kind) : 'IFRS9-EIR')
       }};
     }
     /* Tier 1 / Tier 2 events — write-off, loan sale, recovery, cure,
