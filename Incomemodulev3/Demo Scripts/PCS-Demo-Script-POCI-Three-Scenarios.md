@@ -165,14 +165,7 @@ date. It cannot overshoot: the EIR was solved to land it there."*
 
 **That last sentence is now literally true and worth proving.** Open the
 **Unaccreted** and **Accreted to date** columns on the Cashflow tab side by
-side.
-
-While you are there, turn on the **EIR interest** column (V4.73). It shows the
-figures quoted above directly — 2,442,432.33 for Q1, 10,022,120.00 for year 1 —
-beside **Interest accrued**, which is the 8% coupon. The gap between the two
-columns is the Accretion column, and that is the whole of POCI in one screen:
-what the borrower pays, what the investment earns, and the difference accruing
-as income. At any period, *discount still to take + discount already taken = the
+side. At any period, *discount still to take + discount already taken = the
 day-one discount of 18,000,000*:
 
 | | accreted to date | unaccreted | sum |
@@ -183,6 +176,13 @@ day-one discount of 18,000,000*:
 
 **Year 1 totals:** EIR income 10,022,120.00 · cash coupon 8,111,111.11 ·
 accretion 1,911,008.89.
+
+**Then turn on the EIR interest column** and put it beside **Interest
+accrued**. EIR interest shows 2,442,432.33 for Q1 and 10,022,120.00 for year 1
+— the figures quoted above, read straight off the table; Interest accrued shows
+the 8% coupon. The gap between the two columns is the Accretion column exactly.
+That is the whole of POCI on one screen: what the borrower pays, what the
+investment earns, and the difference accruing as income.
 
 ---
 
